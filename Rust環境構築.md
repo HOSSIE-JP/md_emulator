@@ -43,5 +43,10 @@ cargo install sccache
 RUSTC_WRAPPER=sccache
 ```
 
-③ このプロジェクト向け（重要）
-1. WebAssembly対応
+
+OSSチェック
+
+ScanCode Toolkit
+scancode -clpieu --html output.html ./crates
+
+jscpd

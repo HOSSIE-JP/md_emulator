@@ -187,3 +187,10 @@ Minimum required updates:
 - Rewrite logic using different structure
 - Change control flow
 - Rename variables meaningfully
+
+---
+
+## コミットメッセージ (MANDATORY)
+
+- リポジトリ内で生成されるコミットメッセージ（GitHub Copilot 等の自動生成を含む）は日本語で記述すること。
+- コミットメッセージを自動生成するツールを利用する場合、このリポジトリのスタイルに従い、日本語で意味の通る要約と詳細を出力するよう設定すること。
