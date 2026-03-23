@@ -1,0 +1,15 @@
+[package]
+name = "md-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+md-bus = { path = "../md-bus" }
+md-cpu-m68k = { path = "../md-cpu-m68k" }
+md-cpu-z80 = { path = "../md-cpu-z80" }
+md-vdp = { path = "../md-vdp" }
+md-apu = { path = "../md-apu" }

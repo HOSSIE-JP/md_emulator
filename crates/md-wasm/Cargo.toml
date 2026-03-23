@@ -1,0 +1,13 @@
+[package]
+name = "md-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen.workspace = true
+serde-wasm-bindgen.workspace = true
+md-core = { path = "../md-core" }

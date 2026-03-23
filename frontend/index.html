@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mega Drive Emulator Frontend (Scaffold)</title>
+  </head>
+  <body>
+    <h1>Mega Drive Emulator</h1>
+    <p>初期実装: REST APIの疎通確認用UI</p>
+    <p id="status">status: idle</p>
+    <label>
+      ROM path:
+      <input id="romPath" type="text" value="D:/homebrew/rom.bin" style="width: 360px" />
+    </label>
+    <button id="loadRomPath">Load ROM Path</button>
+    <button id="romInfo">ROM Info</button>
+    <button id="toggleApiLog">Toggle API Log</button>
+    <button id="reset">Reset</button>
+    <button id="step">Step 1 frame</button>
+    <button id="step10">Step 10 frames</button>
+    <button id="runPreview">Run Preview</button>
+    <button id="stopPreview">Stop Preview</button>
+    <p>Keyboard: Arrow/WASD=方向, J=B, K=C, U=A, Enter=Start</p>
+    <p><a href="debug.html">VDP Debug Viewer →</a></p>
+    <div>
+      <canvas id="screen" width="320" height="224" style="border: 1px solid #444; image-rendering: pixelated; width: 640px; height: 448px"></canvas>
+    </div>
+    <pre id="out"></pre>
+    <script type="module" src="./emulator.js"></script>
+  </body>
+</html>

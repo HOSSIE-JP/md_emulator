@@ -1,0 +1,13 @@
+[package]
+name = "md-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axum.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tower-http.workspace = true
+md-core = { path = "../md-core" }

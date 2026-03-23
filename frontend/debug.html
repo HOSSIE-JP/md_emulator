@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VDP Debug Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 12px; }
+    h1 { font-size: 16px; margin-bottom: 8px; color: #7ec8e3; }
+    h2 { font-size: 14px; margin: 8px 0 4px; color: #8bc6ec; }
+    .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    .toolbar button, .toolbar select { font-family: monospace; padding: 4px 10px; background: #2a2a4a; color: #e0e0e0; border: 1px solid #555; cursor: pointer; }
+    .toolbar button:hover { background: #3a3a5a; }
+    .toolbar label { font-size: 12px; }
+    .toolbar input { font-family: monospace; background: #2a2a4a; color: #e0e0e0; border: 1px solid #555; padding: 4px; width: 60px; }
+    #status { font-size: 11px; color: #aaa; margin-bottom: 8px; }
+    .panels { display: flex; flex-wrap: wrap; gap: 12px; }
+    .panel { background: #222244; border: 1px solid #444; padding: 8px; }
+    .panel canvas { image-rendering: pixelated; border: 1px solid #333; display: block; }
+    .cram-grid { display: grid; grid-template-columns: repeat(16, 24px); gap: 1px; }
+    .cram-cell { width: 24px; height: 24px; border: 1px solid #555; cursor: pointer; position: relative; }
+    .cram-cell:hover { border-color: #fff; z-index: 1; }
+    .cram-cell .tooltip { display: none; position: absolute; top: -28px; left: 0; background: #000; color: #fff; font-size: 10px; padding: 2px 4px; white-space: nowrap; border: 1px solid #888; z-index: 10; }
+    .cram-cell:hover .tooltip { display: block; }
+    table.sprite-table { font-size: 11px; border-collapse: collapse; width: 100%; }
+    table.sprite-table th, table.sprite-table td { border: 1px solid #444; padding: 2px 6px; text-align: right; }
+    table.sprite-table th { background: #2a2a4a; }
+    table.sprite-table tr:nth-child(even) { background: #1e1e3a; }
+    .tab-bar { display: flex; gap: 2px; margin-bottom: 8px; }
+    .tab-bar button { padding: 6px 14px; background: #2a2a4a; border: 1px solid #555; border-bottom: none; color: #aaa; cursor: pointer; }
+    .tab-bar button.active { background: #222244; color: #fff; border-bottom: 1px solid #222244; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    a { color: #7ec8e3; }
+  </style>
+</head>
+<body>
+  <h1>VDP Debug Viewer</h1>
+  <div class="toolbar">
+    <label>API: <input id="apiBase" type="text" value="http://127.0.0.1:8080" style="width:200px" /></label>
+    <button id="btnRefresh">Refresh All</button>
+    <button id="btnAutoRefresh">Auto Refresh: OFF</button>
+    <label>Tile Palette: <select id="tilePalette"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+    <a href="index.html">← Main</a>
+  </div>
+  <div id="status">idle</div>
+
+  <div class="tab-bar">
+    <button class="active" data-tab="planes">Scroll Planes</button>
+    <button data-tab="tiles">Tiles</button>
+    <button data-tab="cram">CRAM</button>
+    <button data-tab="sprites">Sprites</button>
+    <button data-tab="frame">Frame</button>
+  </div>
+
+  <!-- Scroll Planes -->
+  <div id="tab-planes" class="tab-content active">
+    <div class="panels">
+      <div class="panel">
+        <h2>Plane A</h2>
+        <canvas id="canvasPlaneA" width="512" height="512"></canvas>
+        <div id="planeAInfo" style="font-size:11px;margin-top:4px;"></div>
+      </div>
+      <div class="panel">
+        <h2>Plane B</h2>
+        <canvas id="canvasPlaneB" width="512" height="512"></canvas>
+        <div id="planeBInfo" style="font-size:11px;margin-top:4px;"></div>
+      </div>
+      <div class="panel">
+        <h2>Window</h2>
+        <canvas id="canvasWindow" width="512" height="256"></canvas>
+        <div id="planeWInfo" style="font-size:11px;margin-top:4px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tiles -->
+  <div id="tab-tiles" class="tab-content">
+    <div class="panel">
+      <h2>VRAM Tiles (2048 tiles, 32×64 grid)</h2>
+      <canvas id="canvasTiles" width="256" height="512" style="width:512px;height:1024px;"></canvas>
+    </div>
+  </div>
+
+  <!-- CRAM -->
+  <div id="tab-cram" class="tab-content">
+    <div class="panel">
+      <h2>CRAM Palette (4 palettes × 16 colors)</h2>
+      <div id="cramGrid" class="cram-grid"></div>
+    </div>
+  </div>
+
+  <!-- Sprites -->
+  <div id="tab-sprites" class="tab-content">
+    <div class="panel">
+      <h2>Sprite Attribute Table</h2>
+      <div style="max-height:500px;overflow:auto;">
+        <table class="sprite-table">
+          <thead>
+            <tr><th>#</th><th>X</th><th>Y</th><th>W</th><th>H</th><th>Tile</th><th>Pal</th><th>Pri</th><th>HF</th><th>VF</th><th>Link</th></tr>
+          </thead>
+          <tbody id="spriteBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Frame -->
+  <div id="tab-frame" class="tab-content">
+    <div class="panel">
+      <h2>Composited Frame</h2>
+      <canvas id="canvasFrame" width="320" height="224" style="width:640px;height:448px;"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const apiBaseInput = document.getElementById('apiBase');
+    const statusEl = document.getElementById('status');
+
+    function apiBase() { return apiBaseInput.value.replace(/\/+$/, ''); }
+    function setStatus(t) { statusEl.textContent = t; }
+
+    function drawArgbToCanvas(canvas, width, height, pixelsArgb) {
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      const img = ctx.createImageData(width, height);
+      const dst = img.data;
+      const len = Math.min(pixelsArgb.length, width * height);
+      for (let i = 0; i < len; i++) {
+        const c = pixelsArgb[i] >>> 0;
+        const o = i * 4;
+        dst[o]     = (c >> 16) & 0xff;
+        dst[o + 1] = (c >> 8) & 0xff;
+        dst[o + 2] = c & 0xff;
+        dst[o + 3] = (c >> 24) & 0xff;
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+
+    async function fetchJson(path) {
+      const resp = await fetch(apiBase() + path);
+      return resp.json();
+    }
+
+    async function refreshPlane(name, canvasId, infoId) {
+      try {
+        const data = await fetchJson(`/api/v1/vdp/plane?name=${name}`);
+        if (data.pixels_argb) {
+          const canvas = document.getElementById(canvasId);
+          drawArgbToCanvas(canvas, data.width, data.height, data.pixels_argb);
+          const el = document.getElementById(infoId);
+          if (el) el.textContent = `${data.width}×${data.height}px`;
+        }
+      } catch (e) {
+        console.error(`plane ${name}:`, e);
+      }
+    }
+
+    async function refreshTiles() {
+      try {
+        const pal = document.getElementById('tilePalette').value;
+        const data = await fetchJson(`/api/v1/vdp/tiles?palette=${pal}`);
+        if (data.pixels_argb) {
+          drawArgbToCanvas(document.getElementById('canvasTiles'), data.width, data.height, data.pixels_argb);
+        }
+      } catch (e) {
+        console.error('tiles:', e);
+      }
+    }
+
+    async function refreshCram() {
+      try {
+        const data = await fetchJson('/api/v1/vdp/colors');
+        if (!data.colors_argb) return;
+        const grid = document.getElementById('cramGrid');
+        grid.innerHTML = '';
+        data.colors_argb.forEach((argb, i) => {
+          const c = argb >>> 0;
+          const r = (c >> 16) & 0xff;
+          const g = (c >> 8) & 0xff;
+          const b = c & 0xff;
+          const cell = document.createElement('div');
+          cell.className = 'cram-cell';
+          cell.style.backgroundColor = `rgb(${r},${g},${b})`;
+          const tip = document.createElement('span');
+          tip.className = 'tooltip';
+          tip.textContent = `#${i} P${(i >> 4) & 3}:${i & 15} rgb(${r},${g},${b})`;
+          cell.appendChild(tip);
+          grid.appendChild(cell);
+        });
+      } catch (e) {
+        console.error('cram:', e);
+      }
+    }
+
+    async function refreshSprites() {
+      try {
+        const data = await fetchJson('/api/v1/vdp/sprites');
+        if (!data.sprites) return;
+        const body = document.getElementById('spriteBody');
+        body.innerHTML = '';
+        data.sprites.forEach((s, i) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${i}</td><td>${s.x}</td><td>${s.y}</td><td>${s.width}</td><td>${s.height}</td><td>$${s.tile.toString(16).toUpperCase()}</td><td>${s.palette}</td><td>${s.priority ? 1 : 0}</td><td>${s.hflip ? 'Y' : ''}</td><td>${s.vflip ? 'Y' : ''}</td><td>${s.link}</td>`;
+          body.appendChild(tr);
+        });
+      } catch (e) {
+        console.error('sprites:', e);
+      }
+    }
+
+    async function refreshFrame() {
+      try {
+        const data = await fetchJson('/api/v1/video/frame');
+        if (data.pixels_argb) {
+          drawArgbToCanvas(document.getElementById('canvasFrame'), data.width, data.height, data.pixels_argb);
+        }
+      } catch (e) {
+        console.error('frame:', e);
+      }
+    }
+
+    async function refreshAll() {
+      setStatus('refreshing...');
+      const t0 = performance.now();
+      await Promise.all([
+        refreshPlane('A', 'canvasPlaneA', 'planeAInfo'),
+        refreshPlane('B', 'canvasPlaneB', 'planeBInfo'),
+        refreshPlane('W', 'canvasWindow', 'planeWInfo'),
+        refreshTiles(),
+        refreshCram(),
+        refreshSprites(),
+        refreshFrame(),
+      ]);
+      setStatus(`refreshed in ${(performance.now() - t0).toFixed(0)}ms`);
+    }
+
+    // Tab switching
+    document.querySelectorAll('.tab-bar button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+      });
+    });
+
+    // Refresh button
+    document.getElementById('btnRefresh').addEventListener('click', refreshAll);
+
+    // Auto refresh toggle
+    let autoInterval = null;
+    document.getElementById('btnAutoRefresh').addEventListener('click', () => {
+      const btn = document.getElementById('btnAutoRefresh');
+      if (autoInterval) {
+        clearInterval(autoInterval);
+        autoInterval = null;
+        btn.textContent = 'Auto Refresh: OFF';
+      } else {
+        autoInterval = setInterval(refreshAll, 500);
+        btn.textContent = 'Auto Refresh: ON';
+      }
+    });
+
+    // Palette change
+    document.getElementById('tilePalette').addEventListener('change', refreshTiles);
+
+    // Initial load
+    refreshAll().catch(e => setStatus('initial fetch failed: ' + e));
+  </script>
+</body>
+</html>

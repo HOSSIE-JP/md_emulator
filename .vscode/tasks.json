@@ -1,0 +1,88 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "md-api: Stop Existing Server",
+      "type": "shell",
+      "command": "Get-Process -Name md-api -ErrorAction SilentlyContinue | Stop-Process -Force",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "md-api: Start Server",
+      "type": "shell",
+      "command": "cargo run -p md-api",
+      "isBackground": true,
+      "dependsOn": "md-api: Stop Existing Server",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "emulator"
+      },
+      "problemMatcher": {
+        "owner": "md-api",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^.*Compiling|^.*Running",
+          "endsPattern": "listening on"
+        }
+      }
+    },
+    {
+      "label": "Frontend: Start HTTP Server",
+      "type": "shell",
+      "command": "python -m http.server 8000 --directory frontend",
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "emulator"
+      },
+      "problemMatcher": {
+        "owner": "frontend-http",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^Serving",
+          "endsPattern": "^Serving"
+        }
+      }
+    },
+    {
+      "label": "Frontend: Open Browser",
+      "type": "shell",
+      "command": "Start-Process 'http://localhost:8000'",
+      "dependsOn": "Frontend: Start HTTP Server",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Emulator: Launch All",
+      "dependsOn": [
+        "md-api: Start Server",
+        "Frontend: Open Browser"
+      ],
+      "dependsOrder": "parallel",
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}
