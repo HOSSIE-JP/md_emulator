@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Mega Drive WASM Player">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0b1a30"/>
+      <stop offset="1" stop-color="#112f56"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="100" fill="url(#g)"/>
+  <rect x="74" y="116" width="364" height="280" rx="24" fill="#08111f" stroke="#59b8ff" stroke-width="14"/>
+  <rect x="112" y="154" width="288" height="188" rx="8" fill="#000"/>
+  <circle cx="182" cy="432" r="18" fill="#66efb3"/>
+  <circle cx="256" cy="432" r="18" fill="#66efb3"/>
+  <circle cx="330" cy="432" r="18" fill="#66efb3"/>
+</svg>

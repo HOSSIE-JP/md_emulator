@@ -61,6 +61,24 @@
 - Web: `md-wasm`（`wasm-bindgen` 経由）
 - 外部制御: `md-api`（REST/WS/JSON-RPC風）
 
+## Web 公開形態（GitHub Pages）
+
+- 公開対象: `frontend/index.html`（WASM直実行プレーヤー）
+- 配信先: GitHub Pages（Project Pages: `/md_emulator/`）
+- デプロイトリガー: `v*` タグ push（`deploy-pages.yml`）
+- ビルド内容:
+	- `wasm-pack build crates/md-wasm --target web --release --out-dir ../../frontend/pkg`
+	- `wasm-opt -Oz` による WASM 最適化
+	- `roms/` から `frontend/roms/` への ROM 同梱
+	- `frontend/roms/index.json` の自動生成
+
+## PWA対応範囲
+
+- `frontend/manifest.webmanifest` を提供
+- `frontend/sw.js` でアプリシェルとWASM関連ファイルをキャッシュ
+- オンライン前提で初回ロード後の再訪問性能を向上
+- 対応ブラウザでホーム画面追加/アプリインストールをサポート
+
 `md-api` はAPIログのON/OFF制御（`/api/v1/logging`）と、描画確認用フレーム取得（`/api/v1/video/frame`）を提供します。
 また、入力注入API（`/api/v1/input/controller`）により外部からコントローラ状態を設定できます。
 
@@ -71,3 +89,5 @@
 - YM2612/PSGの音声合成はプレースホルダー（ダミー正弦波/矩形波）
 - 全命令網羅・全ハード精度は未完了です
 - API仕様は今後拡張されるため、変更可能性があります
+- `md-api` はサーバープロセスが必要（Pages 単体では稼働しない）
+- `md-wasm` フロントエンドは HTTP(S) サーブ必須（`file://` 直接起動は非対応）

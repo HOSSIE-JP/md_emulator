@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mega Drive Emulator Frontend (REST API)</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: "SF Mono", Consolas, monospace;
+        color: #ebf2ff;
+        background: linear-gradient(180deg, #0b1220 0%, #111a2b 100%);
+        padding: 16px;
+      }
+      h1 { font-size: 22px; margin-bottom: 4px; }
+      .meta { font-size: 11px; color: #8fd1c7; margin-bottom: 12px; }
+      .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+      button {
+        background: #1f2a44; color: #ebf2ff; border: 1px solid #334466;
+        padding: 6px 12px; cursor: pointer; font: inherit; font-size: 13px;
+      }
+      button:hover { background: #293754; }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      input[type="text"] {
+        background: #151e30; color: #ebf2ff; border: 1px solid #334466;
+        padding: 6px 8px; font: inherit; font-size: 13px;
+      }
+      .layout { display: flex; gap: 16px; flex-wrap: wrap; }
+      .screen-col { flex: 0 0 auto; }
+      .side-col { flex: 1 1 280px; min-width: 260px; }
+      canvas {
+        image-rendering: pixelated; border: 1px solid #334466; background: #000;
+        display: block; width: 640px; height: 448px;
+      }
+      #status { font-size: 12px; color: #8fd1c7; margin-top: 6px; }
+      pre { font-size: 11px; color: #b8c4d9; max-height: 300px; overflow: auto; margin-top: 8px;
+            background: rgba(10,16,28,0.6); padding: 8px; border: 1px solid #26324a; }
+      .ctrl-pad { display: grid; grid-template-columns: repeat(3, 52px); gap: 4px; margin-top: 8px; }
+      .ctrl-pad button { width: 52px; height: 40px; font-size: 14px; padding: 0; text-align: center; }
+      .ctrl-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+      .ctrl-actions button { font-size: 13px; min-width: 52px; height: 36px; }
+      .note { font-size: 11px; color: #9fb0cb; margin-top: 8px; line-height: 1.4; }
+      .links { display: flex; gap: 10px; margin-top: 10px; }
+      .links a { color: #8fd1ff; font-size: 12px; }
+      .rom-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Mega Drive Emulator <small style="font-size:13px;color:#8fd1c7">(REST API)</small></h1>
+    <div class="meta" id="buildVersion">build: loading...</div>
+
+    <div class="toolbar">
+      <div class="rom-row">
+        <input id="romPath" type="text" value="/Users/hossie/development/md_emulator/roms/puyo.bin" style="width:380px" />
+        <button id="loadRomPath">Load Path</button>
+        <span style="color:#667;font-size:12px">or</span>
+        <input id="romFile" type="file" accept=".bin,.md,.gen,.smd,.sms,application/octet-stream" style="font-size:12px" />
+        <button id="loadRomFile">Load File</button>
+      </div>
+    </div>
+    <div class="toolbar">
+      <button id="romInfo">ROM Info</button>
+      <button id="toggleApiLog">Toggle API Log</button>
+      <button id="reset">Reset</button>
+      <button id="step">Step 1 frame</button>
+      <button id="step10">Step 10 frames</button>
+      <button id="runPreview">Run Preview</button>
+      <button id="stopPreview">Stop Preview</button>
+      <button id="toggleAudio">Unmute</button>
+      <input id="stateFile" type="file" accept=".mdstate,.json,application/json,application/octet-stream" style="font-size:12px" />
+      <button id="saveState">Save State</button>
+      <button id="loadState" disabled>Load State</button>
+      <button id="downloadState">Download State</button>
+      <button id="uploadState">Upload State</button>
+    </div>
+
+    <div class="layout">
+      <div class="screen-col">
+        <canvas id="screen" width="320" height="224"></canvas>
+        <div id="status">status: idle</div>
+        <pre id="out"></pre>
+      </div>
+      <div class="side-col">
+        <p style="font-size:13px;margin-bottom:6px;">Controller (keyboard / buttons)</p>
+        <div class="note" style="margin-bottom:8px">
+          Arrow/WASD=方向  U=A  J=B  K=C  Enter=Start
+        </div>
+        <div class="ctrl-pad">
+          <span></span>
+          <button data-btn="up">&#x25B2;</button>
+          <span></span>
+          <button data-btn="left">&#x25C0;</button>
+          <span></span>
+          <button data-btn="right">&#x25B6;</button>
+          <span></span>
+          <button data-btn="down">&#x25BC;</button>
+          <span></span>
+        </div>
+        <div class="ctrl-actions">
+          <button data-btn="a">A</button>
+          <button data-btn="b">B</button>
+          <button data-btn="c">C</button>
+          <button data-btn="start">Start</button>
+        </div>
+        <div class="links">
+          <a href="debug.html">VDP Debug</a>
+          <a href="wasm.html">WASM Player</a>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import(`./emulator.js?v=${Date.now()}`);
+    </script>
+  </body>
+</html>

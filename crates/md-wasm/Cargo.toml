@@ -10,4 +10,5 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 wasm-bindgen.workspace = true
 serde-wasm-bindgen.workspace = true
+serde.workspace = true
 md-core = { path = "../md-core" }

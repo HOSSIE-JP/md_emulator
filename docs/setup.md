@@ -44,6 +44,16 @@ cargo install wasm-pack
 wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg
 ```
 
-ビルド後は `frontend/pkg` にブラウザ向けバンドルが生成され、`frontend/wasm.html` から API を介さず直接実行できます。
+ビルド後は `frontend/pkg` にブラウザ向けバンドルが生成され、`frontend/index.html` から API を介さず直接実行できます。
 
-> 注: `frontend/index.html` は REST 疎通確認用、`frontend/wasm.html` は md-wasm を直接使うプレイヤーです。
+> 注: `frontend/index.html` が md-wasm プレイヤー本体です。`frontend/wasm.html` は `index.html` へリダイレクトします。
+
+## Bundled ROM 更新
+
+`index.html` の Bundled ROM 選択肢は `frontend/roms/index.json` を参照します。
+
+1. ルート `roms/` にROMを配置
+2. `frontend/roms/` にコピー
+3. `frontend/roms/index.json` を更新
+
+VS Code Tasks を使う場合は `Frontend: Refresh Bundled ROMs` を実行してください。

@@ -389,6 +389,7 @@ name = "md-wasm"
 version = "0.1.0"
 dependencies = [
  "md-core",
+ "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",
 ]

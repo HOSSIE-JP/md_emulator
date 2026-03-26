@@ -82,7 +82,7 @@ Invoke-RestMethod -Method Get http://127.0.0.1:8080/api/v1/cpu/state
 Invoke-RestMethod -Method Get "http://127.0.0.1:8080/api/v1/cpu/memory?addr=0&len=16"
 ```
 
-## 3) 簡易フロントエンドで試す
+## 3) APIフロントエンドで試す
 
 別ターミナルで `frontend` を配信し、ブラウザで開きます。
 
@@ -90,7 +90,7 @@ Invoke-RestMethod -Method Get "http://127.0.0.1:8080/api/v1/cpu/memory?addr=0&le
 python -m http.server 5500 --directory frontend
 ```
 
-ブラウザで `http://127.0.0.1:5500` を開き、`Reset` と `Step 1 frame` を押すと、APIレスポンスを確認できます。
+ブラウザで `http://127.0.0.1:5500/api-client.html` を開くと、REST APIの手動検証UIを使えます。
 
 `ROM path` にROMファイルパスを入力し、`Load ROM Path` → `ROM Info` → `Step 10 frames` の順で操作すると、
 ROMロード状態と実行進行をまとめて確認できます。
@@ -141,16 +141,55 @@ wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg
 python -m http.server 5500 --directory frontend
 ```
 
-その後、`http://127.0.0.1:5500/wasm.html` を開きます。
+その後、`http://127.0.0.1:5500/index.html` を開きます（`wasm.html` は `index.html` へリダイレクト）。
 
-- `Load ROM`: ローカル ROM ファイルを読み込み
-- `Run` / `Pause`: 60fps 目標で直接実行
-- `Step Frame`: 1フレームずつ実行
-- `Unmute` / `Mute`: ブラウザ内で音声再生
+- ROM選択（Bundled ROM選択またはローカルファイル選択）で **自動的に Load → Run** が開始
+- 音声はデフォルトで有効（初回ユーザー操作時に有効化）
+- `Run` / `Pause`: 実行の一時停止と再開
+- `Step`: Developer Mode を ON にしたときのみ表示されるデバッグ機能
+- `Mute` / `Unmute`: 音声の切り替え
 
 このページは描画・入力・音声をすべて md-wasm から処理するため、REST API 経由の遅延や同期ずれを切り分ける用途に使えます。
 
-## 5) JSON-RPC風APIで試す（AIエージェント向け）
+### 補足: ローカルファイル直接起動について
+
+`index.html` は ES Modules (`type="module"`) と WASM のロードを行うため、`file://` で直接開くとブラウザの制約で失敗します。
+必ず HTTP サーバー経由で開いてください。
+
+## 5) GitHub Pages で公開する（リリースタグ時）
+
+このリポジトリは `v*` 形式のタグ push 時に Pages デプロイを行う想定です。
+
+例:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+デプロイワークフローでは以下を実施します。
+
+1. `wasm-pack` で `frontend/pkg` を再生成
+2. `wasm-opt -Oz` で `md_wasm_bg.wasm` を最適化
+3. リポジトリ `roms/` 配下の ROM を `frontend/roms/` へ取り込み
+4. `frontend/roms/index.json` を自動生成
+5. `frontend/` を GitHub Pages へデプロイ
+
+公開URL（Project Pages）:
+
+`https://<user>.github.io/md_emulator/`
+
+## 6) PWA として使う
+
+WASM プレイヤーは PWA 対応済みです。
+
+- `manifest.webmanifest` を配信
+- `sw.js`（Service Worker）でアセットをキャッシュ
+- 対応ブラウザでは「Install App」ボタンでインストール可能
+
+インストール後はスタンドアロン表示で起動できます。初回起動時に必要ファイルがキャッシュされます。
+
+## 7) JSON-RPC風APIで試す（AIエージェント向け）
 
 ```powershell
 Invoke-RestMethod -Method Post `
@@ -168,7 +207,7 @@ Invoke-RestMethod -Method Post `
   -Body '{"jsonrpc":"2.0","id":2,"method":"load_rom_path","params":{"path":"D:/homebrew/rom.bin"}}'
 ```
 
-## 6) テストで動作確認
+## 8) テストで動作確認
 
 ```powershell
 cargo test --workspace
@@ -183,3 +222,25 @@ cargo test -p md-vdp
 cargo test -p md-apu
 cargo test -p md-core --lib
 ```
+
+## 9) ビルドとROM更新の運用ガイド
+
+### WASM版は毎回ビルドが必要か？
+
+- `crates/md-wasm` / `crates/md-core` / `crates/md-apu` / `crates/md-vdp` / `crates/md-cpu-*` / `crates/md-bus` を変更した場合は、`frontend/pkg` を再生成するため **WASMビルドが必要** です。
+- フロントHTML/CSS/JSだけ変更した場合は、通常WASM再ビルドは不要です。
+
+### Bundled ROM を更新する手順
+
+1. ルートの `roms/` にROMファイル（`.bin/.md/.gen/.smd/.sms/.zip`）を追加・更新
+2. `frontend/roms/` へ同期
+3. `frontend/roms/index.json` を再生成
+
+### VS Code Tasks（推奨）
+
+- `WASM: Build Package (dev)`
+- `WASM: Build Package (release)`
+- `Frontend: Refresh Bundled ROMs`
+- `WASM: Rebuild and Refresh ROMs`
+
+`WASM: Rebuild and Refresh ROMs` を実行すれば、開発で必要なWASM再ビルドとBundled ROM更新をまとめて実施できます。

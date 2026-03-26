@@ -2,115 +2,506 @@
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Mega Drive Emulator Frontend (REST API)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#091322" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <title>Mega Drive WASM Player</title>
     <style>
-      * { box-sizing: border-box; margin: 0; padding: 0; }
+      :root {
+        --bg0: #050a17;
+        --bg1: #0b1a30;
+        --panel: rgba(10, 20, 36, 0.86);
+        --line: #2a3f5e;
+        --ink: #ebf3ff;
+        --sub: #96abc7;
+        --accent: #4bc8ff;
+        --accent2: #7bf0b2;
+        --warn: #ffbb66;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; }
       body {
-        font-family: "SF Mono", Consolas, monospace;
-        color: #ebf2ff;
-        background: linear-gradient(180deg, #0b1220 0%, #111a2b 100%);
-        padding: 16px;
+        font-family: "Avenir Next", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 15% 10%, rgba(87, 183, 255, 0.2), transparent 28%),
+          radial-gradient(circle at 85% 0%, rgba(102, 255, 170, 0.16), transparent 30%),
+          linear-gradient(180deg, var(--bg1), var(--bg0));
       }
-      h1 { font-size: 22px; margin-bottom: 4px; }
-      .meta { font-size: 11px; color: #8fd1c7; margin-bottom: 12px; }
-      .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
-      button {
-        background: #1f2a44; color: #ebf2ff; border: 1px solid #334466;
-        padding: 6px 12px; cursor: pointer; font: inherit; font-size: 13px;
+      main { max-width: 1180px; margin: 0 auto; padding: 18px 14px 20px; }
+      .top {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
       }
-      button:hover { background: #293754; }
-      button:disabled { opacity: 0.4; cursor: not-allowed; }
-      input[type="text"] {
-        background: #151e30; color: #ebf2ff; border: 1px solid #334466;
-        padding: 6px 8px; font: inherit; font-size: 13px;
+      .title {
+        margin: 0;
+        font-size: 24px;
+        letter-spacing: 0.04em;
+        font-weight: 760;
       }
-      .layout { display: flex; gap: 16px; flex-wrap: wrap; }
-      .screen-col { flex: 0 0 auto; }
-      .side-col { flex: 1 1 280px; min-width: 260px; }
-      canvas {
-        image-rendering: pixelated; border: 1px solid #334466; background: #000;
-        display: block; width: 640px; height: 448px;
+      .top-right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .chip {
+        border: 1px solid var(--line);
+        background: rgba(18, 34, 58, 0.7);
+        color: var(--sub);
+        border-radius: 999px;
+        padding: 6px 11px;
+        font-size: 12px;
       }
-      #status { font-size: 12px; color: #8fd1c7; margin-top: 6px; }
-      pre { font-size: 11px; color: #b8c4d9; max-height: 300px; overflow: auto; margin-top: 8px;
-            background: rgba(10,16,28,0.6); padding: 8px; border: 1px solid #26324a; }
-      .ctrl-pad { display: grid; grid-template-columns: repeat(3, 52px); gap: 4px; margin-top: 8px; }
-      .ctrl-pad button { width: 52px; height: 40px; font-size: 14px; padding: 0; text-align: center; }
-      .ctrl-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-      .ctrl-actions button { font-size: 13px; min-width: 52px; height: 36px; }
-      .note { font-size: 11px; color: #9fb0cb; margin-top: 8px; line-height: 1.4; }
-      .links { display: flex; gap: 10px; margin-top: 10px; }
-      .links a { color: #8fd1ff; font-size: 12px; }
-      .rom-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+      .layout {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        box-shadow: 0 14px 32px rgba(0, 0, 0, 0.28);
+      }
+      .screen-wrap { padding: 10px 12px 4px; }
+      .drop-zone {
+        border: 1px dashed #5079ab;
+        border-radius: 10px;
+        padding: 10px;
+        transition: border-color 0.15s ease, background-color 0.15s ease;
+      }
+      .drop-zone.dragover {
+        border-color: var(--accent2);
+        background: rgba(123, 240, 178, 0.08);
+      }
+      .screen-stage {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 320 / 224;
+        max-height: 72vh;
+        margin: 0 auto;
+        transition: transform 0.3s ease;
+      }
+      .screen-stage:fullscreen {
+        width: 100vw;
+        height: 100vh;
+        background: #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      canvas#screen {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        image-rendering: pixelated;
+        display: block;
+        background: #000;
+        border-radius: 8px;
+        border: 1px solid #2d4466;
+        touch-action: none;
+      }
+      .screen-stage:fullscreen canvas#screen {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        border-radius: 0;
+        border: none;
+      }
+      .status {
+        margin-top: 8px;
+        font-size: 13px;
+        color: var(--accent2);
+        min-height: 20px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+      button, select, input[type="file"] {
+        font: inherit;
+        color: var(--ink);
+      }
+      button, select {
+        border: 1px solid var(--line);
+        background: #163154;
+        border-radius: 10px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      button:hover { background: #1d3e68; }
+      button:disabled { opacity: 0.52; cursor: not-allowed; }
+      select {
+        min-width: 170px;
+        background: #102746;
+      }
+      .tiny { font-size: 12px; color: var(--sub); }
+      .controls-bar {
+        padding: 8px 12px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      .controls-bar select { min-width: 120px; flex: 1; max-width: 220px; }
+      .controls-bar input[type="file"] { min-width: 0; flex: 1; max-width: 260px; }
+      .controller-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 4px 8px;
+        gap: 12px;
+      }
+      .info-bar {
+        padding: 4px 12px;
+      }
+      .info-bar .tiny { margin: 2px 0; }
+      .line { border-top: 1px solid rgba(66, 96, 132, 0.45); margin: 4px 0; }
+      .pad {
+        display: grid;
+        grid-template-columns: repeat(3, 52px);
+        gap: 4px;
+        flex-shrink: 0;
+      }
+      .pad button, .actions button {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 0;
+        font-size: 16px;
+      }
+      .actions {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      .actions button { min-width: 52px; }
+      .dev-panel {
+        display: none;
+        padding: 12px;
+      }
+      .dev-panel.visible { display: block; }
+      .meta {
+        white-space: pre-wrap;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #c5d6ed;
+        border: 1px solid #304969;
+        border-radius: 8px;
+        padding: 8px;
+        background: rgba(11, 22, 36, 0.8);
+      }
+      .hide { display: none !important; }
+      .footer-links {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .footer-links a { color: var(--accent); font-size: 12px; }
+      .dev-tabs {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+      .dev-tab {
+        border: 1px solid #39567d;
+        background: #132944;
+        border-radius: 8px;
+        padding: 5px 10px;
+        font-size: 12px;
+      }
+      .dev-tab.active {
+        background: #21456f;
+        border-color: #69a6df;
+      }
+      .dev-section { display: none; margin-top: 8px; }
+      .dev-section.active { display: block; }
+      .dev-row { display: grid; grid-template-columns: 1fr; gap: 8px; }
+      .dev-canvas {
+        width: 100%;
+        height: auto;
+        border: 1px solid #304969;
+        border-radius: 8px;
+        image-rendering: pixelated;
+        background: #000;
+      }
+      .mini-title {
+        font-size: 12px;
+        color: #b7cae4;
+        margin: 4px 0;
+      }
+      .cram-grid {
+        display: grid;
+        grid-template-columns: repeat(16, minmax(14px, 1fr));
+        gap: 2px;
+      }
+      .cram-cell {
+        aspect-ratio: 1 / 1;
+        border: 1px solid #4c6688;
+      }
+      .sprite-wrap { max-height: 220px; overflow: auto; border: 1px solid #304969; border-radius: 8px; }
+      .sprite-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11px;
+      }
+      .sprite-table th, .sprite-table td {
+        border: 1px solid #304969;
+        padding: 2px 4px;
+        text-align: right;
+      }
+      /* Icon buttons */
+      .icon-btn {
+        min-width: 40px;
+        font-size: 18px;
+        padding: 6px 10px;
+        line-height: 1;
+      }
+      .icon-btn[title]::after { content: none; }
+      /* Fullscreen overlay controls */
+      .fs-overlay {
+        display: none;
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        z-index: 9999;
+        pointer-events: none;
+      }
+      .fs-overlay.active { display: block; }
+      .fs-bar {
+        position: absolute;
+        top: 8px; right: 8px;
+        display: flex;
+        gap: 6px;
+        pointer-events: auto;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+      }
+      .fs-bar:hover { opacity: 1; }
+      .fs-bar button {
+        background: rgba(16, 28, 50, 0.85);
+        border: 1px solid rgba(75, 200, 255, 0.4);
+        color: #fff;
+        font-size: 20px;
+        border-radius: 10px;
+        padding: 6px 10px;
+        cursor: pointer;
+        min-width: 38px;
+      }
+      /* Floating gamepad overlay in fullscreen */
+      .fs-pad {
+        position: absolute;
+        bottom: 24px;
+        pointer-events: auto;
+        opacity: 0.35;
+        transition: opacity 0.2s;
+      }
+      .fs-pad:hover, .fs-pad:active { opacity: 0.75; }
+      .fs-dpad {
+        left: 24px;
+        display: grid;
+        grid-template-columns: repeat(3, 52px);
+        gap: 4px;
+      }
+      .fs-actions {
+        right: 24px;
+        display: grid;
+        grid-template-columns: repeat(2, 52px);
+        gap: 4px;
+      }
+      .fs-pad button {
+        background: rgba(16, 28, 50, 0.8);
+        border: 1px solid rgba(75, 200, 255, 0.35);
+        color: #fff;
+        font-size: 18px;
+        border-radius: 12px;
+        min-height: 48px;
+        min-width: 48px;
+        padding: 0;
+        cursor: pointer;
+        -webkit-user-select: none;
+        user-select: none;
+        touch-action: manipulation;
+      }
+      .fs-pad button:active { background: rgba(75, 200, 255, 0.3); }
+      @media (min-width: 900px) {
+        .layout { max-width: 720px; margin: 0 auto; }
+      }
+      @media (max-width: 560px) {
+        .title { font-size: 18px; }
+        .pad { grid-template-columns: repeat(3, 46px); gap: 3px; }
+        .pad button, .actions button { min-height: 40px; min-width: 40px; font-size: 14px; }
+        .actions button { min-width: 46px; }
+        .controls-bar { padding: 6px 8px; gap: 6px; }
+      }
     </style>
   </head>
   <body>
-    <h1>Mega Drive Emulator <small style="font-size:13px;color:#8fd1c7">(REST API)</small></h1>
-    <div class="meta" id="buildVersion">build: loading...</div>
+    <main>
+      <section class="top">
+        <h1 class="title">Mega Drive WASM Player</h1>
+        <div class="top-right">
+          <span id="buildVersion" class="chip">build: loading...</span>
+          <button id="installPwa" class="hide">Install App</button>
+          <button id="toggleDev" class="icon-btn" title="Developer Mode">🛠</button>
+        </div>
+      </section>
 
-    <div class="toolbar">
-      <div class="rom-row">
-        <input id="romPath" type="text" value="/Users/hossie/development/md_emulator/roms/puyo.bin" style="width:380px" />
-        <button id="loadRomPath">Load Path</button>
-        <span style="color:#667;font-size:12px">or</span>
-        <input id="romFile" type="file" accept=".bin,.md,.gen,.smd,.sms,application/octet-stream" style="font-size:12px" />
-        <button id="loadRomFile">Load File</button>
-      </div>
-    </div>
-    <div class="toolbar">
-      <button id="romInfo">ROM Info</button>
-      <button id="toggleApiLog">Toggle API Log</button>
-      <button id="reset">Reset</button>
-      <button id="step">Step 1 frame</button>
-      <button id="step10">Step 10 frames</button>
-      <button id="runPreview">Run Preview</button>
-      <button id="stopPreview">Stop Preview</button>
-      <button id="toggleAudio">Unmute</button>
-      <input id="stateFile" type="file" accept=".mdstate,.json,application/json,application/octet-stream" style="font-size:12px" />
-      <button id="saveState">Save State</button>
-      <button id="loadState" disabled>Load State</button>
-      <button id="downloadState">Download State</button>
-      <button id="uploadState">Upload State</button>
-    </div>
+      <section class="layout">
+        <!-- ROM selection & playback controls -->
+        <div class="card controls-bar">
+          <select id="bundledRom"></select>
+          <input id="romFile" type="file" accept=".bin,.md,.gen,.smd,.sms,.zip,application/octet-stream" />
+          <button id="toggleRun" class="icon-btn" disabled title="Run / Pause">▶</button>
+          <button id="reset" class="icon-btn" disabled title="Reset">⟲</button>
+          <button id="toggleAudio" class="icon-btn" disabled title="Mute / Unmute">🔇</button>
+          <button id="fullscreen" class="icon-btn" title="Fullscreen">⛶</button>
+          <button id="rotateScreen" class="icon-btn" title="Rotate Screen">↻</button>
+        </div>
 
-    <div class="layout">
-      <div class="screen-col">
-        <canvas id="screen" width="320" height="224"></canvas>
-        <div id="status">status: idle</div>
-        <pre id="out"></pre>
-      </div>
-      <div class="side-col">
-        <p style="font-size:13px;margin-bottom:6px;">Controller (keyboard / buttons)</p>
-        <div class="note" style="margin-bottom:8px">
-          Arrow/WASD=方向  U=A  J=B  K=C  Enter=Start
+        <!-- Game screen -->
+        <article class="card screen-wrap">
+          <div id="dropZone" class="drop-zone">
+            <div class="screen-stage">
+              <canvas id="screen" width="320" height="224"></canvas>
+              <div id="fsOverlay" class="fs-overlay">
+                <div class="fs-bar">
+                  <button id="fsRotate" title="Rotate">↻</button>
+                  <button id="fsExit" title="Exit Fullscreen">✕</button>
+                </div>
+                <div class="fs-pad fs-dpad" id="fsDpad">
+                  <span></span>
+                  <button data-btn="up">▲</button>
+                  <span></span>
+                  <button data-btn="left">◀</button>
+                  <span></span>
+                  <button data-btn="right">▶</button>
+                  <span></span>
+                  <button data-btn="down">▼</button>
+                  <span></span>
+                </div>
+                <div class="fs-pad fs-actions" id="fsActions">
+                  <button data-btn="a">A</button>
+                  <button data-btn="b">B</button>
+                  <button data-btn="c">C</button>
+                  <button data-btn="start">ST</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="status" class="status">initializing wasm...</div>
+        </article>
+
+        <!-- Controller: D-pad (left) + Action buttons (right) -->
+        <section class="controller-bar">
+          <div class="pad">
+            <span></span>
+            <button data-btn="up">▲</button>
+            <span></span>
+            <button data-btn="left">◀</button>
+            <span></span>
+            <button data-btn="right">▶</button>
+            <span></span>
+            <button data-btn="down">▼</button>
+            <span></span>
+          </div>
+          <div class="actions">
+            <button data-btn="a">A</button>
+            <button data-btn="b">B</button>
+            <button data-btn="c">C</button>
+            <button data-btn="start">Start</button>
+          </div>
+        </section>
+
+        <!-- Info -->
+        <div class="info-bar">
+          <p class="tiny">操作: Arrow / WASD, U=A, J=B, K=C, Enter=Start</p>
+          <p id="gamepadStatus" class="tiny">Gamepad: disconnected</p>
+          <p class="tiny">ROMはドラッグ&ドロップでも読み込めます。Gamepad接続も対応。</p>
         </div>
-        <div class="ctrl-pad">
-          <span></span>
-          <button data-btn="up">&#x25B2;</button>
-          <span></span>
-          <button data-btn="left">&#x25C0;</button>
-          <span></span>
-          <button data-btn="right">&#x25B6;</button>
-          <span></span>
-          <button data-btn="down">&#x25BC;</button>
-          <span></span>
-        </div>
-        <div class="ctrl-actions">
-          <button data-btn="a">A</button>
-          <button data-btn="b">B</button>
-          <button data-btn="c">C</button>
-          <button data-btn="start">Start</button>
-        </div>
-        <div class="links">
-          <a href="debug.html">VDP Debug</a>
-          <a href="wasm.html">WASM Player</a>
-        </div>
-      </div>
-    </div>
+
+        <!-- Developer panel -->
+        <section id="devPanel" class="card dev-panel">
+          <div class="toolbar">
+            <button id="stepFrame" disabled>Step</button>
+            <select id="devTilePalette">
+              <option value="0">Tile Palette 0</option>
+              <option value="1">Tile Palette 1</option>
+              <option value="2">Tile Palette 2</option>
+              <option value="3">Tile Palette 3</option>
+            </select>
+            <button id="refreshDev" disabled>Refresh Debug</button>
+            <input id="stateFile" type="file" accept=".mdstate,.json,application/json,application/octet-stream" />
+            <button id="saveState" disabled>Save State</button>
+            <button id="loadState" disabled>Load State</button>
+            <button id="downloadState" disabled>Download State</button>
+            <button id="uploadState" disabled>Upload State</button>
+          </div>
+          <pre id="meta" class="meta"></pre>
+
+          <div class="dev-tabs">
+            <button class="dev-tab active" data-dev-tab="registers">Registers</button>
+            <button class="dev-tab" data-dev-tab="planes">Planes</button>
+            <button class="dev-tab" data-dev-tab="tiles">Tiles</button>
+            <button class="dev-tab" data-dev-tab="cram">CRAM</button>
+            <button class="dev-tab" data-dev-tab="sprites">Sprites</button>
+          </div>
+
+          <section id="devRegisters" class="dev-section active">
+            <pre id="devRegistersText" class="meta"></pre>
+          </section>
+
+          <section id="devPlanes" class="dev-section">
+            <div class="dev-row">
+              <div>
+                <p class="mini-title">Plane A</p>
+                <canvas id="devPlaneA" class="dev-canvas" width="512" height="512"></canvas>
+              </div>
+              <div>
+                <p class="mini-title">Plane B</p>
+                <canvas id="devPlaneB" class="dev-canvas" width="512" height="512"></canvas>
+              </div>
+              <div>
+                <p class="mini-title">Window</p>
+                <canvas id="devPlaneW" class="dev-canvas" width="512" height="256"></canvas>
+              </div>
+            </div>
+          </section>
+
+          <section id="devTiles" class="dev-section">
+            <canvas id="devTilesCanvas" class="dev-canvas" width="256" height="512"></canvas>
+          </section>
+
+          <section id="devCram" class="dev-section">
+            <div id="devCramGrid" class="cram-grid"></div>
+          </section>
+
+          <section id="devSprites" class="dev-section">
+            <div class="sprite-wrap">
+              <table class="sprite-table">
+                <thead>
+                  <tr><th>#</th><th>X</th><th>Y</th><th>W</th><th>H</th><th>Tile</th><th>Pal</th><th>Pri</th><th>HF</th><th>VF</th><th>Link</th></tr>
+                </thead>
+                <tbody id="devSpriteBody"></tbody>
+              </table>
+            </div>
+          </section>
+          <div class="footer-links">
+            <a href="api-client.html">REST API Frontend</a>
+            <a href="debug.html">VDP Debug</a>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <!-- Fullscreen overlay is inside .screen-stage for proper fullscreen rendering -->
 
     <script type="module">
-      import(`./emulator.js?v=${Date.now()}`);
+      import(`./wasm-player.js?v=${Date.now()}`);
     </script>
   </body>
 </html>

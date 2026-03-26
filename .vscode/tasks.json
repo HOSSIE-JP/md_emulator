@@ -43,12 +43,12 @@
     {
       "label": "Frontend: Start HTTP Server",
       "type": "shell",
-      "command": "python -m http.server 8000 --directory frontend",
+      "command": "if p=$(lsof -ti :8000 2>/dev/null); then echo \"Killing process on :8000 ($p)\"; kill -9 $p || true; fi; if command -v python >/dev/null 2>&1; then exec python -m http.server 8000 --bind 0.0.0.0 --directory frontend; else exec python3 -m http.server 8000 --bind 0.0.0.0 --directory frontend; fi",
       "osx": {
-        "command": "if command -v python >/dev/null 2>&1; then exec python -m http.server 8000 --directory frontend; else exec python3 -m http.server 8000 --directory frontend; fi"
+        "command": "if p=$(lsof -ti :8000 2>/dev/null); then echo \"Killing process on :8000 ($p)\"; kill -9 $p || true; fi; if command -v python >/dev/null 2>&1; then exec python -m http.server 8000 --bind 0.0.0.0 --directory frontend; else exec python3 -m http.server 8000 --bind 0.0.0.0 --directory frontend; fi"
       },
       "linux": {
-        "command": "if command -v python >/dev/null 2>&1; then exec python -m http.server 8000 --directory frontend; else exec python3 -m http.server 8000 --directory frontend; fi"
+        "command": "if p=$(lsof -ti :8000 2>/dev/null); then echo \"Killing process on :8000 ($p)\"; kill -9 $p || true; fi; if command -v python >/dev/null 2>&1; then exec python -m http.server 8000 --bind 0.0.0.0 --directory frontend; else exec python3 -m http.server 8000 --bind 0.0.0.0 --directory frontend; fi"
       },
       "isBackground": true,
       "presentation": {
@@ -84,6 +84,88 @@
         "panel": "shared"
       },
       "problemMatcher": []
+    },
+    {
+      "label": "WASM: Build Package (dev)",
+      "type": "shell",
+      "command": "wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "wasm"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "WASM: Build Package (release)",
+      "type": "shell",
+      "command": "wasm-pack build crates/md-wasm --target web --release --out-dir ../../frontend/pkg",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "wasm"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: Sync ROMs from roms/",
+      "type": "shell",
+      "command": "New-Item -ItemType Directory -Force -Path frontend/roms | Out-Null; Get-ChildItem roms -File | Where-Object { $_.Extension -in '.bin','.md','.gen','.smd','.sms','.zip' } | ForEach-Object { Copy-Item $_.FullName -Destination (Join-Path 'frontend/roms' $_.Name) -Force }",
+      "osx": {
+        "command": "mkdir -p frontend/roms && find roms -maxdepth 1 -type f \\( -name '*.bin' -o -name '*.md' -o -name '*.gen' -o -name '*.smd' -o -name '*.sms' -o -name '*.zip' \\) -exec cp {} frontend/roms/ \\;"
+      },
+      "linux": {
+        "command": "mkdir -p frontend/roms && find roms -maxdepth 1 -type f \\( -name '*.bin' -o -name '*.md' -o -name '*.gen' -o -name '*.smd' -o -name '*.sms' -o -name '*.zip' \\) -exec cp {} frontend/roms/ \\;"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "wasm"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: Generate ROM Index",
+      "type": "shell",
+      "command": "$files = Get-ChildItem frontend/roms -File | Where-Object { $_.Name -ne 'index.json' } | Sort-Object Name | ForEach-Object { $_.Name }; @{ files = $files } | ConvertTo-Json -Compress | Set-Content -Encoding utf8 frontend/roms/index.json",
+      "osx": {
+        "command": "mkdir -p frontend/roms && if command -v python >/dev/null 2>&1; then PY=python; else PY=python3; fi; \"$PY\" -c \"import glob,json,os; files=sorted([os.path.basename(p) for p in glob.glob('frontend/roms/*') if os.path.isfile(p) and os.path.basename(p)!='index.json']); open('frontend/roms/index.json','w',encoding='utf-8').write(json.dumps({'files':files}, ensure_ascii=False, separators=(',',':')))\""
+      },
+      "linux": {
+        "command": "mkdir -p frontend/roms && if command -v python >/dev/null 2>&1; then PY=python; else PY=python3; fi; \"$PY\" -c \"import glob,json,os; files=sorted([os.path.basename(p) for p in glob.glob('frontend/roms/*') if os.path.isfile(p) and os.path.basename(p)!='index.json']); open('frontend/roms/index.json','w',encoding='utf-8').write(json.dumps({'files':files}, ensure_ascii=False, separators=(',',':')))\""
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "wasm"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: Refresh Bundled ROMs",
+      "dependsOn": [
+        "Frontend: Sync ROMs from roms/",
+        "Frontend: Generate ROM Index"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "WASM: Rebuild and Refresh ROMs",
+      "dependsOn": [
+        "WASM: Build Package (dev)",
+        "Frontend: Refresh Bundled ROMs"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
     },
     {
       "label": "Emulator: Launch All",
