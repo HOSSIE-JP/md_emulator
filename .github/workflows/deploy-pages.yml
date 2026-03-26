@@ -37,14 +37,8 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
 
-      - name: Install binaryen (wasm-opt)
-        run: sudo apt-get update && sudo apt-get install -y binaryen
-
       - name: Build WASM package
         run: wasm-pack build crates/md-wasm --target web --release --out-dir ../../frontend/pkg
-
-      - name: Optimize wasm binary
-        run: wasm-opt -Oz frontend/pkg/md_wasm_bg.wasm -o frontend/pkg/md_wasm_bg.wasm
 
       - name: Generate bundled ROM index
         run: |
