@@ -1,4 +1,4 @@
-const CACHE_NAME = "md-wasm-pwa-v3";
+const CACHE_NAME = "md-wasm-pwa-__BUILD_VERSION__";
 const APP_SHELL = [
   "./",
   "./index.html",

@@ -40,6 +40,11 @@ jobs:
       - name: Build WASM package
         run: wasm-pack build crates/md-wasm --target web --release --out-dir ../../frontend/pkg
 
+      - name: Inject build version into Service Worker
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          sed -i "s/__BUILD_VERSION__/${SHORT_SHA}/g" frontend/sw.js
+
       - name: Generate bundled ROM index
         run: |
           python3 -c "
