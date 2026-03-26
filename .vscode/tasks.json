@@ -5,6 +5,12 @@
       "label": "md-api: Stop Existing Server",
       "type": "shell",
       "command": "Get-Process -Name md-api -ErrorAction SilentlyContinue | Stop-Process -Force",
+      "osx": {
+        "command": "pkill -f 'target/.*/md-api|cargo run -p md-api' || true"
+      },
+      "linux": {
+        "command": "pkill -f 'target/.*/md-api|cargo run -p md-api' || true"
+      },
       "presentation": {
         "reveal": "silent",
         "panel": "shared"
@@ -38,6 +44,12 @@
       "label": "Frontend: Start HTTP Server",
       "type": "shell",
       "command": "python -m http.server 8000 --directory frontend",
+      "osx": {
+        "command": "if command -v python >/dev/null 2>&1; then exec python -m http.server 8000 --directory frontend; else exec python3 -m http.server 8000 --directory frontend; fi"
+      },
+      "linux": {
+        "command": "if command -v python >/dev/null 2>&1; then exec python -m http.server 8000 --directory frontend; else exec python3 -m http.server 8000 --directory frontend; fi"
+      },
       "isBackground": true,
       "presentation": {
         "reveal": "always",
@@ -60,6 +72,12 @@
       "label": "Frontend: Open Browser",
       "type": "shell",
       "command": "Start-Process 'http://localhost:8000'",
+      "osx": {
+        "command": "open 'http://localhost:8000'"
+      },
+      "linux": {
+        "command": "xdg-open 'http://localhost:8000'"
+      },
       "dependsOn": "Frontend: Start HTTP Server",
       "presentation": {
         "reveal": "silent",
@@ -79,6 +97,109 @@
         "kind": "build",
         "isDefault": true
       },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "OSS: jscpd Report",
+      "type": "shell",
+      "command": "npm run check:duplication",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "oss-check"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "OSS: Core Duplicate Check",
+      "type": "shell",
+      "command": "npm run check:duplication:core",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "oss-check"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "OSS: jscpd Strict",
+      "type": "shell",
+      "command": "npm run check:duplication:strict",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "oss-check"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "OSS: Node License Summary",
+      "type": "shell",
+      "command": "npm run check:licenses:node",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "oss-check"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "OSS: Node GPL Policy",
+      "type": "shell",
+      "command": "npm run check:licenses:node:gpl",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "oss-check"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "OSS: Rust License Policy",
+      "type": "shell",
+      "command": "cargo deny check licenses",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "oss-check"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "OSS: Rust Dependency Policy",
+      "type": "shell",
+      "command": "cargo deny check bans sources licenses",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "oss-check"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "OSS: ScanCode HTML Report",
+      "type": "shell",
+      "command": "bash ./tools/run_scancode.sh -clpieu --ignore '*/Cargo.toml' --html output.html ./crates",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "oss-check"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "OSS: Run All Policies",
+      "dependsOn": [
+        "OSS: Core Duplicate Check",
+        "OSS: Node GPL Policy",
+        "OSS: Rust Dependency Policy",
+        "OSS: ScanCode HTML Report"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
       "presentation": {
         "reveal": "always",
         "panel": "shared"

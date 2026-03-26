@@ -21,3 +21,4 @@
 6. ROM情報を確認:  
    `Invoke-RestMethod -Method Get http://127.0.0.1:8080/api/v1/rom/info`
 7. `frontend` の簡易UIを静的サーバーで開いて `Reset` / `Step` を試す
+8. 必要なら `wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg` を実行し、`frontend/wasm.html` で API を介さず確認する

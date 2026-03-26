@@ -229,6 +229,42 @@
 }
 ```
 
+### GET /api/v1/apu/state
+
+- 用途: YM2612/PSG/Z80 の内部デバッグ状態を取得
+
+レスポンスの `cpu` には既存の `m68k`, `z80_pc`, `z80_cycles` に加えて、Z80 の全レジスタと割り込み状態を含む `z80` オブジェクトが含まれます。
+- 主なフィールド:
+
+`dac_enabled`, `dac_data`, `debug_dac_nonzero`, `debug_fm_nonzero`, `ym_write_total`, `z80_pc`, `z80_total_cycles`, `z80_bank_68k_addr`, `regs_port0_2b`, `z80_banked_read_log`, `z80_trace_ring`
+
+- YM 書き込みログ:
+
+`ym_write_log_first100`: 直近100件のYM書き込み
+
+`ym_write_log_recent_non_dac`: 直近100件の非 DAC データ書き込み（`$2A` を除外）。DAC enable (`$2B`) や通常 FM レジスタ設定の追跡用
+
+`z80_banked_read_log`: Z80 が banked window 経由で読んだ直近64件の 68K 側アドレスと値。ROM/68K RAM から音声データを引く処理の追跡用
+
+`z80_trace_ring`: 直近32件の Z80 命令トレース。サウンドドライバのループや割り込み受理状況の確認用
+
+### GET /api/v1/version
+
+- 用途: 実行中バイナリのビルド識別子を取得
+- レスポンス例:
+
+```json
+{
+  "version": "0.1.0+20260326-005140.abcdef123456.dirty"
+}
+```
+
+- 形式:
+
+`<crate version>+<最新ソース更新UTC時刻>.<git short sha>[.dirty]`
+
+- 手動更新は不要。`md-core` の build script がソース更新時刻と Git 状態から自動生成する
+
 ## WebSocket
 
 - URL: `ws://127.0.0.1:8080/api/v1/ws`

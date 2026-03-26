@@ -1,1 +1,97 @@
+# macOS
+.DS_Store
+/.Spotlight-V100
+/.Trashes
+
+# Node
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp.*
+
+# Frontend build / package outputs
+/frontend/pkg/
+/frontend/dist/
+/frontend/build/
+
+# Rust / Cargo
+/target/
+**/target/
+# If you want to ignore Cargo.lock for libraries, uncomment the next line
+# Cargo.lock
+
+# WASM / wasm-pack outputs
+/pkg/
+**/pkg/
+
+# Logs
+*.log
+/logs/
+
+# dotenv
+.env
+.env.*.local
+
+# Editor directories and files
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Coverage
+/coverage/
+*.lcov
+
+# Temporary files
+*~
+*.swp
+*.swo
+*.tmp
+*.temp
+
+# Generated files
+/*.log
+/*.csv
+/*.prof
+
+# Misc binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.class
+
+# OS junk
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Ctags
+tags
+
+# Ignore IDE project files
+/.idea/
+
+# Build artifacts
+/dist/
+/build/
+
+# Ignore local test outputs
+/test-output/
+
+# Optional: ignore large roms if you don't want them in git
+# /roms/
 /target*
+/roms
+/.reports
+output.html

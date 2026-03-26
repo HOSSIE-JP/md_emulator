@@ -15,6 +15,10 @@ impl EmulatorHandle {
         }
     }
 
+    pub fn build_version() -> String {
+        Emulator::build_version()
+    }
+
     pub fn load_rom(&mut self, rom: Vec<u8>) -> Result<(), JsValue> {
         self.emu
             .load_rom_bytes(&rom)

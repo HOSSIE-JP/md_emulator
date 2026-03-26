@@ -190,6 +190,48 @@ Minimum required updates:
 
 ---
 
+## 🎨 VDP 描画リファレンス (MANDATORY)
+
+VDP (S315-5313) の画面描画実装を改善・修正する際は、**Exodus Emulation Platform** の VDP 実装を正確性のリファレンスとして参照すること。
+
+**リファレンスリポジトリ**: https://github.com/RogerSanders/Exodus (MIT License)
+**主要ファイル**: `Devices/315-5313/S315-5313_Rendering.cpp`
+
+### 参照すべき主要な実装ポイント
+
+- **レイヤー優先度**: `CalculateLayerPriorityIndex()` のルックアップテーブル方式
+- **Shadow/Highlight モード**: オペレータースプライト (palette 3, index 14/15) の正確な合成、shadow/highlight のキャンセル
+- **VSRAM 境界処理**: アドレス >= 0x50 では最後の2エントリのAND値を返す
+- **Hscroll データ**: 下位10ビットのみ有効
+- **パレットセレクトビット**: Register 1 bit 2 がクリア時、各色の最下位ビットのみ有効
+- **インターレースモード2**: 8×16パターン、倍精度Y座標、VSRAM 11ビットマスク
+- **スプライト**: ドットオーバーフロー（H40=320dots, H32=256dots）、マスキング、衝突検出
+- **ウィンドウ歪みバグ**: 左寄せウィンドウ後の部分表示2セル領域のマッピングデータ問題
+- **CRAM ドット**: 書き込み中のライン上への色伝搬
+
+### ルール
+
+1. **コードのコピーは禁止** — Exodus のソースから直接コードをコピーしないこと
+2. **仕様・動作の理解のみ** — Exodus の実装を読んで仕様や正しい動作を理解し、独自のコードで実装すること
+3. **ハードウェアテスト結果を優先** — Exodus のコメントに記載されたハードウェアテスト結果は信頼性が高い
+4. **差分がある場合** — 本プロジェクトの描画結果と Exodus の結果に乖離がある場合、Exodus 側の動作を正とする
+
+---
+
+## 🔄 WASM ビルド更新ルール (MANDATORY)
+
+`md-core` / `md-apu` / `md-vdp` / `md-cpu-*` / `md-bus` / `md-wasm` クレートに変更を加えた場合、**必ず WASM パッケージも再ビルドすること**。
+
+```bash
+wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg
+```
+
+- バージョン（ビルドタイムスタンプ）は `crates/md-core/build.rs` が自動生成する。
+- WASM 再ビルドを忘れると、フロントエンド (wasm.html) に修正が反映されない。
+- API サーバー (`md-api`) のビルドだけでは WASM は更新されない。両方を別々にビルドする必要がある。
+
+---
+
 ## コミットメッセージ (MANDATORY)
 
 - リポジトリ内で生成されるコミットメッセージ（GitHub Copilot 等の自動生成を含む）は日本語で記述すること。

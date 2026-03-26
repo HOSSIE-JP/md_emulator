@@ -41,7 +41,9 @@ cargo test --workspace
 
 ```powershell
 cargo install wasm-pack
-wasm-pack build crates/md-wasm --target web
+wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg
 ```
 
-> 注: 現在の `frontend` は主に REST 疎通確認用の最小UIです。
+ビルド後は `frontend/pkg` にブラウザ向けバンドルが生成され、`frontend/wasm.html` から API を介さず直接実行できます。
+
+> 注: `frontend/index.html` は REST 疎通確認用、`frontend/wasm.html` は md-wasm を直接使うプレイヤーです。

@@ -3,7 +3,7 @@ pub enum Reg8 { A, B, C, D, E, H, L, Mem }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reg16 { BC, DE, HL, SP, AF }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Cond { NZ, Z, NC, C }
+pub enum Cond { NZ, Z, NC, C, PO, PE, P, M }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Z80Instruction {
@@ -36,7 +36,9 @@ pub enum Z80Instruction {
     XorR8(Reg8),
     CpR8(Reg8),
     AddAImm,
+    AdcAImm,
     SubImm,
+    SbcAImm,
     AndImm,
     OrImm,
     XorImm,
@@ -116,7 +118,8 @@ pub fn decode(opcode: u8) -> Z80Instruction {
         0xB0..=0xB7 => OrR8(r8_from(opcode & 7)),
         0xB8..=0xBF => CpR8(r8_from(opcode & 7)),
         // ALU imm
-        0xC6 => AddAImm, 0xD6 => SubImm,
+        0xC6 => AddAImm, 0xCE => AdcAImm,
+        0xD6 => SubImm, 0xDE => SbcAImm,
         0xE6 => AndImm, 0xF6 => OrImm,
         0xEE => XorImm, 0xFE => CpImm,
         // LD r8,r8 block (0x40-0x7F except 0x76=HALT)
@@ -149,14 +152,20 @@ pub fn decode(opcode: u8) -> Z80Instruction {
         0xC3 => Jp,
         0xC2 => JpCond(Cond::NZ), 0xCA => JpCond(Cond::Z),
         0xD2 => JpCond(Cond::NC), 0xDA => JpCond(Cond::C),
+        0xE2 => JpCond(Cond::PO), 0xEA => JpCond(Cond::PE),
+        0xF2 => JpCond(Cond::P),  0xFA => JpCond(Cond::M),
         0xE9 => JpHL,
         // Calls/Returns
         0xCD => Call,
         0xC4 => CallCond(Cond::NZ), 0xCC => CallCond(Cond::Z),
         0xD4 => CallCond(Cond::NC), 0xDC => CallCond(Cond::C),
+        0xE4 => CallCond(Cond::PO), 0xEC => CallCond(Cond::PE),
+        0xF4 => CallCond(Cond::P),  0xFC => CallCond(Cond::M),
         0xC9 => Ret,
         0xC0 => RetCond(Cond::NZ), 0xC8 => RetCond(Cond::Z),
         0xD0 => RetCond(Cond::NC), 0xD8 => RetCond(Cond::C),
+        0xE0 => RetCond(Cond::PO), 0xE8 => RetCond(Cond::PE),
+        0xF0 => RetCond(Cond::P),  0xF8 => RetCond(Cond::M),
         0xD9 => Exx,
         // RST
         0xC7 => Rst(0x00), 0xCF => Rst(0x08),
@@ -201,7 +210,7 @@ pub fn cycles_for(instr: &Z80Instruction) -> u32 {
         AddAR8(Reg8::Mem) | SubR8(Reg8::Mem) | AndR8(Reg8::Mem) | OrR8(Reg8::Mem) | XorR8(Reg8::Mem)
         | CpR8(Reg8::Mem) | AdcAR8(Reg8::Mem) | SbcAR8(Reg8::Mem) => 7,
         AddAR8(_) | SubR8(_) | AndR8(_) | OrR8(_) | XorR8(_) | CpR8(_) | AdcAR8(_) | SbcAR8(_) => 4,
-        AddAImm | SubImm | AndImm | OrImm | XorImm | CpImm => 7,
+        AddAImm | AdcAImm | SubImm | SbcAImm | AndImm | OrImm | XorImm | CpImm => 7,
         IncR8(Reg8::Mem) | DecR8(Reg8::Mem) => 11,
         IncR8(_) | DecR8(_) => 4,
         IncR16(_) | DecR16(_) => 6,

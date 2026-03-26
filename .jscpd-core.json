@@ -1,0 +1,19 @@
+{
+  "minLines": 20,
+  "minTokens": 100,
+  "reporters": [
+    "console"
+  ],
+  "ignore": [
+    "**/.git/**",
+    "**/.reports/**",
+    "**/node_modules/**",
+    "**/roms/**",
+    "**/target/**",
+    "**/tools/**",
+    "chat.json",
+    "chat.zip",
+    "output.html",
+    "package-lock.json"
+  ]
+}

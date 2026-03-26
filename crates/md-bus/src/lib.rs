@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use serde::{Deserialize, Serialize};
 
 pub const ROM_START: u32 = 0x000000;
@@ -57,14 +59,22 @@ pub struct SystemBus {
     io_ports: Vec<u8>,
     controller_1: ControllerState,
     controller_2: ControllerState,
-    z80_bus_requested: bool,
-    z80_reset: bool,
+    pub z80_bus_requested: bool,
+    pub z80_reset: bool,
     /// Buffered YM2612 writes: (port, address, data)
     pub ym_write_queue: Vec<(u8, u8, u8)>,
     /// Buffered PSG writes
     pub psg_write_queue: Vec<u8>,
     /// YM2612 address latch per port
     ym_addr_latch: [u8; 2],
+    /// YM2612 status register (updated from APU)
+    pub ym_status: u8,
+    /// Debug: count M68K writes to Z80 space
+    #[serde(skip)]
+    pub z80_m68k_write_count: u32,
+    /// Debug: recent Z80 banked 68K reads
+    #[serde(skip)]
+    pub z80_banked_read_log: RefCell<Vec<(u32, u8)>>,
 }
 
 impl Default for SystemBus {
@@ -72,8 +82,8 @@ impl Default for SystemBus {
         let mut io_ports = vec![0; 0x100];
         io_ports[(PAD1_DATA_PORT - IO_START) as usize] = 0x40;
         io_ports[(PAD2_DATA_PORT - IO_START) as usize] = 0x40;
-        io_ports[(PAD1_CTRL_PORT - IO_START) as usize] = 0x40;
-        io_ports[(PAD2_CTRL_PORT - IO_START) as usize] = 0x40;
+        io_ports[(PAD1_CTRL_PORT - IO_START) as usize] = 0x00;
+        io_ports[(PAD2_CTRL_PORT - IO_START) as usize] = 0x00;
 
         Self {
             rom: Vec::new(),
@@ -87,6 +97,9 @@ impl Default for SystemBus {
             ym_write_queue: Vec::new(),
             psg_write_queue: Vec::new(),
             ym_addr_latch: [0; 2],
+            ym_status: 0,
+            z80_m68k_write_count: 0,
+            z80_banked_read_log: RefCell::new(Vec::new()),
         }
     }
 }
@@ -94,6 +107,26 @@ impl Default for SystemBus {
 impl SystemBus {
     pub fn load_rom(&mut self, rom: Vec<u8>) {
         self.rom = rom;
+    }
+
+    /// Reset all mutable state (keeping ROM). Matches power-on behavior.
+    pub fn reset(&mut self) {
+        self.work_ram.fill(0);
+        self.z80_ram.fill(0);
+        self.z80_bus_requested = false;
+        self.z80_reset = true;
+        self.ym_write_queue.clear();
+        self.psg_write_queue.clear();
+        self.ym_addr_latch = [0; 2];
+        self.ym_status = 0;
+        self.z80_m68k_write_count = 0;
+        self.z80_banked_read_log.borrow_mut().clear();
+        // Re-initialize IO ports with default values
+        self.io_ports.fill(0);
+        self.io_ports[(PAD1_DATA_PORT - IO_START) as usize] = 0x40;
+        self.io_ports[(PAD2_DATA_PORT - IO_START) as usize] = 0x40;
+        self.io_ports[(PAD1_CTRL_PORT - IO_START) as usize] = 0x00;
+        self.io_ports[(PAD2_CTRL_PORT - IO_START) as usize] = 0x00;
     }
 
     pub fn set_controller(&mut self, player: u8, buttons: u16) {
@@ -175,7 +208,7 @@ impl BusDevice for SystemBus {
             ROM_START..=ROM_END => self.rom.get(addr as usize).copied().unwrap_or(0xFF),
             Z80_SPACE_START..=Z80_SPACE_END => {
                 if addr >= YM2612_START && addr <= YM2612_END {
-                    return 0x00; // YM2612 status: not busy
+                    return self.ym_status; // YM2612 status register
                 }
                 let index = (addr as usize - Z80_SPACE_START as usize) & 0x1FFF;
                 self.z80_ram[index]

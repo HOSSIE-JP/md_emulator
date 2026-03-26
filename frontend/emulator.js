@@ -4,20 +4,33 @@ const statusEl = document.getElementById("status");
 const canvas = document.getElementById("screen");
 const ctx = canvas.getContext("2d");
 const frameImage = ctx.createImageData(canvas.width, canvas.height);
+const buildVersionEl = document.getElementById("buildVersion");
+const saveStateButton = document.getElementById("saveState");
+const loadStateButton = document.getElementById("loadState");
+const downloadStateButton = document.getElementById("downloadState");
+const uploadStateButton = document.getElementById("uploadState");
+const stateFileInput = document.getElementById("stateFile");
+
+const API_BASE = "http://127.0.0.1:8080";
 
 const TARGET_FPS = 60;
 const FRAME_MS = 1000 / TARGET_FPS;
+const AUDIO_SAMPLE_RATE = 48000;
+const AUDIO_SAMPLES_PER_FRAME = Math.ceil(AUDIO_SAMPLE_RATE / TARGET_FPS); // ~800
 
-const BTN_UP = 1 << 0;
-const BTN_DOWN = 1 << 1;
-const BTN_LEFT = 1 << 2;
-const BTN_RIGHT = 1 << 3;
-const BTN_B = 1 << 4;
-const BTN_C = 1 << 5;
-const BTN_A = 1 << 6;
-const BTN_START = 1 << 7;
+const BTN_MAP = {
+  up:    1 << 0,
+  down:  1 << 1,
+  left:  1 << 2,
+  right: 1 << 3,
+  b:     1 << 4,
+  c:     1 << 5,
+  a:     1 << 6,
+  start: 1 << 7,
+};
 
 const pressed = new Set();
+const touchPressed = new Set();  // buttons held via on-screen pad
 
 let previewRunning = false;
 let rafId = null;
@@ -26,6 +39,39 @@ let accumulator = 0;
 let frameInFlight = false;
 let lastButtons = 0;
 let renderedFrames = 0;
+
+// Audio state
+let audioCtx = null;
+let audioEnabled = false;
+let audioNextTime = 0;
+let savedStateData = null;
+
+function triggerDownload(bytes, filename, mimeType = "application/octet-stream") {
+  const blob = new Blob([bytes], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+async function saveStateFromApi() {
+  const data = await request(`${API_BASE}/api/v1/emulator/save-state`, "GET");
+  if (!data?.ok || !data?.state) {
+    throw new Error("state save failed");
+  }
+  savedStateData = new Uint8Array(data.state);
+  loadStateButton.disabled = false;
+  return savedStateData;
+}
+
+async function loadStateToApi(bytes) {
+  await request(`${API_BASE}/api/v1/emulator/load-state`, "POST", { data: Array.from(bytes) });
+  savedStateData = new Uint8Array(bytes);
+  loadStateButton.disabled = false;
+  await refreshFrame();
+}
 
 function isEditableTarget(target) {
   if (!(target instanceof Element)) {
@@ -84,8 +130,67 @@ function drawFrame(pixelsArgb) {
   ctx.putImageData(frameImage, 0, 0);
 }
 
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+    sampleRate: AUDIO_SAMPLE_RATE,
+  });
+  audioNextTime = 0;
+}
+
+function toggleAudio() {
+  if (!audioCtx) {
+    initAudio();
+  }
+  audioEnabled = !audioEnabled;
+  if (audioEnabled) {
+    audioCtx.resume();
+    audioNextTime = 0;
+  }
+  const btn = document.getElementById("toggleAudio");
+  if (btn) {
+    btn.textContent = audioEnabled ? "Mute" : "Unmute";
+  }
+}
+
+async function fetchAndPlayAudio() {
+  if (!audioEnabled || !audioCtx) return;
+  try {
+    const data = await requestEx(
+      `${API_BASE}/api/v1/audio/samples?frames=${AUDIO_SAMPLES_PER_FRAME * 2}`,
+      "GET",
+      null,
+      { quiet: true }
+    );
+    if (!data?.samples || data.samples.length === 0) return;
+
+    const stereoSamples = data.samples;
+    const numFrames = stereoSamples.length / 2;
+    const buffer = audioCtx.createBuffer(2, numFrames, AUDIO_SAMPLE_RATE);
+    const left = buffer.getChannelData(0);
+    const right = buffer.getChannelData(1);
+    for (let i = 0; i < numFrames; i++) {
+      left[i] = stereoSamples[i * 2];
+      right[i] = stereoSamples[i * 2 + 1];
+    }
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+    if (audioNextTime < now) {
+      audioNextTime = now;
+    }
+    source.start(audioNextTime);
+    audioNextTime += buffer.duration;
+  } catch {
+    // Silently ignore audio fetch errors
+  }
+}
+
 async function refreshFrame() {
-  const frame = await requestEx("http://127.0.0.1:8080/api/v1/video/frame", "GET", null, {
+  const frame = await requestEx(`${API_BASE}/api/v1/video/frame`, "GET", null, {
     quiet: true,
   });
   if (frame?.pixels_argb) {
@@ -95,30 +200,18 @@ async function refreshFrame() {
 
 function computeButtons() {
   let buttons = 0;
-  if (pressed.has("ArrowUp") || pressed.has("KeyW")) {
-    buttons |= BTN_UP;
-  }
-  if (pressed.has("ArrowDown") || pressed.has("KeyS")) {
-    buttons |= BTN_DOWN;
-  }
-  if (pressed.has("ArrowLeft") || pressed.has("KeyA")) {
-    buttons |= BTN_LEFT;
-  }
-  if (pressed.has("ArrowRight") || pressed.has("KeyD")) {
-    buttons |= BTN_RIGHT;
-  }
-  if (pressed.has("KeyJ")) {
-    buttons |= BTN_B;
-  }
-  if (pressed.has("KeyK")) {
-    buttons |= BTN_C;
-  }
-  if (pressed.has("KeyU")) {
-    buttons |= BTN_A;
-  }
-  if (pressed.has("Enter")) {
-    buttons |= BTN_START;
-  }
+  if (pressed.has("ArrowUp") || pressed.has("KeyW") || touchPressed.has("up"))
+    buttons |= BTN_MAP.up;
+  if (pressed.has("ArrowDown") || pressed.has("KeyS") || touchPressed.has("down"))
+    buttons |= BTN_MAP.down;
+  if (pressed.has("ArrowLeft") || pressed.has("KeyA") || touchPressed.has("left"))
+    buttons |= BTN_MAP.left;
+  if (pressed.has("ArrowRight") || pressed.has("KeyD") || touchPressed.has("right"))
+    buttons |= BTN_MAP.right;
+  if (pressed.has("KeyJ") || touchPressed.has("b")) buttons |= BTN_MAP.b;
+  if (pressed.has("KeyK") || touchPressed.has("c")) buttons |= BTN_MAP.c;
+  if (pressed.has("KeyU") || touchPressed.has("a")) buttons |= BTN_MAP.a;
+  if (pressed.has("Enter") || touchPressed.has("start")) buttons |= BTN_MAP.start;
   return buttons;
 }
 
@@ -129,7 +222,7 @@ async function pushControllerState(force = false) {
   }
   lastButtons = buttons;
   await requestEx(
-    "http://127.0.0.1:8080/api/v1/input/controller",
+    `${API_BASE}/api/v1/input/controller`,
     "POST",
     { player: 1, buttons },
     { quiet: true }
@@ -143,8 +236,9 @@ async function advanceOneVideoFrame() {
   frameInFlight = true;
   try {
     await pushControllerState();
-    await requestEx("http://127.0.0.1:8080/api/v1/emulator/step", "POST", { frames: 1 }, { quiet: true });
+    await requestEx(`${API_BASE}/api/v1/emulator/step`, "POST", { frames: 1 }, { quiet: true });
     await refreshFrame();
+    await fetchAndPlayAudio();
     renderedFrames += 1;
   } finally {
     frameInFlight = false;
@@ -174,11 +268,11 @@ async function previewTick(ts) {
 
 async function runOneFrameStep(frames = 1) {
   await pushControllerState(true);
-  await request("http://127.0.0.1:8080/api/v1/emulator/step", "POST", { frames });
+  await request(`${API_BASE}/api/v1/emulator/step`, "POST", { frames });
   const [cpu, rom, frame] = await Promise.all([
-    request("http://127.0.0.1:8080/api/v1/cpu/state", "GET"),
-    request("http://127.0.0.1:8080/api/v1/rom/info", "GET"),
-    requestEx("http://127.0.0.1:8080/api/v1/video/frame", "GET", null, { quiet: true }),
+    request(`${API_BASE}/api/v1/cpu/state`, "GET"),
+    request(`${API_BASE}/api/v1/rom/info`, "GET"),
+    requestEx(`${API_BASE}/api/v1/video/frame`, "GET", null, { quiet: true }),
   ]);
   if (frame?.pixels_argb) {
     drawFrame(frame.pixels_argb);
@@ -188,7 +282,7 @@ async function runOneFrameStep(frames = 1) {
 
 document.getElementById("reset").addEventListener("click", async () => {
   try {
-    const data = await request("http://127.0.0.1:8080/api/v1/emulator/reset", "POST");
+    const data = await request(`${API_BASE}/api/v1/emulator/reset`, "POST");
     await refreshFrame();
     showJson(data);
   } catch {
@@ -212,7 +306,26 @@ document.getElementById("step10").addEventListener("click", async () => {
 document.getElementById("loadRomPath").addEventListener("click", async () => {
   try {
     const payload = { path: romPathInput.value };
-    const data = await request("http://127.0.0.1:8080/api/v1/emulator/load-rom-path", "POST", payload);
+    const data = await request(`${API_BASE}/api/v1/emulator/load-rom-path`, "POST", payload);
+    savedStateData = null;
+    loadStateButton.disabled = true;
+    await refreshFrame();
+    showJson(data);
+  } catch {
+  }
+});
+
+document.getElementById("loadRomFile").addEventListener("click", async () => {
+  const fileInput = document.getElementById("romFile");
+  const file = fileInput.files?.[0];
+  if (!file) { setStatus("select a ROM file first"); return; }
+  try {
+    setStatus(`uploading ${file.name}...`);
+    const arrayBuffer = await file.arrayBuffer();
+    const bytes = Array.from(new Uint8Array(arrayBuffer));
+    const data = await request(`${API_BASE}/api/v1/emulator/load-rom`, "POST", { rom: bytes });
+    savedStateData = null;
+    loadStateButton.disabled = true;
     await refreshFrame();
     showJson(data);
   } catch {
@@ -221,7 +334,7 @@ document.getElementById("loadRomPath").addEventListener("click", async () => {
 
 document.getElementById("romInfo").addEventListener("click", async () => {
   try {
-    const data = await request("http://127.0.0.1:8080/api/v1/rom/info", "GET");
+    const data = await request(`${API_BASE}/api/v1/rom/info`, "GET");
     showJson(data);
   } catch {
   }
@@ -229,8 +342,8 @@ document.getElementById("romInfo").addEventListener("click", async () => {
 
 document.getElementById("toggleApiLog").addEventListener("click", async () => {
   try {
-    const current = await request("http://127.0.0.1:8080/api/v1/logging", "GET");
-    const next = await request("http://127.0.0.1:8080/api/v1/logging", "POST", {
+    const current = await request(`${API_BASE}/api/v1/logging`, "GET");
+    const next = await request(`${API_BASE}/api/v1/logging`, "POST", {
       enabled: !current.enabled,
     });
     showJson({ logging: next });
@@ -258,6 +371,57 @@ document.getElementById("stopPreview").addEventListener("click", () => {
     rafId = null;
   }
   setStatus("preview stopped");
+});
+
+document.getElementById("toggleAudio").addEventListener("click", () => {
+  toggleAudio();
+});
+
+saveStateButton.addEventListener("click", async () => {
+  try {
+    const bytes = await saveStateFromApi();
+    setStatus(`state saved (${bytes.length} bytes)`);
+  } catch (error) {
+    setStatus(`state save failed: ${error}`);
+  }
+});
+
+loadStateButton.addEventListener("click", async () => {
+  if (!savedStateData) {
+    setStatus("no saved state in memory");
+    return;
+  }
+  try {
+    await loadStateToApi(savedStateData);
+    setStatus("state loaded");
+  } catch (error) {
+    setStatus(`state load failed: ${error}`);
+  }
+});
+
+downloadStateButton.addEventListener("click", async () => {
+  try {
+    const bytes = await saveStateFromApi();
+    triggerDownload(bytes, "api-save.mdstate", "application/octet-stream");
+    setStatus(`state downloaded (${bytes.length} bytes)`);
+  } catch (error) {
+    setStatus(`state download failed: ${error}`);
+  }
+});
+
+uploadStateButton.addEventListener("click", async () => {
+  const file = stateFileInput.files?.[0];
+  if (!file) {
+    setStatus("select a state file first");
+    return;
+  }
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    await loadStateToApi(bytes);
+    setStatus(`state uploaded: ${file.name}`);
+  } catch (error) {
+    setStatus(`state upload failed: ${error}`);
+  }
 });
 
 window.addEventListener("keydown", async (event) => {
@@ -299,15 +463,26 @@ refreshFrame().catch((error) => {
   setStatus(`initial fetch failed: ${error}`);
 });
 
-showJson({
-  keyboard: {
-    up: ["ArrowUp", "W"],
-    down: ["ArrowDown", "S"],
-    left: ["ArrowLeft", "A"],
-    right: ["ArrowRight", "D"],
-    b: ["J"],
-    c: ["K"],
-    a: ["U"],
-    start: ["Enter"],
-  },
+// On-screen controller buttons (mouse/touch)
+document.querySelectorAll("[data-btn]").forEach((btn) => {
+  const name = btn.dataset.btn;
+  const down = () => { touchPressed.add(name); pushControllerState().catch(() => {}); };
+  const up = () => { touchPressed.delete(name); pushControllerState().catch(() => {}); };
+  btn.addEventListener("mousedown", down);
+  btn.addEventListener("mouseup", up);
+  btn.addEventListener("mouseleave", up);
+  btn.addEventListener("touchstart", (e) => { e.preventDefault(); down(); });
+  btn.addEventListener("touchend", (e) => { e.preventDefault(); up(); });
+  btn.addEventListener("touchcancel", (e) => { e.preventDefault(); up(); });
 });
+
+// Fetch and display build version
+requestEx(`${API_BASE}/api/v1/version`, "GET", null, { quiet: true })
+  .then((data) => {
+    if (buildVersionEl && data?.version) {
+      buildVersionEl.textContent = `build: ${data.version} (API)`;
+    }
+  })
+  .catch(() => {
+    if (buildVersionEl) buildVersionEl.textContent = "build: API unreachable";
+  });

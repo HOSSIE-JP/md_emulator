@@ -1,0 +1,20 @@
+{
+  "minLines": 20,
+  "minTokens": 100,
+  "reporters": [
+    "console",
+    "html"
+  ],
+  "output": ".reports/jscpd",
+  "ignore": [
+    "**/.git/**",
+    "**/.reports/**",
+    "**/node_modules/**",
+    "**/roms/**",
+    "**/target/**",
+    "chat.json",
+    "chat.zip",
+    "output.html",
+    "package-lock.json"
+  ]
+}

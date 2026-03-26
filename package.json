@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "scripts": {
+    "check:duplication": "jscpd --config .jscpd.json",
+    "check:duplication:core": "jscpd --config .jscpd-core.json crates src frontend",
+    "check:duplication:strict": "jscpd --config .jscpd.json --threshold 0",
+    "check:licenses:node": "license-checker-rseidelsohn --summary --excludePrivatePackages",
+    "check:licenses:node:gpl": "license-checker-rseidelsohn --summary --excludePrivatePackages --failOn 'GPL;AGPL;LGPL;NGPL'"
+  },
+  "devDependencies": {
+    "jscpd": "^4.0.8",
+    "license-checker-rseidelsohn": "^4.4.2"
+  }
+}

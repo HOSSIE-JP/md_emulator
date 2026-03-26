@@ -116,6 +116,7 @@ pub fn router(emulator: Arc<Mutex<Emulator>>) -> Router {
 
     Router::new()
         .route("/api/v1/health", get(health))
+        .route("/api/v1/version", get(version))
         .route("/api/v1/logging", get(get_logging).post(set_logging))
         .route("/api/v1/input/controller", post(set_controller_input))
         .route("/api/v1/emulator/reset", post(reset))
@@ -139,6 +140,7 @@ pub fn router(emulator: Arc<Mutex<Emulator>>) -> Router {
         .route("/api/v1/vdp/vsram", get(vdp_vsram))
         .route("/api/v1/vdp/scanline-vsram", get(vdp_scanline_vsram))
         .route("/api/v1/audio/samples", get(audio_samples))
+        .route("/api/v1/apu/state", get(apu_state))
         .route("/api/v1/ws", get(ws_upgrade))
         .route("/api/v1/mcp/rpc", post(mcp_rpc))
         .layer(CorsLayer::permissive())
@@ -153,6 +155,10 @@ fn log_if_enabled(state: &ApiState, message: impl AsRef<str>) {
 
 async fn health() -> impl IntoResponse {
     Json(OkResponse { ok: true })
+}
+
+async fn version() -> impl IntoResponse {
+    Json(json!({"version": Emulator::build_version()}))
 }
 
 async fn get_logging(State(state): State<ApiState>) -> impl IntoResponse {
@@ -428,6 +434,13 @@ async fn audio_samples(State(state): State<ApiState>, Query(query): Query<AudioQ
         let frames = query.frames.unwrap_or(800);
         let samples = emu.take_audio_samples(frames);
         return Json(json!({"sample_rate": 48000, "channels": 2, "samples": samples}));
+    }
+    Json(json!({"error": "lock failed"}))
+}
+
+async fn apu_state(State(state): State<ApiState>) -> impl IntoResponse {
+    if let Ok(emu) = state.emulator.lock() {
+        return Json(emu.get_apu_debug());
     }
     Json(json!({"error": "lock failed"}))
 }

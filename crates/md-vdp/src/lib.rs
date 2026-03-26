@@ -1,5 +1,11 @@
 ﻿use serde::{Deserialize, Serialize};
 
+/// Hardware color lookup tables (Exodus VDP reference)
+const NORMAL_COLOR: [u8; 8] = [0, 34, 68, 102, 136, 170, 204, 238];
+const SHADOW_COLOR: [u8; 8] = [0, 17, 34, 51, 68, 85, 102, 119];
+/// Highlight = Normal/2 + 128 (clamped to 255)
+const HIGHLIGHT_COLOR: [u8; 8] = [128, 145, 162, 179, 196, 213, 230, 247];
+
 pub const FRAME_WIDTH: usize = 320;
 pub const FRAME_HEIGHT: usize = 224;
 
@@ -31,6 +37,14 @@ pub struct SpriteDebugInfo {
     pub hflip: bool,
     pub vflip: bool,
     pub link: u8,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SpritePixel {
+    front_color_idx: u8,
+    front_priority: bool,
+    back_color_idx: u8,
+    back_priority: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,8 +125,16 @@ impl Vdp {
     // Register helpers
     fn scroll_a_addr(&self) -> usize { ((self.registers[2] as usize) & 0x38) << 10 }
     fn scroll_b_addr(&self) -> usize { ((self.registers[4] as usize) & 0x07) << 13 }
-    fn window_addr(&self) -> usize   { ((self.registers[3] as usize) & 0x3E) << 10 }
-    fn sprite_table_addr(&self) -> usize { ((self.registers[5] as usize) & 0x7F) << 9 }
+    fn window_addr(&self) -> usize {
+        // In H40 mode bit 1 is forced to 0 (mask 0x3C); in H32 use 0x3E
+        let mask = if self.h40_mode() { 0x3C } else { 0x3E };
+        ((self.registers[3] as usize) & mask) << 10
+    }
+    fn sprite_table_addr(&self) -> usize {
+        // In H40 mode bit 0 is forced to 0 (mask 0x7E); in H32 use 0x7F
+        let mask = if self.h40_mode() { 0x7E } else { 0x7F };
+        ((self.registers[5] as usize) & mask) << 9
+    }
     fn hscroll_addr(&self) -> usize  { ((self.registers[0x0D] as usize) & 0x3F) << 10 }
     fn bg_color_index(&self) -> u8   { self.registers[7] & 0x3F }
     fn hscroll_mode(&self) -> u8     { self.registers[0x0B] & 0x03 }
@@ -122,6 +144,11 @@ impl Vdp {
     fn hint_enabled(&self) -> bool   { (self.registers[0] & 0x10) != 0 }
     fn h40_mode(&self) -> bool       { (self.registers[0x0C] & 0x81) != 0 }
     fn interlace(&self) -> bool      { (self.registers[0x0C] & 0x02) != 0 }
+    fn interlace_double(&self) -> bool  { self.interlace() && (self.registers[0x0C] & 0x04) != 0 }
+    fn shadow_highlight_enabled(&self) -> bool { (self.registers[0x0C] & 0x08) != 0 }
+    /// Palette select bit (reg 1 bit 2). When cleared, only the lowest bit
+    /// of each color intensity has effect, selecting between half and minimum.
+    fn palette_select(&self) -> bool { (self.registers[1] & 0x04) != 0 }
 
     fn scroll_size(&self) -> (usize, usize) {
         let reg = self.registers[0x10];
@@ -134,17 +161,29 @@ impl Vdp {
         (w, h)
     }
 
-    fn scale3to8(v: u32) -> u32 { (v << 5) | (v << 2) | (v >> 1) }
-
-    fn cram_to_argb(&self, index: u8) -> u32 {
+    fn cram_color(&self, index: u8, shadow: bool, highlight: bool) -> u32 {
         let idx = (index as usize) * 2;
         if idx + 1 >= self.cram.len() { return 0xFF000000; }
         let word = ((self.cram[idx] as u16) << 8) | self.cram[idx + 1] as u16;
-        let b = ((word >> 9) & 0x07) as u32;
-        let g = ((word >> 5) & 0x07) as u32;
-        let r = ((word >> 1) & 0x07) as u32;
-        0xFF000000 | (Self::scale3to8(r) << 16) | (Self::scale3to8(g) << 8) | Self::scale3to8(b)
+        let mut b3 = ((word >> 9) & 0x07) as usize;
+        let mut g3 = ((word >> 5) & 0x07) as usize;
+        let mut r3 = ((word >> 1) & 0x07) as usize;
+        // Palette select bit (reg 1 bit 2): when cleared, only the lowest
+        // bit of each intensity value is effective, mapped to half intensity.
+        if !self.palette_select() {
+            r3 = (r3 & 0x01) << 2;
+            g3 = (g3 & 0x01) << 2;
+            b3 = (b3 & 0x01) << 2;
+        }
+        let table = if shadow == highlight { &NORMAL_COLOR } else if shadow { &SHADOW_COLOR } else { &HIGHLIGHT_COLOR };
+        0xFF000000 | ((table[r3] as u32) << 16) | ((table[g3] as u32) << 8) | table[b3] as u32
     }
+
+    fn cram_to_argb(&self, index: u8) -> u32 {
+        self.cram_color(index, false, false)
+    }
+
+    fn left_column_blank(&self) -> bool { (self.registers[0] & 0x20) != 0 }
 
     fn get_tile_pixel(&self, tile_addr: usize, px: usize, py: usize) -> u8 {
         let row_offset = tile_addr + py * 4;
@@ -154,22 +193,47 @@ impl Vdp {
         if (px & 1) == 0 { byte >> 4 } else { byte & 0x0F }
     }
 
+    /// Read VSRAM with Exodus-accurate boundary handling: addresses >= 0x50
+    /// return the ANDed result of the last two VSRAM entries.
+    fn read_vsram_word(&self, addr: usize) -> u16 {
+        if addr + 1 < 0x50 {
+            Self::read_vram_word(&self.vsram, addr)
+        } else {
+            let a = Self::read_vram_word(&self.vsram, 0x4C);
+            let b = Self::read_vram_word(&self.vsram, 0x4E);
+            a & b
+        }
+    }
+
     fn render_scroll_line(&self, plane_addr: usize, hscroll: i32, vscroll_full: i32, vsram_offset: usize, per_col_vscroll: bool, y: usize, line_buf: &mut [(u8, bool)]) {
         let (sw, sh) = self.scroll_size();
         let screen_w = if self.h40_mode() { 320 } else { 256 };
+        let interlace2 = self.interlace_double();
+        let rows_per_tile: usize = if interlace2 { 16 } else { 8 };
+        let effective_sh = if interlace2 { sh * 2 } else { sh };
 
         for x in 0..screen_w {
             // Per-2-column vscroll: each 16-pixel (2-cell) column uses its own VSRAM entry
-            let vscroll = if per_col_vscroll {
+            let vscroll_raw = if per_col_vscroll {
                 let col = x / 16;
-                Self::read_vram_word(&self.vsram, col * 4 + vsram_offset) as i32
+                self.read_vsram_word(col * 4 + vsram_offset) as i32
             } else {
                 vscroll_full
             };
+            // Mask vscroll to 10 bits (11 bits in interlace mode 2)
+            let vscroll_mask = if interlace2 { 0x7FF } else { 0x3FF };
+            let vscroll = vscroll_raw & vscroll_mask;
 
-            let scrolled_y = ((y as i32 + vscroll) as usize) % (sh * 8);
-            let tile_row = scrolled_y / 8;
-            let py = scrolled_y % 8;
+            // In interlace mode 2, effective row = row*2 + odd_frame
+            let effective_y = if interlace2 {
+                (y as i32) * 2 + (if (self.status & 0x0004) != 0 { 1 } else { 0 })
+            } else {
+                y as i32
+            };
+
+            let scrolled_y = ((effective_y + vscroll) as usize) % (effective_sh * 8);
+            let tile_row = scrolled_y / rows_per_tile;
+            let py = scrolled_y % rows_per_tile;
 
             let scrolled_x = ((x as i32 - hscroll) as usize) % (sw * 8);
             let tile_col = scrolled_x / 8;
@@ -186,8 +250,10 @@ impl Vdp {
             let vflip = (entry & 0x1000) != 0;
 
             let fx = if hflip { 7 - px } else { px };
-            let fy = if vflip { 7 - py } else { py };
-            let tile_addr = tile_index * 32;
+            let fy = if vflip { (rows_per_tile - 1) - py } else { py };
+            // In interlace mode 2, patterns are 8x16; tile size = 64 bytes
+            let bytes_per_tile = rows_per_tile * 4;
+            let tile_addr = tile_index * bytes_per_tile;
             let pixel = self.get_tile_pixel(tile_addr, fx, fy);
 
             if x < screen_w {
@@ -197,13 +263,39 @@ impl Vdp {
         }
     }
 
-    fn render_sprites_line(&self, y: usize, line_buf: &mut [(u8, bool)]) {
+    fn compose_color_idx(bg_idx: u8, plane_b: (u8, bool), plane_a: (u8, bool), sprite: (u8, bool)) -> u8 {
+        let (b_idx, b_pri) = plane_b;
+        let (a_idx, a_pri) = plane_a;
+        let (s_idx, s_pri) = sprite;
+
+        if s_pri && s_idx != 0 {
+            s_idx
+        } else if a_pri && a_idx != 0 {
+            a_idx
+        } else if b_pri && b_idx != 0 {
+            b_idx
+        } else if s_idx != 0 {
+            s_idx
+        } else if a_idx != 0 {
+            a_idx
+        } else if b_idx != 0 {
+            b_idx
+        } else {
+            bg_idx
+        }
+    }
+
+    fn render_sprites_line(&mut self, y: usize, line_buf: &mut [SpritePixel]) {
         let sat_base = self.sprite_table_addr();
         let screen_w = if self.h40_mode() { 320usize } else { 256 };
         let max_sprites = if self.h40_mode() { 80 } else { 64 };
         let max_per_line = if self.h40_mode() { 20 } else { 16 };
+        let max_dots: usize = if self.h40_mode() { 320 } else { 256 };
+        let interlace2 = self.interlace_double();
+        let sprite_v_offset: i32 = if interlace2 { 256 } else { 128 };
 
         let mut sprites_on_line = 0;
+        let mut dots_rendered: usize = 0;
         let mut link = 0u8;
 
         for _ in 0..max_sprites {
@@ -211,11 +303,12 @@ impl Vdp {
             if entry_base + 7 >= self.vram.len() { break; }
 
             let y_pos = (((self.vram[entry_base] as u16) << 8) | self.vram[entry_base + 1] as u16) & 0x03FF;
-            let sprite_y = y_pos as i32 - 128;
+            let sprite_y = y_pos as i32 - sprite_v_offset;
             let size_byte = self.vram[entry_base + 2];
             let h_cells = ((size_byte >> 2) & 0x03) as i32 + 1;
             let v_cells = (size_byte & 0x03) as i32 + 1;
-            let sprite_h = v_cells * 8;
+            let rows_per_tile_s: i32 = if interlace2 { 16 } else { 8 };
+            let sprite_h = v_cells * rows_per_tile_s;
 
             let next_link = self.vram[entry_base + 3] & 0x7F;
 
@@ -232,27 +325,64 @@ impl Vdp {
             let iy = y as i32;
             if iy >= sprite_y && iy < sprite_y + sprite_h {
                 sprites_on_line += 1;
-                if sprites_on_line > max_per_line { break; }
+                if sprites_on_line > max_per_line {
+                    // Set sprite overflow flag (status bit 6)
+                    self.status |= 0x0040;
+                    break;
+                }
 
-                let py = if vflip { (sprite_h - 1 - (iy - sprite_y)) as usize } else { (iy - sprite_y) as usize };
-                let cell_row = py / 8;
-                let row_in_cell = py % 8;
+                // Sprite masking: x_pos == 0 (raw value, not adjusted) stops
+                // rendering remaining sprites on this line, but only if at
+                // least one other sprite has already been found on this line
+                if x_pos == 0 && sprites_on_line >= 2 {
+                    break;
+                }
+
+                // In interlace mode 2, effective sprite row = row*2 + odd_frame
+                let sprite_row = if interlace2 {
+                    let base_row = (iy - sprite_y) * 2 + (if (self.status & 0x0004) != 0 { 1 } else { 0 });
+                    if vflip { sprite_h * 2 - 1 - base_row } else { base_row }
+                } else {
+                    if vflip { sprite_h - 1 - (iy - sprite_y) } else { iy - sprite_y }
+                };
+                let py = sprite_row as usize;
+                let rows_per_tile_u = rows_per_tile_s as usize;
+                let cell_row = py / rows_per_tile_u;
+                let row_in_cell = py % rows_per_tile_u;
+
+                // Check dot overflow before rendering this sprite's pixels
+                if dots_rendered >= max_dots {
+                    self.status |= 0x0040; // sprite overflow flag
+                    break;
+                }
 
                 for cx in 0..h_cells {
                     let cell_col = if hflip { (h_cells - 1 - cx) as usize } else { cx as usize };
                     let tile = tile_index + cell_col * v_cells as usize + cell_row;
-                    let tile_addr = tile * 32;
+                    let bytes_per_tile_s = rows_per_tile_u * 4;
+                    let tile_addr = tile * bytes_per_tile_s;
 
                     for px_in_cell in 0..8 {
                         let fx = if hflip { 7 - px_in_cell } else { px_in_cell };
                         let pixel = self.get_tile_pixel(tile_addr, fx, row_in_cell);
                         let screen_x = sprite_x + cx * 8 + px_in_cell as i32;
 
+                        dots_rendered += 1;
                         if pixel != 0 && screen_x >= 0 && (screen_x as usize) < screen_w {
                             let sx = screen_x as usize;
-                            let (existing, _existing_pri) = line_buf[sx];
-                            if existing == 0 {
-                                line_buf[sx] = (palette * 16 + pixel, priority);
+                            let color_idx = palette * 16 + pixel;
+                            let cell = &mut line_buf[sx];
+                            if cell.front_color_idx == 0 {
+                                cell.front_color_idx = color_idx;
+                                cell.front_priority = priority;
+                            } else {
+                                if cell.back_color_idx == 0 {
+                                    cell.back_color_idx = color_idx;
+                                    cell.back_priority = priority;
+                                }
+                                // Sprite collision: two sprites have non-transparent
+                                // pixels at the same screen position
+                                self.status |= 0x0020;
                             }
                         }
                     }
@@ -323,9 +453,6 @@ impl Vdp {
         let win_h_cell = (win_h_pos & 0x1F) as usize * 2; // 2-cell units
         let win_down  = (win_v_pos & 0x80) != 0; // 1=window is below the split
         let win_v_cell = (win_v_pos & 0x1F) as usize; // cell rows
-        let win_h_pixel = win_h_cell * 8;
-        let cells_w = if self.h40_mode() { 40 } else { 32 };
-
         // Determine if window covers this scanline vertically
         let y_cell = y / 8;
         let win_covers_full_line = if win_v_cell == 0 {
@@ -356,31 +483,32 @@ impl Vdp {
 
         // Hscroll
         let hs_addr = self.hscroll_addr();
+        // Hscroll modes: 0=full screen, 1=prohibited (invalid, treat as full screen),
+        // 2=per-tile (8-pixel row), 3=per-line
         let (hscroll_a, hscroll_b) = match self.hscroll_mode() {
-            0 => {
-                let a = Self::read_vram_word(&self.vram, hs_addr) as i16 as i32;
-                let b = Self::read_vram_word(&self.vram, hs_addr + 2) as i16 as i32;
+            0 | 1 => {
+                let a = (Self::read_vram_word(&self.vram, hs_addr) & 0x03FF) as i16 as i32;
+                let b = (Self::read_vram_word(&self.vram, hs_addr + 2) & 0x03FF) as i16 as i32;
                 (a, b)
             }
             2 => {
-                let row = (y / 8) * 4;
-                let a = Self::read_vram_word(&self.vram, hs_addr + row) as i16 as i32;
-                let b = Self::read_vram_word(&self.vram, hs_addr + row + 2) as i16 as i32;
+                let row = (y & !7) * 4;
+                let a = (Self::read_vram_word(&self.vram, hs_addr + row) & 0x03FF) as i16 as i32;
+                let b = (Self::read_vram_word(&self.vram, hs_addr + row + 2) & 0x03FF) as i16 as i32;
                 (a, b)
             }
-            3 => {
+            _ => {
                 let row = y * 4;
-                let a = Self::read_vram_word(&self.vram, hs_addr + row) as i16 as i32;
-                let b = Self::read_vram_word(&self.vram, hs_addr + row + 2) as i16 as i32;
+                let a = (Self::read_vram_word(&self.vram, hs_addr + row) & 0x03FF) as i16 as i32;
+                let b = (Self::read_vram_word(&self.vram, hs_addr + row + 2) & 0x03FF) as i16 as i32;
                 (a, b)
-            }
-            _ => (0, 0),
+            },
         };
 
         // Vscroll
         let per_col_vscroll = self.vscroll_mode() == 1;
-        let vscroll_a = Self::read_vram_word(&self.vsram, 0) as i32;
-        let vscroll_b = Self::read_vram_word(&self.vsram, 2) as i32;
+        let vscroll_a = self.read_vsram_word(0) as i32;
+        let vscroll_b = self.read_vsram_word(2) as i32;
 
         // Debug: record VSRAM[0] for this scanline
         if y < self.debug_scanline_vsram_a.len() {
@@ -389,14 +517,14 @@ impl Vdp {
 
         let mut plane_b_buf = vec![(0u8, false); screen_w];
         let mut plane_a_buf = vec![(0u8, false); screen_w];
-        let mut sprite_buf  = vec![(0u8, false); screen_w];
+        let mut sprite_buf = vec![SpritePixel::default(); screen_w];
 
         self.render_scroll_line(self.scroll_b_addr(), hscroll_b, vscroll_b, 2, per_col_vscroll, y, &mut plane_b_buf);
 
         // Render Plane A and Window plane
         // Window plane has no scroll; it uses a fixed nametable layout
         let win_base = self.window_addr();
-        let has_any_window = win_h_cell > 0 || win_covers_full_line;
+        let has_any_window = (0..screen_w).any(win_active);
 
         if has_any_window {
             // Render scroll A only for non-window pixels
@@ -432,35 +560,109 @@ impl Vdp {
 
         self.render_sprites_line(y, &mut sprite_buf);
 
+        let sh_mode = self.shadow_highlight_enabled();
+
         // Priority compositing
         for x in 0..screen_w.min(FRAME_WIDTH) {
             let (b_idx, b_pri) = plane_b_buf[x];
             let (a_idx, a_pri) = plane_a_buf[x];
-            let (s_idx, s_pri) = sprite_buf[x];
+            let sprite = sprite_buf[x];
+            let front_sprite = (sprite.front_color_idx, sprite.front_priority);
 
-            let color_idx = if s_pri && s_idx != 0 {
-                s_idx
-            } else if a_pri && a_idx != 0 {
-                a_idx
-            } else if b_pri && b_idx != 0 {
-                b_idx
-            } else if s_idx != 0 {
-                s_idx
-            } else if a_idx != 0 {
-                a_idx
-            } else if b_idx != 0 {
-                b_idx
+            if sh_mode {
+                let front_ci = sprite.front_color_idx;
+                let is_shadow_op = (front_ci & 0x3F) == 0x3F; // palette 3, index 15
+                let is_highlight_op = (front_ci & 0x3F) == 0x3E; // palette 3, index 14
+                let sprite_is_normal_intensity = (front_ci & 0x0F) == 0x0E && !is_highlight_op;
+
+                let found_sprite = front_sprite.0 != 0;
+                let found_a = a_idx != 0;
+                let found_b = b_idx != 0;
+
+                // Exodus lookup-table logic, expanded directly.
+                let (layer_idx, color_idx, mut shadow, mut highlight);
+
+                if found_sprite && front_sprite.1 && !is_shadow_op && !is_highlight_op {
+                    layer_idx = 0;
+                    color_idx = front_sprite.0;
+                    shadow = false;
+                    highlight = false;
+                } else if found_a && a_pri {
+                    layer_idx = 1;
+                    color_idx = a_idx;
+                    shadow = false;
+                    highlight = false;
+                    if found_sprite && front_sprite.1 && is_shadow_op { shadow = true; }
+                    else if found_sprite && front_sprite.1 && is_highlight_op { highlight = true; }
+                } else if found_b && b_pri {
+                    layer_idx = 2;
+                    color_idx = b_idx;
+                    shadow = false;
+                    highlight = false;
+                    if found_sprite && front_sprite.1 && is_shadow_op { shadow = true; }
+                    else if found_sprite && front_sprite.1 && is_highlight_op { highlight = true; }
+                } else if found_sprite && !is_shadow_op && !is_highlight_op {
+                    layer_idx = 0;
+                    color_idx = front_sprite.0;
+                    shadow = !a_pri && !b_pri;
+                    highlight = false;
+                } else if found_a {
+                    layer_idx = 1;
+                    color_idx = a_idx;
+                    shadow = !a_pri && !b_pri;
+                    highlight = false;
+                    if is_shadow_op { shadow = true; }
+                    if is_highlight_op { highlight = true; }
+                } else if found_b {
+                    layer_idx = 2;
+                    color_idx = b_idx;
+                    shadow = !a_pri && !b_pri;
+                    highlight = false;
+                    if is_shadow_op { shadow = true; }
+                    if is_highlight_op { highlight = true; }
+                } else {
+                    layer_idx = 3;
+                    color_idx = bg_idx;
+                    shadow = !a_pri && !b_pri;
+                    highlight = false;
+                    if is_shadow_op { shadow = true; }
+                    if is_highlight_op { highlight = true; }
+                }
+
+                // Sprite palette index 14 on palette rows other than row 3 stays normal.
+                if layer_idx == 0 && sprite_is_normal_intensity {
+                    shadow = false;
+                    highlight = false;
+                }
+
+                // Shadow and highlight cancel each other out (Exodus-verified)
+                if shadow && highlight {
+                    shadow = false;
+                    highlight = false;
+                }
+
+                let final_idx = if color_idx != 0 { color_idx } else { bg_idx };
+                self.framebuffer[y * FRAME_WIDTH + x] = self.cram_color(final_idx, shadow, highlight);
             } else {
-                bg_idx
-            };
+                // Normal compositing (no shadow/highlight)
+                let color_idx = Self::compose_color_idx(bg_idx, (b_idx, b_pri), (a_idx, a_pri), front_sprite);
 
-            let c = if color_idx != 0 { self.cram_to_argb(color_idx) } else { bg_color };
-            self.framebuffer[y * FRAME_WIDTH + x] = c;
+                let c = if color_idx != 0 { self.cram_to_argb(color_idx) } else { bg_color };
+                self.framebuffer[y * FRAME_WIDTH + x] = c;
+            }
         }
 
         // Fill remaining pixels if H32 mode
         for x in screen_w..FRAME_WIDTH {
             self.framebuffer[y * FRAME_WIDTH + x] = bg_color;
+        }
+
+        // Left column blanking: Register 0 bit 5 blanks leftmost 8 pixels
+        if self.left_column_blank() {
+            let blank = self.cram_to_argb(bg_idx);
+            for x in 0..8.min(FRAME_WIDTH) {
+                self.framebuffer[y * FRAME_WIDTH + x] = blank;
+            }
         }
     }
 
@@ -476,8 +678,8 @@ impl Vdp {
         // Reading status auto-acknowledges pending interrupt flags
         self.vblank_flag = false;
         self.hblank_flag = false;
-        // Clear F flag (VInt pending) from status
-        self.status &= !0x0080;
+        // Clear F flag (VInt pending), sprite collision (bit 5), and sprite overflow (bit 6)
+        self.status &= !(0x0080 | 0x0040 | 0x0020);
         s
     }
 

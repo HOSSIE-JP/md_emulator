@@ -98,6 +98,12 @@ ROMロード状態と実行進行をまとめて確認できます。
 `Run Preview` を押すとVBlank同期ベース（60fps目標）で `step + video/frame取得` を繰り返し、Canvasにフレームが描画されます。
 `Toggle API Log` でサーバーログをON/OFFできます。
 
+### オーディオ再生
+
+`Unmute` ボタンをクリックすると、Web Audio API経由でゲーム音声の再生が開始されます（ブラウザのユーザージェスチャー要件に対応）。
+`Run Preview` 中に `Unmute` を押すとリアルタイムで音声が再生されます。音声はAPIサーバーから48kHzステレオサンプルを取得して再生します。
+再度ボタン（`Mute`）を押すとミュートします。
+
 ### VDP デバッグビューア
 
 `http://127.0.0.1:5500/debug.html` を開くと、VDPの内部状態を視覚的に確認できます。
@@ -107,6 +113,13 @@ ROMロード状態と実行進行をまとめて確認できます。
 - **CRAM**: 64色パレットのカラーグリッド（4パレット×16色）
 - **Sprites**: スプライト属性テーブル（座標・サイズ・タイル・反転・優先度）
 - **Frame**: 合成済みフレーム
+
+コピー支援:
+
+- `Copy Snapshot`: レジスタ、CRAM、スプライト、各画像のハッシュ付き要約をまとめてクリップボードへコピー
+- `Copy Active Tab`: 現在タブの生JSONをコピー
+- 各パネルの `Copy JSON`: 対象セクションだけをコピー
+- CRAMセルをクリック: その色だけをコピー
 
 `Refresh All` で全データ取得、`Auto Refresh` で500ms間隔の自動更新が可能です。
 
@@ -118,7 +131,26 @@ ROMロード状態と実行進行をまとめて確認できます。
 - `A`: `U`
 - `Start`: `Enter`
 
-## 4) JSON-RPC風APIで試す（AIエージェント向け）
+## 4) WASM 直実行プレイヤーで試す
+
+API を介さずブラウザ内で直接実行したい場合は、先に WASM バンドルを生成します。
+
+```powershell
+cargo install wasm-pack
+wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg
+python -m http.server 5500 --directory frontend
+```
+
+その後、`http://127.0.0.1:5500/wasm.html` を開きます。
+
+- `Load ROM`: ローカル ROM ファイルを読み込み
+- `Run` / `Pause`: 60fps 目標で直接実行
+- `Step Frame`: 1フレームずつ実行
+- `Unmute` / `Mute`: ブラウザ内で音声再生
+
+このページは描画・入力・音声をすべて md-wasm から処理するため、REST API 経由の遅延や同期ずれを切り分ける用途に使えます。
+
+## 5) JSON-RPC風APIで試す（AIエージェント向け）
 
 ```powershell
 Invoke-RestMethod -Method Post `
@@ -136,7 +168,7 @@ Invoke-RestMethod -Method Post `
   -Body '{"jsonrpc":"2.0","id":2,"method":"load_rom_path","params":{"path":"D:/homebrew/rom.bin"}}'
 ```
 
-## 5) テストで動作確認
+## 6) テストで動作確認
 
 ```powershell
 cargo test --workspace
