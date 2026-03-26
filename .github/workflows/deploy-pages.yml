@@ -46,31 +46,13 @@ jobs:
       - name: Optimize wasm binary
         run: wasm-opt -Oz frontend/pkg/md_wasm_bg.wasm -o frontend/pkg/md_wasm_bg.wasm
 
-      - name: Bundle ROM files from repository
-        run: |
-          mkdir -p frontend/roms
-          find roms -maxdepth 1 -type f \( -name '*.bin' -o -name '*.md' -o -name '*.gen' -o -name '*.smd' -o -name '*.sms' -o -name '*.zip' \) -exec cp {} frontend/roms/ \;
-
       - name: Generate bundled ROM index
         run: |
-          mkdir -p frontend/roms
-          {
-            echo '{"files":['
-            first=1
-            for f in frontend/roms/*; do
-              [ -f "$f" ] || continue
-              name=$(basename "$f")
-              if [ "$name" = "index.json" ]; then
-                continue
-              fi
-              if [ $first -eq 0 ]; then
-                echo ','
-              fi
-              first=0
-              printf '"%s"' "$name"
-            done
-            echo ']}'
-          } | tr -d '\n' > frontend/roms/index.json
+          python3 -c "
+          import glob, json, os
+          files = sorted([os.path.basename(p) for p in glob.glob('frontend/roms/*') if os.path.isfile(p) and os.path.basename(p) != 'index.json'])
+          open('frontend/roms/index.json', 'w', encoding='utf-8').write(json.dumps({'files': files}, ensure_ascii=False, separators=(',', ':')))
+          "
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
