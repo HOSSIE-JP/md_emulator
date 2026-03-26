@@ -35,7 +35,6 @@ yarn-error.log*
 .env.*.local
 
 # Editor directories and files
-.vscode/
 .idea/
 *.iml
 *.ipr
