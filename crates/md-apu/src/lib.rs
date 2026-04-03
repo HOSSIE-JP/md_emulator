@@ -874,9 +874,9 @@ impl Apu {
         }
         self.ym2612.eg_timer = if update_eg { 2 } else { self.ym2612.eg_timer - 1 };
 
-        // Timer A: one FM output = 24 FM internal clocks
+        // Timer A: increments once per FM output clock (timerAClockDivider=1)
         if self.ym2612.get_timer_a_load() {
-            self.ym2612.timer_a_counter += 24;
+            self.ym2612.timer_a_counter += 1;
             let period = 1024u32.saturating_sub(self.ym2612.get_timer_a_value()).max(1);
             while self.ym2612.timer_a_counter >= period {
                 self.ym2612.timer_a_counter -= period;
@@ -885,9 +885,9 @@ impl Apu {
                 }
             }
         }
-        // Timer B: one FM output = 24 FM internal clocks, timer B divider = 16
+        // Timer B: increments once per FM output clock, with ×16 prescaler (timerBClockDivider=16)
         if self.ym2612.get_timer_b_load() {
-            self.ym2612.timer_b_subcounter += 24;
+            self.ym2612.timer_b_subcounter += 1;
             let period = (16u32 * 256u32.saturating_sub(self.ym2612.get_timer_b_value())).max(1);
             while self.ym2612.timer_b_subcounter >= period {
                 self.ym2612.timer_b_subcounter -= period;

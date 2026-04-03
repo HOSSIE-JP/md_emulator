@@ -88,7 +88,13 @@
     {
       "label": "WASM: Build Package (dev)",
       "type": "shell",
-      "command": "wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg",
+      "command": "wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg; $ver = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); (Get-Content frontend/sw.template.js) -replace '__BUILD_VERSION__', $ver | Set-Content frontend/sw.js; Write-Host \"\"; Write-Host \"✅ WASM ビルド完了 (dev) | バージョン: $ver\"",
+      "osx": {
+        "command": "wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg && VER=$(date +%s) && sed \"s/__BUILD_VERSION__/$VER/g\" frontend/sw.template.js > frontend/sw.js && echo \"\" && echo \"✅ WASM ビルド完了 (dev) | バージョン: $VER\""
+      },
+      "linux": {
+        "command": "wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg && VER=$(date +%s) && sed \"s/__BUILD_VERSION__/$VER/g\" frontend/sw.template.js > frontend/sw.js && echo \"\" && echo \"✅ WASM ビルド完了 (dev) | バージョン: $VER\""
+      },
       "presentation": {
         "reveal": "always",
         "panel": "dedicated",
@@ -99,7 +105,13 @@
     {
       "label": "WASM: Build Package (release)",
       "type": "shell",
-      "command": "wasm-pack build crates/md-wasm --target web --release --out-dir ../../frontend/pkg",
+      "command": "wasm-pack build crates/md-wasm --target web --release --out-dir ../../frontend/pkg; $ver = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); (Get-Content frontend/sw.template.js) -replace '__BUILD_VERSION__', $ver | Set-Content frontend/sw.js; Write-Host \"\"; Write-Host \"✅ WASM ビルド完了 (release) | バージョン: $ver\"",
+      "osx": {
+        "command": "wasm-pack build crates/md-wasm --target web --release --out-dir ../../frontend/pkg && VER=$(date +%s) && sed \"s/__BUILD_VERSION__/$VER/g\" frontend/sw.template.js > frontend/sw.js && echo \"\" && echo \"✅ WASM ビルド完了 (release) | バージョン: $VER\""
+      },
+      "linux": {
+        "command": "wasm-pack build crates/md-wasm --target web --release --out-dir ../../frontend/pkg && VER=$(date +%s) && sed \"s/__BUILD_VERSION__/$VER/g\" frontend/sw.template.js > frontend/sw.js && echo \"\" && echo \"✅ WASM ビルド完了 (release) | バージョン: $VER\""
+      },
       "presentation": {
         "reveal": "always",
         "panel": "dedicated",

@@ -43,7 +43,8 @@ jobs:
       - name: Inject build version into Service Worker
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
-          sed -i "s/__BUILD_VERSION__/${SHORT_SHA}/g" frontend/sw.js
+          sed "s/__BUILD_VERSION__/${SHORT_SHA}/g" frontend/sw.template.js > frontend/sw.js
+          echo "✅ SW 生成完了 | バージョン: ${SHORT_SHA}"
 
       - name: Generate bundled ROM index
         run: |
