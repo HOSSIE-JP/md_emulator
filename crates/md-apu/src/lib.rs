@@ -313,6 +313,10 @@ pub struct Apu {
     pub cycle_accumulator: u64,
     /// FM internal tick accumulator (ticks every 144 master clocks)
     pub fm_tick_accumulator: u64,
+    /// Timer-only tick accumulator for lightweight Z80-interleaved timer advance
+    pub timer_only_accumulator: u64,
+    /// FM ticks already advanced by advance_timers() (to avoid double-counting)
+    pub timer_preadvanced_ticks: u64,
     /// Last computed FM output (sample-and-hold between ticks)
     pub last_fm_left: f32,
     pub last_fm_right: f32,
@@ -334,6 +338,12 @@ pub struct Apu {
     /// Debug: total output samples pushed
     #[serde(skip)]
     pub debug_output_total: u64,
+    /// Debug: Timer A overflow count
+    #[serde(skip)]
+    pub debug_timer_a_overflow_count: u64,
+    /// Debug: Timer A flag clear count (reg27 bit4 writes)
+    #[serde(skip)]
+    pub debug_timer_a_clear_count: u64,
 }
 
 impl Default for Apu {
@@ -345,6 +355,8 @@ impl Default for Apu {
             psg: Psg::default(),
             cycle_accumulator: 0,
             fm_tick_accumulator: 0,
+            timer_only_accumulator: 0,
+            timer_preadvanced_ticks: 0,
             last_fm_left: 0.0,
             last_fm_right: 0.0,
             debug_dac_samples: 0,
@@ -353,6 +365,8 @@ impl Default for Apu {
             debug_fm_ticks: 0,
             debug_output_nonzero: 0,
             debug_output_total: 0,
+            debug_timer_a_overflow_count: 0,
+            debug_timer_a_clear_count: 0,
         }
     }
 }
@@ -624,6 +638,43 @@ impl Apu {
         }
     }
 
+    /// Lightweight timer-only advance for use during Z80 interleaving.
+    /// Advances timer counters without doing FM synthesis or audio output.
+    /// This keeps Timer A/B status fresh for Z80 polling.
+    pub fn advance_timers(&mut self, cycles: u32) {
+        if cycles == 0 {
+            return;
+        }
+        self.timer_only_accumulator += cycles as u64;
+        while self.timer_only_accumulator >= 144 {
+            self.timer_only_accumulator -= 144;
+            self.timer_preadvanced_ticks += 1;
+            // Timer A
+            if self.ym2612.get_timer_a_load() {
+                self.ym2612.timer_a_counter += 1;
+                let period = 1024u32.saturating_sub(self.ym2612.get_timer_a_value()).max(1);
+                while self.ym2612.timer_a_counter >= period {
+                    self.ym2612.timer_a_counter -= period;
+                    if self.ym2612.get_timer_a_enabled() {
+                        self.ym2612.status |= 0x01;
+                        self.debug_timer_a_overflow_count += 1;
+                    }
+                }
+            }
+            // Timer B
+            if self.ym2612.get_timer_b_load() {
+                self.ym2612.timer_b_subcounter += 1;
+                let period = (16u32 * 256u32.saturating_sub(self.ym2612.get_timer_b_value())).max(1);
+                while self.ym2612.timer_b_subcounter >= period {
+                    self.ym2612.timer_b_subcounter -= period;
+                    if self.ym2612.get_timer_b_enabled() {
+                        self.ym2612.status |= 0x02;
+                    }
+                }
+            }
+        }
+    }
+
     pub fn write_ym2612(&mut self, port: u8, address: u8, data: u8) {
         // Debug logging
         if self.ym2612.write_log.len() >= 4096 {
@@ -791,6 +842,7 @@ impl Apu {
             // Timer A reset: clear overflow flag
             if (data & 0x10) != 0 {
                 self.ym2612.status &= !0x01u8;
+                self.debug_timer_a_clear_count += 1;
             }
             // Timer B reset: clear overflow flag
             if (data & 0x20) != 0 {
@@ -874,24 +926,30 @@ impl Apu {
         self.ym2612.eg_timer = if update_eg { 2 } else { self.ym2612.eg_timer - 1 };
 
         // Timer A: increments once per FM output clock (timerAClockDivider=1)
-        if self.ym2612.get_timer_a_load() {
-            self.ym2612.timer_a_counter += 1;
-            let period = 1024u32.saturating_sub(self.ym2612.get_timer_a_value()).max(1);
-            while self.ym2612.timer_a_counter >= period {
-                self.ym2612.timer_a_counter -= period;
-                if self.ym2612.get_timer_a_enabled() {
-                    self.ym2612.status |= 0x01;
+        // Skip if this tick was already advanced by advance_timers()
+        if self.timer_preadvanced_ticks > 0 {
+            self.timer_preadvanced_ticks -= 1;
+        } else {
+            if self.ym2612.get_timer_a_load() {
+                self.ym2612.timer_a_counter += 1;
+                let period = 1024u32.saturating_sub(self.ym2612.get_timer_a_value()).max(1);
+                while self.ym2612.timer_a_counter >= period {
+                    self.ym2612.timer_a_counter -= period;
+                    if self.ym2612.get_timer_a_enabled() {
+                        self.ym2612.status |= 0x01;
+                        self.debug_timer_a_overflow_count += 1;
+                    }
                 }
             }
-        }
-        // Timer B: increments once per FM output clock, with ×16 prescaler (timerBClockDivider=16)
-        if self.ym2612.get_timer_b_load() {
-            self.ym2612.timer_b_subcounter += 1;
-            let period = (16u32 * 256u32.saturating_sub(self.ym2612.get_timer_b_value())).max(1);
-            while self.ym2612.timer_b_subcounter >= period {
-                self.ym2612.timer_b_subcounter -= period;
-                if self.ym2612.get_timer_b_enabled() {
-                    self.ym2612.status |= 0x02;
+            // Timer B: increments once per FM output clock, with ×16 prescaler (timerBClockDivider=16)
+            if self.ym2612.get_timer_b_load() {
+                self.ym2612.timer_b_subcounter += 1;
+                let period = (16u32 * 256u32.saturating_sub(self.ym2612.get_timer_b_value())).max(1);
+                while self.ym2612.timer_b_subcounter >= period {
+                    self.ym2612.timer_b_subcounter -= period;
+                    if self.ym2612.get_timer_b_enabled() {
+                        self.ym2612.status |= 0x02;
+                    }
                 }
             }
         }
@@ -1528,5 +1586,47 @@ mod tests {
         assert!(apu.ym2612.channels[0].operators[0].attenuation < MAX_ATTENUATION,
             "Attack curve should progress from max attenuation, got {}",
             apu.ym2612.channels[0].operators[0].attenuation);
+    }
+
+    #[test]
+    fn fm_produces_nonzero_output_with_instant_attack() {
+        let mut apu = Apu::default();
+        // Set frequency for channel 0 (A4 = 440Hz approx)
+        apu.write_ym2612(0, 0xA4, 0x22); // block=4
+        apu.write_ym2612(0, 0xA0, 0x69); // fnum
+        // Set all 4 operators with instant attack (AR=31), TL=0
+        for op_slot in [0x00, 0x08, 0x04, 0x0C] {
+            apu.write_ym2612(0, 0x30 + op_slot, 0x01); // DT=0, MUL=1
+            apu.write_ym2612(0, 0x40 + op_slot, 0x00); // TL=0
+            apu.write_ym2612(0, 0x50 + op_slot, 0x1F); // KS=0, AR=31 (max)
+            apu.write_ym2612(0, 0x60 + op_slot, 0x00); // D1R=0
+            apu.write_ym2612(0, 0x70 + op_slot, 0x00); // D2R=0
+            apu.write_ym2612(0, 0x80 + op_slot, 0x0F); // SL=0, RR=max
+        }
+        // Algorithm 7 (all carriers), panning L+R
+        apu.write_ym2612(0, 0xB0, 0x07); // FB=0, ALG=7
+        apu.write_ym2612(0, 0xB4, 0xC0); // Pan L+R
+
+        // Key-on all 4 operators on channel 0
+        apu.write_ym2612(0, 0x28, 0xF0);
+
+        // Verify key-on and instant attack
+        for op in 0..4 {
+            assert!(apu.ym2612.channels[0].operators[op].key_on,
+                "Operator {} should be key-on", op);
+            assert_eq!(apu.ym2612.channels[0].operators[op].attenuation, 0,
+                "Operator {} should have 0 attenuation (instant attack)", op);
+        }
+
+        // Run FM synthesis
+        apu.step_cycles(10_000);
+
+        // Check that some non-zero output was produced
+        let has_nonzero = apu.audio_buffer.iter().any(|s| s.abs() > 1.0e-6);
+        assert!(has_nonzero,
+            "FM should produce non-zero output with instant attack, TL=0, ALG=7. \
+             fm_nonzero={}, output_nonzero={}, fm_ticks={}, buffer_len={}",
+            apu.debug_fm_nonzero, apu.debug_output_nonzero,
+            apu.debug_fm_ticks, apu.audio_buffer.len());
     }
 }

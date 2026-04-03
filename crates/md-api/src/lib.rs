@@ -127,11 +127,11 @@ pub fn router(emulator: Arc<Mutex<Emulator>>) -> Router {
         .route("/api/v1/emulator/load-state", post(load_state))
         .route("/api/v1/rom/info", get(rom_info))
         .route("/api/v1/cpu/state", get(cpu_state))
-        .route("/api/v1/cpu/memory", get(memory))
+        .route("/api/v1/cpu/memory", get(memory).post(write_memory))
         .route("/api/v1/cpu/trace", get(cpu_trace))
         .route("/api/v1/video/frame", get(video_frame))
         .route("/api/v1/vdp/cram", get(vdp_cram))
-        .route("/api/v1/vdp/registers", get(vdp_registers))
+        .route("/api/v1/vdp/registers", get(vdp_registers).post(set_vdp_register))
         .route("/api/v1/vdp/vram", get(vdp_vram))
         .route("/api/v1/vdp/plane", get(vdp_plane))
         .route("/api/v1/vdp/tiles", get(vdp_tiles))
@@ -299,6 +299,26 @@ async fn memory(State(state): State<ApiState>, Query(query): Query<MemoryQuery>)
     Json(serde_json::json!({"error": "lock failed"}))
 }
 
+async fn write_memory(
+    State(state): State<ApiState>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let addr = body["addr"].as_u64().unwrap_or(0) as u32;
+    let data: Vec<u8> = body["data"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_u64().map(|n| n as u8)).collect())
+        .unwrap_or_default();
+    log_if_enabled(
+        &state,
+        format!("POST /api/v1/cpu/memory addr=0x{:X} len={}", addr, data.len()),
+    );
+    if let Ok(mut emu) = state.emulator.lock() {
+        emu.set_memory(addr, &data);
+        return Json(serde_json::json!({"ok": true, "addr": addr, "len": data.len()}));
+    }
+    Json(serde_json::json!({"error": "lock failed"}))
+}
+
 async fn rom_info(State(state): State<ApiState>) -> impl IntoResponse {
     log_if_enabled(&state, "GET /api/v1/rom/info");
     if let Ok(emu) = state.emulator.lock() {
@@ -352,6 +372,19 @@ async fn vdp_registers(State(state): State<ApiState>) -> impl IntoResponse {
             "hint_delivered": emu.hint_delivered_count,
             "vint_delivered": emu.vint_delivered_count,
         }));
+    }
+    Json(json!({"error": "lock failed"}))
+}
+
+async fn set_vdp_register(
+    State(state): State<ApiState>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let reg = body["reg"].as_u64().unwrap_or(0) as u8;
+    let value = body["value"].as_u64().unwrap_or(0) as u8;
+    if let Ok(mut emu) = state.emulator.lock() {
+        emu.set_vdp_register(reg, value);
+        return Json(json!({"ok": true, "reg": reg, "value": value}));
     }
     Json(json!({"error": "lock failed"}))
 }

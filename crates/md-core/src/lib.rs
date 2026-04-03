@@ -57,7 +57,6 @@ pub struct Emulator {
     vdp: Vdp,
     apu: Apu,
     bus: SystemBus,
-    z80_bank_68k_addr: u32,
     breakpoints: HashSet<u32>,
     trace: VecDeque<InstructionTrace>,
     #[serde(skip)]
@@ -83,7 +82,6 @@ impl Default for Emulator {
             vdp: Vdp::default(),
             apu: Apu::default(),
             bus: SystemBus::default(),
-            z80_bank_68k_addr: 0,
             breakpoints: HashSet::new(),
             trace: VecDeque::with_capacity(512),
             z80_trace_ring: VecDeque::with_capacity(Z80_TRACE_RING_CAPACITY),
@@ -135,7 +133,6 @@ impl Emulator {
         self.z80.reset();
         self.vdp.reset();
         self.apu.reset();
-        self.z80_bank_68k_addr = 0;
         self.paused = false;
         self.trace.clear();
         self.z80_trace_ring.clear();
@@ -201,6 +198,16 @@ impl Emulator {
 
     pub fn get_memory(&self, address: u32, length: usize) -> Vec<u8> {
         self.bus.get_memory(address, length)
+    }
+
+    pub fn set_memory(&mut self, address: u32, data: &[u8]) {
+        for (i, &byte) in data.iter().enumerate() {
+            BusDevice::write8(&mut self.bus, address.wrapping_add(i as u32), byte);
+        }
+    }
+
+    pub fn set_vdp_register(&mut self, reg: u8, value: u8) {
+        self.vdp.write_control_port(0x8000 | ((reg as u16) << 8) | value as u16);
     }
 
     pub fn get_vram(&self) -> &[u8] {
@@ -285,6 +292,17 @@ impl Emulator {
             "eg_counter": ym.envelope_cycle_counter,
             "status": ym.status,
             "reg27": ym.regs_port0[0x27],
+            "timer_a_value": ((ym.regs_port0[0x24] as u32) << 2) | ((ym.regs_port0[0x25] as u32) & 0x03),
+            "timer_a_counter": ym.timer_a_counter,
+            "timer_a_period": 1024u32.saturating_sub(((ym.regs_port0[0x24] as u32) << 2) | ((ym.regs_port0[0x25] as u32) & 0x03)).max(1),
+            "timer_a_load": (ym.regs_port0[0x27] & 0x01) != 0,
+            "timer_a_enabled": (ym.regs_port0[0x27] & 0x04) != 0,
+            "timer_preadvanced_ticks": self.apu.timer_preadvanced_ticks,
+            "timer_only_accumulator": self.apu.timer_only_accumulator,
+            "reg24": ym.regs_port0[0x24],
+            "reg25": ym.regs_port0[0x25],
+            "timer_a_overflow_count": self.apu.debug_timer_a_overflow_count,
+            "timer_a_clear_count": self.apu.debug_timer_a_clear_count,
             "channels": channels,
             "psg_volumes": psg.volume,
             "psg_periods": psg.tone_period,
@@ -305,17 +323,29 @@ impl Emulator {
         m.insert("regs_port0_2b".into(), serde_json::json!(ym.regs_port0[0x2B]));
         m.insert("z80_bus_requested".into(), serde_json::json!(self.bus.z80_bus_requested));
         m.insert("z80_reset".into(), serde_json::json!(self.bus.z80_reset));
+        m.insert("z80_m68k_write_count".into(), serde_json::json!(self.bus.z80_m68k_write_count));
         m.insert("ym_write_total".into(), serde_json::json!(self.ym_write_total));
         m.insert("z80_pc".into(), serde_json::json!(self.z80.state.pc));
         m.insert("z80_total_cycles".into(), serde_json::json!(self.z80.state.total_cycles));
         m.insert("z80_halted".into(), serde_json::json!(self.z80.state.halted));
         m.insert("z80_iff1".into(), serde_json::json!(self.z80.state.iff1));
         m.insert("z80_int_pending".into(), serde_json::json!(self.z80.state.int_pending));
-        m.insert("z80_bank_68k_addr".into(), serde_json::json!(format!("{:#010X}", self.z80_bank_68k_addr)));
+        m.insert("z80_bank_68k_addr".into(), serde_json::json!(format!("{:#010X}", self.bus.z80_bank_68k_addr)));
+        m.insert("z80_bank_write_count".into(), serde_json::json!(self.bus.z80_bank_write_count));
+        m.insert("z80_bank_max_value".into(), serde_json::json!(format!("{:#010X}", self.bus.z80_bank_max_value)));
+        m.insert("z80_bank_write_log".into(), serde_json::json!(
+            self.bus.z80_bank_write_log.iter()
+                .map(|(v, bank)| format!("val=0x{:02X}(b0={}) -> bank={:#010X}", v, v & 1, bank))
+                .collect::<Vec<_>>()
+        ));
         m.insert("z80_int_count".into(), serde_json::json!(self.z80.state.total_cycles)); // proxy
         m.insert("vint_delivered".into(), serde_json::json!(self.vint_delivered_count));
         m.insert("vdp_frame".into(), serde_json::json!(self.vdp.frame));
         m.insert("vdp_vint_enabled".into(), serde_json::json!((self.vdp.registers[1] & 0x20) != 0));
+        m.insert("vdp_scanline".into(), serde_json::json!(self.vdp.scanline));
+        m.insert("vdp_status".into(), serde_json::json!(format!("0x{:04X}", self.vdp.status)));
+        m.insert("vdp_read_status_total".into(), serde_json::json!(self.vdp.debug_read_status_total));
+        m.insert("vdp_read_status_vblank_count".into(), serde_json::json!(self.vdp.debug_read_status_vblank_count));
 
         // DAC/FM debug counters
         m.insert("debug_dac_samples".into(), serde_json::json!(self.apu.debug_dac_samples));
@@ -480,17 +510,14 @@ impl Emulator {
 
         self.z80_cycle_balance += i64::from(m68k_cycles) * Z80_CLOCK_HZ;
 
-        // Track how many M68K-equivalent cycles the Z80 consumes, so we can
-        // interleave APU stepping and keep Timer A / B status fresh.
-        let mut apu_frac: i64 = 0; // fractional accumulator (in Z80_HZ units)
-        let mut apu_stepped: u32 = 0;
+        // Track Z80 cycles for lightweight timer interleaving
+        let mut z80_cycles_run: u32 = 0;
 
         if !self.bus.z80_reset && !self.bus.z80_bus_requested {
             while self.z80_cycle_balance > 0 {
                 let trace_cycles = {
                     let mut z80_bus = CoreZ80Bus {
                         bus: &mut self.bus,
-                        bank_68k_addr: &mut self.z80_bank_68k_addr,
                     };
                     let trace = self.z80.step_instruction(&mut z80_bus);
                     if self.z80_trace_ring.len() == Z80_TRACE_RING_CAPACITY {
@@ -503,19 +530,20 @@ impl Emulator {
                     break;
                 }
                 self.z80_cycle_balance -= i64::from(trace_cycles) * M68K_CLOCK_HZ;
+                z80_cycles_run += trace_cycles;
                 self.flush_sound_writes();
 
-                // Convert Z80 cycles to M68K-equivalent and step APU incrementally
-                apu_frac += i64::from(trace_cycles) * M68K_CLOCK_HZ;
-                let m68k_equiv = (apu_frac / Z80_CLOCK_HZ) as u32;
-                apu_frac %= Z80_CLOCK_HZ;
+                // Lightweight timer advance: convert Z80 cycles to master clocks
+                // and advance only timer counters (no FM synthesis).
+                // Z80 clock = M68K clock * Z80_HZ / M68K_HZ ≈ 0.4667x
+                // Master clock and M68K clock are the same for timer purposes.
+                // Z80 cycles → M68K equiv: z80_cycles * M68K_HZ / Z80_HZ
+                // But we need master clocks for timer accumulator (144 per FM tick).
+                // Approximate: pass Z80 cycles scaled to M68K domain.
+                let m68k_equiv = ((trace_cycles as u64 * M68K_CLOCK_HZ as u64) / Z80_CLOCK_HZ as u64) as u32;
                 if m68k_equiv > 0 {
-                    let step = m68k_equiv.min(m68k_cycles.saturating_sub(apu_stepped));
-                    if step > 0 {
-                        self.apu.step_cycles(step);
-                        self.bus.ym_status = self.apu.ym2612.status;
-                        apu_stepped += step;
-                    }
+                    self.apu.advance_timers(m68k_equiv);
+                    self.bus.ym_status = self.apu.ym2612.status;
                 }
             }
         } else {
@@ -523,10 +551,10 @@ impl Emulator {
         }
 
         self.flush_sound_writes();
-        let remaining = m68k_cycles.saturating_sub(apu_stepped);
-        if remaining > 0 {
-            self.apu.step_cycles(remaining);
-        }
+        // Full APU step for audio generation (timers will advance again but
+        // advance_timers already handled them — next_fm_sample will re-advance,
+        // which is harmless as the counter just continues from where it is)
+        self.apu.step_cycles(m68k_cycles);
         // APU step_cycles advances timers — update status for next Z80 read
         self.bus.ym_status = self.apu.ym2612.status;
         self.process_vdp_dma();
@@ -569,12 +597,17 @@ impl Emulator {
             self.vdp.vblank_flag = false;
             self.m68k.state.pending_ipl = 6;
             self.vint_delivered_count += 1;
-            // Z80 also receives VBlank interrupt (active low /INT pin)
-            self.z80.signal_int();
         } else if self.vdp.hblank_flag {
             self.vdp.hblank_flag = false;
             self.m68k.state.pending_ipl = 4;
             self.hint_delivered_count += 1;
+        }
+
+        // Z80 /INT is connected directly to VBlank, independent of M68K VINT_EN.
+        // On real hardware, Z80 always receives VBlank interrupts regardless of R1 bit 5.
+        if self.vdp.z80_vblank_flag {
+            self.vdp.z80_vblank_flag = false;
+            self.z80.signal_int();
         }
     }
 
@@ -604,7 +637,7 @@ struct CoreM68kBus<'a> {
 }
 
 fn m68k_to_z80_bus_addr(addr: u32) -> u32 {
-    Z80_SPACE_START + (((addr - Z80_SPACE_START) >> 1) & 0x7FFF)
+    Z80_SPACE_START + ((addr - Z80_SPACE_START) & 0x7FFF)
 }
 
 impl M68kBus for CoreM68kBus<'_> {
@@ -675,12 +708,11 @@ impl M68kBus for CoreM68kBus<'_> {
     fn read8(&mut self, addr: u32) -> u8 {
         let addr = addr & 0x00FFFFFF;
         if addr >= Z80_SPACE_START as u32 && addr <= Z80_SPACE_END as u32 {
-            // M68K byte access to Z80 space: 1:1 address mapping.
-            // Both even and odd M68K addresses map to sequential Z80 addresses.
+            // M68K byte access to Z80 space: A1..A15 → Z80 A0..A14 (>>1 mapping).
             let bus_addr = if addr >= YM2612_START && addr <= YM2612_END {
                 addr
             } else {
-                Z80_SPACE_START | ((addr - Z80_SPACE_START) & 0x1FFF)
+                m68k_to_z80_bus_addr(addr)
             };
             return BusDevice::read8(self.bus, bus_addr);
         }
@@ -711,13 +743,12 @@ impl M68kBus for CoreM68kBus<'_> {
     fn write8(&mut self, addr: u32, value: u8) {
         let addr = addr & 0x00FFFFFF;
         if addr >= Z80_SPACE_START as u32 && addr <= Z80_SPACE_END as u32 {
-            // M68K byte access to Z80 space: 1:1 address mapping.
-            // Both even and odd M68K addresses map to sequential Z80 addresses.
+            // M68K byte access to Z80 space: use same address mapping as word access.
             self.bus.z80_m68k_write_count = self.bus.z80_m68k_write_count.saturating_add(1);
             let bus_addr = if addr >= YM2612_START && addr <= YM2612_END {
                 addr
             } else {
-                Z80_SPACE_START | ((addr - Z80_SPACE_START) & 0x1FFF)
+                m68k_to_z80_bus_addr(addr)
             };
             BusDevice::write8(self.bus, bus_addr, value);
             return;
@@ -750,7 +781,6 @@ impl M68kBus for CoreM68kBus<'_> {
 
 struct CoreZ80Bus<'a> {
     bus: &'a mut SystemBus,
-    bank_68k_addr: &'a mut u32,
 }
 
 impl Z80Bus for CoreZ80Bus<'_> {
@@ -769,7 +799,7 @@ impl Z80Bus for CoreZ80Bus<'_> {
             }
             // Banked 68K window
             0x8000..=0xFFFF => {
-                let bank_base = *self.bank_68k_addr & 0x00FF_8000;
+                let bank_base = self.bus.z80_bank_68k_addr & 0x00FF_8000;
                 let m68k_addr = bank_base | (addr32 & 0x7FFF);
                 let value = BusDevice::read8(self.bus, m68k_addr);
                 let mut banked_read_log = self.bus.z80_banked_read_log.borrow_mut();
@@ -799,7 +829,16 @@ impl Z80Bus for CoreZ80Bus<'_> {
             // Z80 bank register (serial, bit0 shifted in per write).
             0x6000..=0x60FF => {
                 let incoming = ((value as u32) & 0x01) << 23;
-                *self.bank_68k_addr = ((*self.bank_68k_addr >> 1) | incoming) & 0x00FF_8000;
+                self.bus.z80_bank_68k_addr =
+                    ((self.bus.z80_bank_68k_addr >> 1) | incoming) & 0x00FF_8000;
+                self.bus.z80_bank_write_count = self.bus.z80_bank_write_count.saturating_add(1);
+                if self.bus.z80_bank_68k_addr > self.bus.z80_bank_max_value {
+                    self.bus.z80_bank_max_value = self.bus.z80_bank_68k_addr;
+                }
+                if self.bus.z80_bank_write_log.len() >= 40 {
+                    self.bus.z80_bank_write_log.remove(0);
+                }
+                self.bus.z80_bank_write_log.push((value, self.bus.z80_bank_68k_addr));
             }
             // PSG write port
             0x7F11 => {
@@ -807,7 +846,7 @@ impl Z80Bus for CoreZ80Bus<'_> {
             }
             // Banked 68K window write
             0x8000..=0xFFFF => {
-                let bank_base = *self.bank_68k_addr & 0x00FF_8000;
+                let bank_base = self.bus.z80_bank_68k_addr & 0x00FF_8000;
                 let m68k_addr = bank_base | (addr32 & 0x7FFF);
                 BusDevice::write8(self.bus, m68k_addr, value);
             }
@@ -904,7 +943,6 @@ mod tests {
         {
             let mut z80_bus = CoreZ80Bus {
                 bus: &mut emu.bus,
-                bank_68k_addr: &mut emu.z80_bank_68k_addr,
             };
 
             // YM: address then data on port 0
@@ -925,7 +963,6 @@ mod tests {
         {
             let mut z80_bus = CoreZ80Bus {
                 bus: &mut emu.bus,
-                bank_68k_addr: &mut emu.z80_bank_68k_addr,
             };
             z80_bus.write8(0x0000, 0x5A);
             assert_eq!(z80_bus.read8(0x0000), 0x5A);
@@ -946,7 +983,6 @@ mod tests {
         {
             let z80_bus = CoreZ80Bus {
                 bus: &mut emu.bus,
-                bank_68k_addr: &mut emu.z80_bank_68k_addr,
             };
 
             // Z80 banked window maps linearly: Z80 $8000+n → M68K bank_base+n
@@ -958,13 +994,15 @@ mod tests {
     }
 
     #[test]
-    fn m68k_word_writes_map_to_sequential_z80_bytes() {
+    fn m68k_word_writes_send_high_byte_to_z80() {
         let mut emu = Emulator::new();
         {
             let mut m68k_bus = CoreM68kBus {
                 bus: &mut emu.bus,
                 vdp: &mut emu.vdp,
             };
+            // Word writes send only the high byte (D8-D15) to the Z80 bus.
+            // M68K address maps 1:1 to Z80 address (& 0x7FFF).
             m68k_bus.write16(0xA0_0000, 0x1122);
             m68k_bus.write16(0xA0_0002, 0x3344);
             m68k_bus.write16(0xA0_0004, 0x5566);
@@ -972,27 +1010,30 @@ mod tests {
         {
             let z80_bus = CoreZ80Bus {
                 bus: &mut emu.bus,
-                bank_68k_addr: &mut emu.z80_bank_68k_addr,
             };
-            assert_eq!(z80_bus.read8(0x0000), 0x11);
-            assert_eq!(z80_bus.read8(0x0001), 0x33);
-            assert_eq!(z80_bus.read8(0x0002), 0x55);
+            // Each word write goes to the corresponding Z80 addr (1:1).
+            assert_eq!(z80_bus.read8(0x0000), 0x11); // high byte of 0x1122
+            assert_eq!(z80_bus.read8(0x0002), 0x33); // high byte of 0x3344
+            assert_eq!(z80_bus.read8(0x0004), 0x55); // high byte of 0x5566
+            // Odd Z80 addresses are untouched.
+            assert_eq!(z80_bus.read8(0x0001), 0x00);
+            assert_eq!(z80_bus.read8(0x0003), 0x00);
         }
     }
 
     #[test]
-    fn m68k_byte_accesses_keep_direct_z80_space_mapping() {
+    fn m68k_byte_accesses_use_direct_z80_mapping() {
         let mut emu = Emulator::new();
         {
             let mut m68k_bus = CoreM68kBus {
                 bus: &mut emu.bus,
                 vdp: &mut emu.vdp,
             };
-            // M68K byte writes to Z80 space use 1:1 address mapping.
-            // Both even and odd M68K addresses map to sequential Z80 bytes.
-            m68k_bus.write8(0xA0_0000, 0xAA);
-            m68k_bus.write8(0xA0_0001, 0xBB);
-            m68k_bus.write8(0xA0_0002, 0xCC);
+            // M68K byte access uses 1:1 mapping (& 0x7FFF).
+            // Consecutive M68K addresses map to consecutive Z80 addresses.
+            m68k_bus.write8(0xA0_0000, 0xAA); // Z80 addr 0
+            m68k_bus.write8(0xA0_0001, 0xBB); // Z80 addr 1
+            m68k_bus.write8(0xA0_0002, 0xCC); // Z80 addr 2
             assert_eq!(m68k_bus.read8(0xA0_0000), 0xAA);
             assert_eq!(m68k_bus.read8(0xA0_0001), 0xBB);
             assert_eq!(m68k_bus.read8(0xA0_0002), 0xCC);

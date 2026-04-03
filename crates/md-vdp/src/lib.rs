@@ -66,6 +66,9 @@ pub struct Vdp {
     auto_increment: u16,
     pub hint_counter: u16,
     pub vblank_flag: bool,
+    /// Z80 /INT signal: fires at VBlank regardless of VINT_EN (R1 bit 5).
+    /// On real hardware, Z80 /INT is directly connected to the VBlank output.
+    pub z80_vblank_flag: bool,
     pub hblank_flag: bool,
     pub data_write_count: u64,
     pub ctrl_write_count: u64,
@@ -79,6 +82,12 @@ pub struct Vdp {
     pub last_dma_length: u16,
     /// Debug: VSRAM[0] value read at each scanline during rendering
     pub debug_scanline_vsram_a: Vec<u16>,
+    /// Debug: count of read_status calls that returned VBlank=1
+    #[serde(default)]
+    pub debug_read_status_vblank_count: u64,
+    /// Debug: total read_status calls
+    #[serde(default)]
+    pub debug_read_status_total: u64,
 }
 
 impl Default for Vdp {
@@ -101,6 +110,7 @@ impl Default for Vdp {
             auto_increment: 2,
             hint_counter: 0,
             vblank_flag: false,
+            z80_vblank_flag: false,
             hblank_flag: false,
             data_write_count: 0,
             ctrl_write_count: 0,
@@ -113,6 +123,8 @@ impl Default for Vdp {
             last_dma_source: 0,
             last_dma_length: 0,
             debug_scanline_vsram_a: vec![0; FRAME_HEIGHT],
+            debug_read_status_vblank_count: 0,
+            debug_read_status_total: 0,
         }
     }
 }
@@ -429,6 +441,8 @@ impl Vdp {
         if self.scanline == 224 {
             self.status |= 0x0008; // VBlank flag in status
             self.status |= 0x0080; // F flag (VInt pending)
+            // Z80 /INT is directly connected to VBlank, independent of VINT_EN
+            self.z80_vblank_flag = true;
             if self.vint_enabled() {
                 self.vblank_flag = true;
             }
@@ -674,6 +688,10 @@ impl Vdp {
 
     pub fn read_status(&mut self) -> u16 {
         let s = self.status;
+        self.debug_read_status_total += 1;
+        if s & 0x0008 != 0 {
+            self.debug_read_status_vblank_count += 1;
+        }
         self.pending_command = None;
         // Reading status auto-acknowledges pending interrupt flags
         self.vblank_flag = false;
@@ -1065,5 +1083,42 @@ mod tests {
         // First pixel should not be background
         let pixel = vdp.framebuffer[0];
         assert_ne!(pixel, 0xFF000000);
+    }
+
+    #[test]
+    fn vblank_status_bit_set_during_vblank() {
+        let mut vdp = Vdp::default();
+        // Advance to scanline 223 (last active line)
+        for _ in 0..223 {
+            vdp.step_scanline();
+        }
+        assert_eq!(vdp.scanline, 223);
+        // VBlank not yet active
+        assert_eq!(vdp.status & 0x0008, 0, "VBlank should not be set before scanline 224");
+
+        // Advance to scanline 224 (VBlank starts)
+        vdp.step_scanline();
+        assert_eq!(vdp.scanline, 224);
+        assert_ne!(vdp.status & 0x0008, 0, "VBlank should be set at scanline 224");
+
+        // read_status should return with VBlank bit set
+        let s = vdp.read_status();
+        assert_ne!(s & 0x0008, 0, "read_status should return VBlank=1 during VBlank");
+
+        // VBlank bit should PERSIST after read_status (only F/coll/overflow cleared)
+        assert_ne!(vdp.status & 0x0008, 0, "VBlank bit should persist after read_status");
+
+        // Advance through VBlank (scanlines 225-261)
+        for _ in 225..262 {
+            vdp.step_scanline();
+        }
+        // Still in VBlank at scanline 261
+        let s2 = vdp.read_status();
+        assert_ne!(s2 & 0x0008, 0, "VBlank should still be set at scanline 261");
+
+        // Advance to scanline 262 → wraps to 0 (new frame)
+        vdp.step_scanline();
+        assert_eq!(vdp.scanline, 0);
+        assert_eq!(vdp.status & 0x0008, 0, "VBlank should be cleared at new frame");
     }
 }

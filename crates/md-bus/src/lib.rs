@@ -69,12 +69,33 @@ pub struct SystemBus {
     ym_addr_latch: [u8; 2],
     /// YM2612 status register (updated from APU)
     pub ym_status: u8,
+    /// Cartridge SRAM (battery-backed)
+    sram: Vec<u8>,
+    /// SRAM mapped address range start
+    sram_start: u32,
+    /// SRAM mapped address range end (inclusive)
+    sram_end: u32,
+    /// SRAM type flags from ROM header (bit 5 = odd-only, bit 6 = even-only)
+    sram_flags: u8,
+    /// Whether SRAM is enabled / mapped (controlled by $A130F1)
+    sram_enabled: bool,
+    /// Z80 bank register: bits 15-23 of 68K address for banked window
+    pub z80_bank_68k_addr: u32,
     /// Debug: count M68K writes to Z80 space
     #[serde(skip)]
     pub z80_m68k_write_count: u32,
     /// Debug: recent Z80 banked 68K reads
     #[serde(skip)]
     pub z80_banked_read_log: RefCell<Vec<(u32, u8)>>,
+    /// Debug: count Z80 bank register writes
+    #[serde(skip)]
+    pub z80_bank_write_count: u32,
+    /// Debug: max bank value seen
+    #[serde(skip)]
+    pub z80_bank_max_value: u32,
+    /// Debug: ring buffer of last 20 bank register write values (value, resulting_bank)
+    #[serde(skip)]
+    pub z80_bank_write_log: Vec<(u8, u32)>,
 }
 
 impl Default for SystemBus {
@@ -98,18 +119,51 @@ impl Default for SystemBus {
             psg_write_queue: Vec::new(),
             ym_addr_latch: [0; 2],
             ym_status: 0,
+            sram: Vec::new(),
+            sram_start: 0,
+            sram_end: 0,
+            sram_flags: 0,
+            sram_enabled: false,
+            z80_bank_68k_addr: 0,
             z80_m68k_write_count: 0,
             z80_banked_read_log: RefCell::new(Vec::new()),
+            z80_bank_write_count: 0,
+            z80_bank_max_value: 0,
+            z80_bank_write_log: Vec::new(),
         }
     }
 }
 
 impl SystemBus {
     pub fn load_rom(&mut self, rom: Vec<u8>) {
+        // Parse SRAM info from ROM header ($1B0-$1BB)
+        if rom.len() > 0x1BC {
+            let marker = [rom[0x1B0], rom[0x1B1]];
+            if marker == [0x52, 0x41] {
+                // "RA" marker → SRAM present
+                let flags = rom[0x1B3];
+                let start = u32::from_be_bytes([rom[0x1B4], rom[0x1B5], rom[0x1B6], rom[0x1B7]]);
+                let end = u32::from_be_bytes([rom[0x1B8], rom[0x1B9], rom[0x1BA], rom[0x1BB]]);
+                if end >= start {
+                    let sram_size = (end - start + 1) as usize;
+                    // For odd-only or even-only SRAM, effective size is half
+                    let effective_size = if (flags & 0x60) != 0 {
+                        sram_size / 2
+                    } else {
+                        sram_size
+                    };
+                    self.sram = vec![0xFF; effective_size]; // uninitialized SRAM reads 0xFF
+                    self.sram_start = start;
+                    self.sram_end = end;
+                    self.sram_flags = flags;
+                    self.sram_enabled = true;
+                }
+            }
+        }
         self.rom = rom;
     }
 
-    /// Reset all mutable state (keeping ROM). Matches power-on behavior.
+    /// Reset all mutable state (keeping ROM and SRAM). Matches power-on behavior.
     pub fn reset(&mut self) {
         self.work_ram.fill(0);
         self.z80_ram.fill(0);
@@ -119,8 +173,16 @@ impl SystemBus {
         self.psg_write_queue.clear();
         self.ym_addr_latch = [0; 2];
         self.ym_status = 0;
+        // SRAM is battery-backed; keep contents but re-enable mapping
+        if !self.sram.is_empty() {
+            self.sram_enabled = true;
+        }
+        self.z80_bank_68k_addr = 0;
         self.z80_m68k_write_count = 0;
         self.z80_banked_read_log.borrow_mut().clear();
+        self.z80_bank_write_count = 0;
+        self.z80_bank_max_value = 0;
+        self.z80_bank_write_log.clear();
         // Re-initialize IO ports with default values
         self.io_ports.fill(0);
         self.io_ports[(PAD1_DATA_PORT - IO_START) as usize] = 0x40;
@@ -199,11 +261,38 @@ impl SystemBus {
         }
         data
     }
+
+    /// Calculate SRAM byte offset from M68K address, respecting odd/even-only flags.
+    /// Returns None if the address doesn't match the SRAM byte type.
+    fn sram_offset(&self, addr: u32) -> Option<usize> {
+        let odd_only = (self.sram_flags & 0x20) != 0;
+        let even_only = (self.sram_flags & 0x40) != 0;
+        let is_odd = (addr & 1) != 0;
+        if odd_only && !is_odd {
+            return None; // even address on odd-only SRAM
+        }
+        if even_only && is_odd {
+            return None; // odd address on even-only SRAM
+        }
+        let byte_addr = addr - self.sram_start;
+        if odd_only || even_only {
+            Some((byte_addr / 2) as usize)
+        } else {
+            Some(byte_addr as usize)
+        }
+    }
 }
 
 impl BusDevice for SystemBus {
     fn read8(&self, addr: u32) -> u8 {
         let addr = addr & 0x00FFFFFF;
+        // SRAM read: intercept before ROM
+        if self.sram_enabled && addr >= self.sram_start && addr <= self.sram_end {
+            if let Some(offset) = self.sram_offset(addr) {
+                return self.sram.get(offset).copied().unwrap_or(0xFF);
+            }
+            // Address not matching odd/even filter → fall through to ROM
+        }
         match addr {
             ROM_START..=ROM_END => self.rom.get(addr as usize).copied().unwrap_or(0xFF),
             Z80_SPACE_START..=Z80_SPACE_END => {
@@ -242,6 +331,15 @@ impl BusDevice for SystemBus {
 
     fn write8(&mut self, addr: u32, value: u8) {
         let addr = addr & 0x00FFFFFF;
+        // SRAM write: intercept before other handlers
+        if self.sram_enabled && addr >= self.sram_start && addr <= self.sram_end {
+            if let Some(offset) = self.sram_offset(addr) {
+                if offset < self.sram.len() {
+                    self.sram[offset] = value;
+                }
+                return;
+            }
+        }
         match addr {
             Z80_SPACE_START..=Z80_SPACE_END => {
                 if addr >= YM2612_START && addr <= YM2612_END {
@@ -256,7 +354,28 @@ impl BusDevice for SystemBus {
                     }
                     return;
                 }
-                let index = (addr as usize - Z80_SPACE_START as usize) & 0x1FFF;
+                // Z80 bank register (Z80 addr 0x6000-0x60FF)
+                let z80_local = (addr as usize - Z80_SPACE_START as usize) & 0xFFFF;
+                if z80_local >= 0x6000 && z80_local <= 0x60FF {
+                    let incoming = ((value as u32) & 0x01) << 23;
+                    self.z80_bank_68k_addr =
+                        ((self.z80_bank_68k_addr >> 1) | incoming) & 0x00FF_8000;
+                    self.z80_bank_write_count = self.z80_bank_write_count.saturating_add(1);
+                    if self.z80_bank_68k_addr > self.z80_bank_max_value {
+                        self.z80_bank_max_value = self.z80_bank_68k_addr;
+                    }
+                    if self.z80_bank_write_log.len() >= 40 {
+                        self.z80_bank_write_log.remove(0);
+                    }
+                    self.z80_bank_write_log.push((value, self.z80_bank_68k_addr));
+                    return;
+                }
+                // PSG write port (Z80 addr 0x7F11)
+                if z80_local == 0x7F11 {
+                    self.psg_write_queue.push(value);
+                    return;
+                }
+                let index = z80_local & 0x1FFF;
                 self.z80_ram[index] = value;
             }
             IO_START..=IO_END => {
@@ -268,6 +387,12 @@ impl BusDevice for SystemBus {
                         self.z80_reset = (value & 0x01) == 0;
                     }
                     0xA1_1101 | 0xA1_1201 => { /* odd byte - ignore */ }
+                    // SRAM control register ($A130F1): bit 0 = SRAM mapped
+                    0xA1_30F1 => {
+                        if !self.sram.is_empty() {
+                            self.sram_enabled = (value & 0x01) != 0;
+                        }
+                    }
                     _ => {
                         let index = (addr as usize - IO_START as usize) & 0xFF;
                         self.io_ports[index] = value;
@@ -276,10 +401,20 @@ impl BusDevice for SystemBus {
             }
             WORK_RAM_START..=WORK_RAM_END => {
                 let index = (addr as usize - WORK_RAM_START as usize) & 0xFFFF;
+                // Temporary debug: detect writes to $FF0066/$FF0067
+                if index == 0x0066 || index == 0x0067 {
+                    let old = self.work_ram[index];
+                    eprintln!("[BUS] write8 ${:06X} (index {:04X}): 0x{:02X} -> 0x{:02X}", addr, index, old, value);
+                }
                 self.work_ram[index] = value;
             }
             WORK_RAM_MIRROR_START..=WORK_RAM_MIRROR_END => {
                 let index = (addr as usize - WORK_RAM_MIRROR_START as usize) & 0xFFFF;
+                // Temporary debug: detect writes to $FF0066/$FF0067
+                if index == 0x0066 || index == 0x0067 {
+                    let old = self.work_ram[index];
+                    eprintln!("[BUS-MIRROR] write8 ${:06X} (index {:04X}): 0x{:02X} -> 0x{:02X}", addr, index, old, value);
+                }
                 self.work_ram[index] = value;
             }
             _ => {}
