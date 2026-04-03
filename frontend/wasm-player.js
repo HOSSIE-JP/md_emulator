@@ -186,6 +186,8 @@ function drainAudio() {
   source.connect(audioContext.destination);
   const now = audioContext.currentTime;
   if (audioNextTime < now) audioNextTime = now;
+  // Prevent audio scheduling from drifting too far ahead (~50ms max)
+  if (audioNextTime > now + 0.05) audioNextTime = now + 0.02;
   source.start(audioNextTime);
   audioNextTime += buffer.duration;
 }
@@ -246,6 +248,10 @@ function frameTick(ts) {
   if (!lastTs) lastTs = ts;
   accumulator += ts - lastTs;
   lastTs = ts;
+
+  // Cap accumulator to prevent burst-scheduling many frames of audio
+  // after a browser pause or slow frame (max 3 frames = ~50ms).
+  if (accumulator > FRAME_MS * 3) accumulator = FRAME_MS * 3;
 
   while (accumulator >= FRAME_MS) {
     accumulator -= FRAME_MS;

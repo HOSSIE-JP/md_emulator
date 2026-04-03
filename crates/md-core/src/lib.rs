@@ -480,6 +480,11 @@ impl Emulator {
 
         self.z80_cycle_balance += i64::from(m68k_cycles) * Z80_CLOCK_HZ;
 
+        // Track how many M68K-equivalent cycles the Z80 consumes, so we can
+        // interleave APU stepping and keep Timer A / B status fresh.
+        let mut apu_frac: i64 = 0; // fractional accumulator (in Z80_HZ units)
+        let mut apu_stepped: u32 = 0;
+
         if !self.bus.z80_reset && !self.bus.z80_bus_requested {
             while self.z80_cycle_balance > 0 {
                 let trace_cycles = {
@@ -499,13 +504,31 @@ impl Emulator {
                 }
                 self.z80_cycle_balance -= i64::from(trace_cycles) * M68K_CLOCK_HZ;
                 self.flush_sound_writes();
+
+                // Convert Z80 cycles to M68K-equivalent and step APU incrementally
+                apu_frac += i64::from(trace_cycles) * M68K_CLOCK_HZ;
+                let m68k_equiv = (apu_frac / Z80_CLOCK_HZ) as u32;
+                apu_frac %= Z80_CLOCK_HZ;
+                if m68k_equiv > 0 {
+                    let step = m68k_equiv.min(m68k_cycles.saturating_sub(apu_stepped));
+                    if step > 0 {
+                        self.apu.step_cycles(step);
+                        self.bus.ym_status = self.apu.ym2612.status;
+                        apu_stepped += step;
+                    }
+                }
             }
         } else {
             self.z80_cycle_balance = 0;
         }
 
         self.flush_sound_writes();
-        self.apu.step_cycles(m68k_cycles);
+        let remaining = m68k_cycles.saturating_sub(apu_stepped);
+        if remaining > 0 {
+            self.apu.step_cycles(remaining);
+        }
+        // APU step_cycles advances timers — update status for next Z80 read
+        self.bus.ym_status = self.apu.ym2612.status;
         self.process_vdp_dma();
 
         self.vdp_cycle_accumulator = self.vdp_cycle_accumulator.saturating_add(m68k_cycles);

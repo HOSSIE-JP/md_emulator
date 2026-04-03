@@ -836,10 +836,9 @@ impl Apu {
 
     pub fn take_samples(&mut self, count_stereo_frames: usize) -> Vec<f32> {
         let sample_count = count_stereo_frames * 2;
-        // If the buffer has grown much larger than requested (> 4x), skip
-        // old samples and return only the most recent portion.
-        // This prevents stale silence from blocking fresh audio.
-        let max_buffered = sample_count * 4;
+        // Cap buffer at 2× requested to keep latency under ~33ms.
+        // Discard oldest samples when buffer exceeds this limit.
+        let max_buffered = sample_count * 2;
         if self.audio_buffer.len() > max_buffered {
             let skip = self.audio_buffer.len() - max_buffered;
             // Ensure skip is even (stereo pairs)
