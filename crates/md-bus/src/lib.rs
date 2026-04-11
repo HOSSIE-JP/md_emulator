@@ -401,20 +401,10 @@ impl BusDevice for SystemBus {
             }
             WORK_RAM_START..=WORK_RAM_END => {
                 let index = (addr as usize - WORK_RAM_START as usize) & 0xFFFF;
-                // Temporary debug: detect writes to $FF0066/$FF0067
-                if index == 0x0066 || index == 0x0067 {
-                    let old = self.work_ram[index];
-                    eprintln!("[BUS] write8 ${:06X} (index {:04X}): 0x{:02X} -> 0x{:02X}", addr, index, old, value);
-                }
                 self.work_ram[index] = value;
             }
             WORK_RAM_MIRROR_START..=WORK_RAM_MIRROR_END => {
                 let index = (addr as usize - WORK_RAM_MIRROR_START as usize) & 0xFFFF;
-                // Temporary debug: detect writes to $FF0066/$FF0067
-                if index == 0x0066 || index == 0x0067 {
-                    let old = self.work_ram[index];
-                    eprintln!("[BUS-MIRROR] write8 ${:06X} (index {:04X}): 0x{:02X} -> 0x{:02X}", addr, index, old, value);
-                }
                 self.work_ram[index] = value;
             }
             _ => {}

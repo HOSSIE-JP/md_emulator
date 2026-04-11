@@ -768,6 +768,7 @@ impl Vdp {
         self.ctrl_write_count += 1;
         // Register writes (0x8xxx) always take priority and reset pending state
         if (value & 0xC000) == 0x8000 {
+            let _had_pending = self.pending_command.is_some();
             self.pending_command = None;
             let reg = ((value >> 8) & 0x1F) as usize;
             let val = (value & 0xFF) as u8;

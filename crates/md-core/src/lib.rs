@@ -122,9 +122,62 @@ impl Emulator {
         if bytes.is_empty() {
             return Err(EmulatorError::EmptyRom);
         }
-        self.bus.load_rom(bytes.to_vec());
+        let rom = if Self::is_smd_format(bytes) {
+            Self::deinterleave_smd(bytes)
+        } else {
+            bytes.to_vec()
+        };
+        self.bus.load_rom(rom);
         self.reset();
         Ok(())
+    }
+
+    /// Detect SMD (Super Magic Drive) interleaved ROM format.
+    /// SMD files have a 512-byte header followed by 16KB interleaved blocks.
+    fn is_smd_format(bytes: &[u8]) -> bool {
+        const SMD_HEADER_SIZE: usize = 512;
+        const SMD_BLOCK_SIZE: usize = 16384;
+        if bytes.len() <= SMD_HEADER_SIZE {
+            return false;
+        }
+        // SMD files: (total_size - 512) is a multiple of 16384
+        if (bytes.len() - SMD_HEADER_SIZE) % SMD_BLOCK_SIZE != 0 {
+            return false;
+        }
+        // Verify by deinterleaving first block and checking for "SEGA" at offset 0x100
+        let block = &bytes[SMD_HEADER_SIZE..SMD_HEADER_SIZE + SMD_BLOCK_SIZE];
+        let odd = &block[..SMD_BLOCK_SIZE / 2];
+        let even = &block[SMD_BLOCK_SIZE / 2..];
+        // Offset 0x100 in deinterleaved data: even byte at index 0x80, odd byte at index 0x80
+        // deinterleaved[0x100] = even[0x80], deinterleaved[0x101] = odd[0x80], ...
+        let sig: Vec<u8> = (0..4)
+            .flat_map(|i| [even[0x80 + i], odd[0x80 + i]])
+            .collect();
+        // "SEGA" = [0x53, 0x45, 0x47, 0x41]
+        sig.len() >= 4 && sig[0] == 0x53 && sig[1] == 0x45 && sig[2] == 0x47 && sig[3] == 0x41
+    }
+
+    /// Deinterleave SMD format ROM into standard binary format.
+    fn deinterleave_smd(bytes: &[u8]) -> Vec<u8> {
+        const SMD_HEADER_SIZE: usize = 512;
+        const SMD_BLOCK_SIZE: usize = 16384;
+        const HALF_BLOCK: usize = SMD_BLOCK_SIZE / 2;
+
+        let data = &bytes[SMD_HEADER_SIZE..];
+        let num_blocks = data.len() / SMD_BLOCK_SIZE;
+        let mut rom = vec![0u8; num_blocks * SMD_BLOCK_SIZE];
+
+        for b in 0..num_blocks {
+            let block = &data[b * SMD_BLOCK_SIZE..(b + 1) * SMD_BLOCK_SIZE];
+            let odd = &block[..HALF_BLOCK];
+            let even = &block[HALF_BLOCK..];
+            let out = &mut rom[b * SMD_BLOCK_SIZE..(b + 1) * SMD_BLOCK_SIZE];
+            for i in 0..HALF_BLOCK {
+                out[i * 2] = even[i];
+                out[i * 2 + 1] = odd[i];
+            }
+        }
+        rom
     }
 
     pub fn reset(&mut self) {
@@ -578,11 +631,9 @@ impl Emulator {
     }
 
     fn flush_sound_writes(&mut self) {
-        let count = self.bus.ym_write_queue.len() as u64;
         for (port, addr, data) in self.bus.ym_write_queue.drain(..) {
             self.apu.write_ym2612(port, addr, data);
         }
-        self.ym_write_total += count;
         for data in self.bus.psg_write_queue.drain(..) {
             self.apu.write_psg(data);
         }
