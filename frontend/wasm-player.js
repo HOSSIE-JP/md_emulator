@@ -68,6 +68,83 @@ let deferredInstallPrompt = null;
 let devAutoRefreshId = null;
 const DEV_REFRESH_INTERVAL_MS = 500;
 
+// ── SRAM persistence via IndexedDB ──
+const SRAM_DB_NAME = "md-emulator-sram";
+const SRAM_DB_VERSION = 1;
+const SRAM_STORE_NAME = "saves";
+const SRAM_AUTO_SAVE_FRAMES = 300; // ~5 seconds at 60fps
+let sramRomKey = null;
+let sramFrameCounter = 0;
+
+function openSramDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(SRAM_DB_NAME, SRAM_DB_VERSION);
+    req.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(SRAM_STORE_NAME)) {
+        db.createObjectStore(SRAM_STORE_NAME);
+      }
+    };
+    req.onsuccess = (event) => resolve(event.target.result);
+    req.onerror = (event) => reject(event.target.error);
+  });
+}
+
+async function saveSramToDb(key, data) {
+  if (!key || !data || data.length === 0) return;
+  try {
+    const db = await openSramDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(SRAM_STORE_NAME, "readwrite");
+      tx.objectStore(SRAM_STORE_NAME).put(new Uint8Array(data), key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = (e) => reject(e.target.error);
+    });
+  } catch (e) {
+    console.warn("[SRAM] save failed:", e);
+  }
+}
+
+async function loadSramFromDb(key) {
+  if (!key) return null;
+  try {
+    const db = await openSramDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(SRAM_STORE_NAME, "readonly");
+      const req = tx.objectStore(SRAM_STORE_NAME).get(key);
+      req.onsuccess = (e) => resolve(e.target.result ?? null);
+      req.onerror = (e) => reject(e.target.error);
+    });
+  } catch (e) {
+    console.warn("[SRAM] load failed:", e);
+    return null;
+  }
+}
+
+function computeRomKey(romBytes, label) {
+  // Simple FNV-1a hash of first 512 bytes + file size for stable identification
+  let hash = 0x811c9dc5;
+  const limit = Math.min(romBytes.length, 512);
+  for (let i = 0; i < limit; i++) {
+    hash ^= romBytes[i];
+    hash = (Math.imul(hash, 0x01000193)) >>> 0;
+  }
+  return `sram_${label.replace(/[^a-zA-Z0-9._-]/g, "_")}_${romBytes.length}_${hash.toString(16)}`;
+}
+
+async function autoSaveSram() {
+  if (!emulator || !sramRomKey) return;
+  try {
+    if (!emulator.has_sram()) return;
+    const data = emulator.get_sram();
+    if (data && data.length > 0) {
+      await saveSramToDb(sramRomKey, data);
+    }
+  } catch (e) {
+    console.warn("[SRAM] auto-save failed:", e);
+  }
+}
+
 function toByteArray(data) {
   if (!data) return null;
   if (data instanceof Uint8Array) return data;
@@ -230,6 +307,14 @@ function runOneFrame() {
   drawFrame(emulator.get_framebuffer_argb());
   drainAudio();
   renderedFrames += 1;
+  // SRAM 自動保存 (約5秒ごと)
+  if (emulator.has_sram && emulator.has_sram()) {
+    sramFrameCounter += 1;
+    if (sramFrameCounter >= SRAM_AUTO_SAVE_FRAMES) {
+      sramFrameCounter = 0;
+      autoSaveSram().catch(() => {});
+    }
+  }
   updateMeta();
 }
 
@@ -291,19 +376,35 @@ async function loadRomBytes(romBytes, label = "ROM") {
   emulator.reset();
   renderedFrames = 0;
   savedStateData = null;
+  sramRomKey = computeRomKey(romBytes, label);
+  sramFrameCounter = 0;
+
+  // SRAM が存在する場合、IndexedDB から保存済みデータを復元する
+  if (emulator.has_sram && emulator.has_sram()) {
+    const savedSram = await loadSramFromDb(sramRomKey);
+    if (savedSram && savedSram.length > 0) {
+      emulator.load_sram(Array.from(savedSram));
+      setStatus(`${label} loaded (SRAM restored, ${savedSram.length} bytes)`);
+    }
+  }
+
   drawFrame(emulator.get_framebuffer_argb());
   enableRuntimeButtons();
-  setStatus(`${label} loaded (${loadedRomBytes.length} bytes)`);
+  if (emulator.has_sram && emulator.has_sram()) {
+    setStatus(`${label} loaded (SRAM: ${emulator.get_sram().length} bytes)`);
+  } else {
+    setStatus(`${label} loaded (${loadedRomBytes.length} bytes)`);
+  }
   await ensureAudioDefaultPlayback();
   startRunLoop();
-  setStatus(`running: ${label} (${loadedRomBytes.length} bytes)`);
   updateMeta();
 }
 
 async function initializeWasm() {
   try {
-    wasmModule = await import(`./pkg/md_wasm.js?v=${Date.now()}`);
-    await wasmModule.default();
+    const cacheBust = Date.now();
+    wasmModule = await import(`./pkg/md_wasm.js?v=${cacheBust}`);
+    await wasmModule.default(`./pkg/md_wasm_bg.wasm?v=${cacheBust}`);
     emulator = new wasmModule.EmulatorHandle();
     wasmReady = true;
 
@@ -387,9 +488,19 @@ async function setupBundledRomList() {
 function resetEmulator() {
   if (!emulator || !loadedRomBytes) return;
   stopLoop();
+  // load_rom は SRAM を 0xFF に再初期化するため、リセット前に保存して復元する
+  let sramData = null;
+  if (emulator.has_sram && emulator.has_sram()) {
+    sramData = emulator.get_sram();
+  }
   emulator.load_rom(loadedRomBytes);
   emulator.reset();
+  // SRAM はバッテリーバックアップなのでリセット後も内容を保持する
+  if (sramData && sramData.length > 0) {
+    emulator.load_sram(Array.from(sramData));
+  }
   renderedFrames = 0;
+  sramFrameCounter = 0;
   drawFrame(emulator.get_framebuffer_argb());
   audioNextTime = 0;
   setStatus("emulator reset");
@@ -625,7 +736,20 @@ function setupDragAndDrop() {
 
 function setupPwa() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch((error) => {
+    navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).then((reg) => {
+      // Check for SW updates periodically (every 60s in dev)
+      setInterval(() => reg.update().catch(() => {}), 60_000);
+      // When a new SW is found, activate immediately
+      reg.addEventListener("updatefound", () => {
+        const newSw = reg.installing;
+        if (!newSw) return;
+        newSw.addEventListener("statechange", () => {
+          if (newSw.state === "activated") {
+            console.log("[PWA] new service worker activated — clearing caches");
+          }
+        });
+      });
+    }).catch((error) => {
       setStatus(`service worker registration failed: ${error}`);
     });
   }
@@ -898,4 +1022,11 @@ setupDragAndDrop();
 setupPwa();
 initializeWasm().finally(() => {
   setupBundledRomList();
+});
+
+// ページ離脱前に SRAM を保存する
+window.addEventListener("beforeunload", () => {
+  if (emulator && sramRomKey && emulator.has_sram && emulator.has_sram()) {
+    autoSaveSram().catch(() => {});
+  }
 });

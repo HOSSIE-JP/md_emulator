@@ -6,8 +6,122 @@ const SHADOW_COLOR: [u8; 8] = [0, 17, 34, 51, 68, 85, 102, 119];
 /// Highlight = Normal/2 + 128 (clamped to 255)
 const HIGHLIGHT_COLOR: [u8; 8] = [128, 145, 162, 179, 196, 213, 230, 247];
 
+const LAYER_INDEX_SPRITE: u8 = 0;
+const LAYER_INDEX_A: u8 = 1;
+const LAYER_INDEX_B: u8 = 2;
+const LAYER_INDEX_BG: u8 = 3;
+const LAYER_PRIORITY_LOOKUP_TABLE_SIZE: usize = 0x200;
+
+const fn build_layer_priority_lookup_table() -> [u8; LAYER_PRIORITY_LOOKUP_TABLE_SIZE] {
+    let mut table = [0; LAYER_PRIORITY_LOOKUP_TABLE_SIZE];
+    let mut index = 0;
+    while index < LAYER_PRIORITY_LOOKUP_TABLE_SIZE {
+        table[index] = calculate_layer_priority_entry(index);
+        index += 1;
+    }
+    table
+}
+
+const fn calculate_layer_priority_entry(index: usize) -> u8 {
+    let shadow_highlight_enabled = (index & (1 << 8)) != 0;
+    let sprite_is_shadow_operator = (index & (1 << 7)) != 0;
+    let sprite_is_highlight_operator = (index & (1 << 6)) != 0;
+    let found_sprite_pixel = (index & (1 << 5)) != 0;
+    let found_layer_a_pixel = (index & (1 << 4)) != 0;
+    let found_layer_b_pixel = (index & (1 << 3)) != 0;
+    let priority_sprite = (index & (1 << 2)) != 0;
+    let priority_layer_a = (index & (1 << 1)) != 0;
+    let priority_layer_b = (index & 1) != 0;
+
+    let mut layer_index = LAYER_INDEX_BG;
+    let mut shadow = false;
+    let mut highlight = false;
+
+    if !shadow_highlight_enabled {
+        if found_sprite_pixel && priority_sprite {
+            layer_index = LAYER_INDEX_SPRITE;
+        } else if found_layer_a_pixel && priority_layer_a {
+            layer_index = LAYER_INDEX_A;
+        } else if found_layer_b_pixel && priority_layer_b {
+            layer_index = LAYER_INDEX_B;
+        } else if found_sprite_pixel {
+            layer_index = LAYER_INDEX_SPRITE;
+        } else if found_layer_a_pixel {
+            layer_index = LAYER_INDEX_A;
+        } else if found_layer_b_pixel {
+            layer_index = LAYER_INDEX_B;
+        }
+    } else {
+        if found_sprite_pixel && priority_sprite && !sprite_is_shadow_operator && !sprite_is_highlight_operator {
+            layer_index = LAYER_INDEX_SPRITE;
+        } else if found_layer_a_pixel && priority_layer_a {
+            layer_index = LAYER_INDEX_A;
+            if priority_sprite && sprite_is_shadow_operator {
+                shadow = true;
+            } else if priority_sprite && sprite_is_highlight_operator {
+                highlight = true;
+            }
+        } else if found_layer_b_pixel && priority_layer_b {
+            layer_index = LAYER_INDEX_B;
+            if priority_sprite && sprite_is_shadow_operator {
+                shadow = true;
+            } else if priority_sprite && sprite_is_highlight_operator {
+                highlight = true;
+            }
+        } else if found_sprite_pixel && !sprite_is_shadow_operator && !sprite_is_highlight_operator {
+            layer_index = LAYER_INDEX_SPRITE;
+            if !priority_layer_a && !priority_layer_b {
+                shadow = true;
+            }
+        } else if found_layer_a_pixel {
+            layer_index = LAYER_INDEX_A;
+            if !priority_layer_a && !priority_layer_b {
+                shadow = true;
+            }
+            if sprite_is_shadow_operator {
+                shadow = true;
+            } else if sprite_is_highlight_operator {
+                highlight = true;
+            }
+        } else if found_layer_b_pixel {
+            layer_index = LAYER_INDEX_B;
+            if !priority_layer_a && !priority_layer_b {
+                shadow = true;
+            }
+            if sprite_is_shadow_operator {
+                shadow = true;
+            } else if sprite_is_highlight_operator {
+                highlight = true;
+            }
+        } else {
+            if !priority_layer_a && !priority_layer_b {
+                shadow = true;
+            }
+            if sprite_is_shadow_operator {
+                shadow = true;
+            } else if sprite_is_highlight_operator {
+                highlight = true;
+            }
+        }
+
+        if shadow && highlight {
+            shadow = false;
+            highlight = false;
+        }
+    }
+
+    layer_index | ((highlight as u8) << 2) | ((shadow as u8) << 3)
+}
+
+const LAYER_PRIORITY_LOOKUP_TABLE: [u8; LAYER_PRIORITY_LOOKUP_TABLE_SIZE] =
+    build_layer_priority_lookup_table();
+
 pub const FRAME_WIDTH: usize = 320;
 pub const FRAME_HEIGHT: usize = 224;
+const NTSC_TOTAL_SCANLINES: u16 = 262;
+const PAL_TOTAL_SCANLINES: u16 = 313;
+const NTSC_VBLANK_START: u16 = 224;
+const PAL_VBLANK_START: u16 = 240;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum DmaTarget {
@@ -88,6 +202,27 @@ pub struct Vdp {
     /// Debug: total read_status calls
     #[serde(default)]
     pub debug_read_status_total: u64,
+    /// Active-scanline CRAM write artifacts ("CRAM dots") approximation.
+    #[serde(default)]
+    cram_dot_events: Vec<(usize, u8)>,
+    #[serde(default = "default_cram_dot_scanline")]
+    cram_dot_scanline: u16,
+    #[serde(default = "default_total_scanlines")]
+    total_scanlines: u16,
+    #[serde(default = "default_vblank_start")]
+    vblank_start: u16,
+}
+
+const fn default_cram_dot_scanline() -> u16 {
+    u16::MAX
+}
+
+const fn default_total_scanlines() -> u16 {
+    NTSC_TOTAL_SCANLINES
+}
+
+const fn default_vblank_start() -> u16 {
+    NTSC_VBLANK_START
 }
 
 impl Default for Vdp {
@@ -125,6 +260,10 @@ impl Default for Vdp {
             debug_scanline_vsram_a: vec![0; FRAME_HEIGHT],
             debug_read_status_vblank_count: 0,
             debug_read_status_total: 0,
+            cram_dot_events: Vec::new(),
+            cram_dot_scanline: default_cram_dot_scanline(),
+            total_scanlines: default_total_scanlines(),
+            vblank_start: default_vblank_start(),
         }
     }
 }
@@ -132,6 +271,20 @@ impl Default for Vdp {
 impl Vdp {
     pub fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    pub fn set_pal_mode(&mut self, pal: bool) {
+        if pal {
+            self.total_scanlines = PAL_TOTAL_SCANLINES;
+            self.vblank_start = PAL_VBLANK_START;
+        } else {
+            self.total_scanlines = NTSC_TOTAL_SCANLINES;
+            self.vblank_start = NTSC_VBLANK_START;
+        }
+    }
+
+    pub fn is_pal_mode(&self) -> bool {
+        self.total_scanlines == PAL_TOTAL_SCANLINES
     }
 
     // Register helpers
@@ -173,6 +326,39 @@ impl Vdp {
         (w, h)
     }
 
+    fn effective_playfield_modes(&self) -> (u8, u8) {
+        let hsz = self.registers[0x10] & 0x03;
+        let vsz = (self.registers[0x10] >> 4) & 0x03;
+        // Hardware-like vertical mode limitation based on horizontal size mode.
+        let effective_vsz = ((vsz & 0x01) & (((!hsz) & 0x02) >> 1))
+            | ((vsz & 0x02) & (((!hsz) & 0x01) << 1));
+        (hsz, effective_vsz)
+    }
+
+    fn mapping_row_shift(hsz_mode: u8) -> u8 {
+        // Exodus-derived behavior for invalid HSZ mode 2.
+        [6, 7, 0, 8][hsz_mode as usize]
+    }
+
+    fn mapping_entry_address(&self, plane_addr: usize, tile_row: usize, tile_col: usize) -> usize {
+        let (hsz_mode, vsz_mode) = self.effective_playfield_modes();
+        let playfield_mask_x = ((hsz_mode as u16) << 5) | 0x1F;
+        let playfield_mask_y = ((vsz_mode as u16) << 5) | 0x1F;
+        let row_shift = Self::mapping_row_shift(hsz_mode);
+
+        let row = (tile_row as u16) & playfield_mask_y;
+        let col = (tile_col as u16) & playfield_mask_x;
+
+        let mut mapping_data_address = (plane_addr as u16)
+            | ((row << row_shift) & ((!playfield_mask_x) << 1))
+            | (col << 1);
+        // Invalid HSZ mode 2 uses special masking behavior (Exodus/hardware tests).
+        if hsz_mode == 2 {
+            mapping_data_address &= 0xFF3F;
+        }
+        mapping_data_address as usize
+    }
+
     fn cram_color(&self, index: u8, shadow: bool, highlight: bool) -> u32 {
         let idx = (index as usize) * 2;
         if idx + 1 >= self.cram.len() { return 0xFF000000; }
@@ -197,6 +383,53 @@ impl Vdp {
 
     fn left_column_blank(&self) -> bool { (self.registers[0] & 0x20) != 0 }
 
+    fn clear_cram_dot_line_if_matches(&mut self, y: u16) {
+        if self.cram_dot_scanline == y {
+            self.cram_dot_events.clear();
+            self.cram_dot_scanline = default_cram_dot_scanline();
+        }
+    }
+
+    fn record_cram_dot_write(&mut self, cram_addr: usize) {
+        if !self.display_enabled() || (self.scanline as usize) >= FRAME_HEIGHT {
+            return;
+        }
+
+        if self.cram_dot_scanline != self.scanline {
+            self.cram_dot_events.clear();
+            self.cram_dot_scanline = self.scanline;
+        }
+
+        let screen_w = if self.h40_mode() { 320usize } else { 256 };
+        let color_idx = ((cram_addr & 0x7E) >> 1) as u8;
+        let entry = (color_idx & 0x3F) as usize;
+        let mut x = (entry * screen_w) / 64;
+        x = (x + (self.cram_dot_events.len() & 0x03)).min(screen_w.saturating_sub(1));
+        self.cram_dot_events.push((x, color_idx));
+    }
+
+    fn apply_cram_dots_for_line(&mut self, y: usize, screen_w: usize) {
+        if self.cram_dot_scanline != y as u16 || self.cram_dot_events.is_empty() {
+            return;
+        }
+
+        let mut events = self.cram_dot_events.clone();
+        events.sort_by_key(|(x, _)| *x);
+
+        let mut next = 0usize;
+        let mut propagated_color_idx: Option<u8> = None;
+        for x in 0..screen_w.min(FRAME_WIDTH) {
+            while next < events.len() && events[next].0 <= x {
+                propagated_color_idx = Some(events[next].1);
+                next += 1;
+            }
+
+            if let Some(color_idx) = propagated_color_idx {
+                self.framebuffer[y * FRAME_WIDTH + x] = self.cram_to_argb(color_idx);
+            }
+        }
+    }
+
     fn get_tile_pixel(&self, tile_addr: usize, px: usize, py: usize) -> u8 {
         let row_offset = tile_addr + py * 4;
         let byte_idx = row_offset + (px >> 1);
@@ -217,18 +450,39 @@ impl Vdp {
         }
     }
 
+    fn vscroll_source_column(x: usize, hscroll: i32, per_col_vscroll: bool) -> i32 {
+        if !per_col_vscroll {
+            return 0;
+        }
+
+        let col = (x / 16) as i32;
+        let left_scrolled_column_visible = hscroll.rem_euclid(16) != 0;
+        if left_scrolled_column_visible {
+            col - 1
+        } else {
+            col
+        }
+    }
+
     fn render_scroll_line(&self, plane_addr: usize, hscroll: i32, vscroll_full: i32, vsram_offset: usize, per_col_vscroll: bool, y: usize, line_buf: &mut [(u8, bool)]) {
-        let (sw, sh) = self.scroll_size();
+        let (hsz_mode, vsz_mode) = self.effective_playfield_modes();
+        let playfield_w_cells = (((hsz_mode as usize) << 5) | 0x1F) + 1;
+        let playfield_h_cells = (((vsz_mode as usize) << 5) | 0x1F) + 1;
         let screen_w = if self.h40_mode() { 320 } else { 256 };
         let interlace2 = self.interlace_double();
         let rows_per_tile: usize = if interlace2 { 16 } else { 8 };
-        let effective_sh = if interlace2 { sh * 2 } else { sh };
+        let playfield_h_pixels = playfield_h_cells * rows_per_tile;
+        let playfield_w_pixels = playfield_w_cells * 8;
 
         for x in 0..screen_w {
             // Per-2-column vscroll: each 16-pixel (2-cell) column uses its own VSRAM entry
             let vscroll_raw = if per_col_vscroll {
-                let col = x / 16;
-                self.read_vsram_word(col * 4 + vsram_offset) as i32
+                let source_col = Self::vscroll_source_column(x, hscroll, per_col_vscroll);
+                if source_col < 0 {
+                    self.read_vsram_word(0x50 + vsram_offset) as i32
+                } else {
+                    self.read_vsram_word(source_col as usize * 4 + vsram_offset) as i32
+                }
             } else {
                 vscroll_full
             };
@@ -243,15 +497,15 @@ impl Vdp {
                 y as i32
             };
 
-            let scrolled_y = ((effective_y + vscroll) as usize) % (effective_sh * 8);
+            let scrolled_y = ((effective_y + vscroll) as usize) % playfield_h_pixels;
             let tile_row = scrolled_y / rows_per_tile;
             let py = scrolled_y % rows_per_tile;
 
-            let scrolled_x = ((x as i32 - hscroll) as usize) % (sw * 8);
+            let scrolled_x = ((x as i32 - hscroll) as usize) % playfield_w_pixels;
             let tile_col = scrolled_x / 8;
             let px = scrolled_x % 8;
 
-            let entry_addr = plane_addr + (tile_row * sw + tile_col) * 2;
+            let entry_addr = self.mapping_entry_address(plane_addr, tile_row, tile_col);
             if entry_addr + 1 >= self.vram.len() { continue; }
             let entry = ((self.vram[entry_addr] as u16) << 8) | self.vram[entry_addr + 1] as u16;
 
@@ -294,6 +548,81 @@ impl Vdp {
             b_idx
         } else {
             bg_idx
+        }
+    }
+
+    fn lookup_shadow_highlight_priority(
+        plane_b: (u8, bool),
+        plane_a: (u8, bool),
+        sprite: (u8, bool),
+        bg_idx: u8,
+        sprite_is_shadow_operator: bool,
+        sprite_is_highlight_operator: bool,
+    ) -> (u8, u8, bool, bool) {
+        let (b_idx, b_pri) = plane_b;
+        let (a_idx, a_pri) = plane_a;
+        let (s_idx, s_pri) = sprite;
+
+        let mut priority_index = 1 << 8;
+        priority_index |= ((sprite_is_shadow_operator as usize) << 7)
+            | ((sprite_is_highlight_operator as usize) << 6)
+            | (((s_idx != 0) as usize) << 5)
+            | (((a_idx != 0) as usize) << 4)
+            | (((b_idx != 0) as usize) << 3)
+            | ((s_pri as usize) << 2)
+            | ((a_pri as usize) << 1)
+            | (b_pri as usize);
+
+        let selection = LAYER_PRIORITY_LOOKUP_TABLE[priority_index];
+        let layer_index = selection & 0x03;
+        let shadow = (selection & 0x08) != 0;
+        let highlight = (selection & 0x04) != 0;
+        let color_idx = match layer_index {
+            LAYER_INDEX_SPRITE => s_idx,
+            LAYER_INDEX_A => a_idx,
+            LAYER_INDEX_B => b_idx,
+            _ => bg_idx,
+        };
+
+        (layer_index, color_idx, shadow, highlight)
+    }
+
+    fn apply_left_window_distortion_bug(&self, hscroll_a: i32, win_h_cell: usize, plane_a_buf: &mut [(u8, bool)]) {
+        let screen_w = if self.h40_mode() { 320usize } else { 256 };
+        let boundary_px = win_h_cell * 8;
+        if boundary_px >= screen_w {
+            return;
+        }
+
+        // We sample from the original line to avoid cascading distortion.
+        let source = plane_a_buf.to_vec();
+        let (sw, _) = self.scroll_size();
+        let playfield_pixels = (sw * 8) as i32;
+        let hscroll_pattern_displacement = hscroll_a.rem_euclid(8) as usize;
+
+        for x in boundary_px..screen_w {
+            let screen_column = x / 16;
+            if screen_column == 0 {
+                continue;
+            }
+
+            let prev_column_start = (screen_column - 1) * 16;
+            let prev_column_had_window = prev_column_start < boundary_px;
+            if !prev_column_had_window {
+                continue;
+            }
+
+            let current_column_pixel = x - (screen_column * 16);
+            let column_start_x = (screen_column * 16) as i32;
+            let scrolled_x = (column_start_x - hscroll_a).rem_euclid(playfield_pixels) as usize;
+            let scrolled_mapping_number = scrolled_x / 8;
+            let distorted_pixel_count =
+                hscroll_pattern_displacement + ((scrolled_mapping_number & 0x1) * 8);
+
+            if current_column_pixel < distorted_pixel_count {
+                let src_x = (x + 16) % screen_w;
+                plane_a_buf[x] = source[src_x];
+            }
         }
     }
 
@@ -412,15 +741,20 @@ impl Vdp {
         self.hblank_flag = false;
 
         let y = self.scanline as usize;
+        let in_active_period = self.scanline < self.vblank_start;
 
-        if y < FRAME_HEIGHT {
-            if self.display_enabled() {
-                self.render_line(y);
-            } else {
-                let bg = self.cram_to_argb(self.bg_color_index());
-                for x in 0..FRAME_WIDTH {
-                    self.framebuffer[y * FRAME_WIDTH + x] = bg;
+        if in_active_period {
+            if y < FRAME_HEIGHT {
+                if self.display_enabled() {
+                    self.render_line(y);
+                } else {
+                    let bg = self.cram_to_argb(self.bg_color_index());
+                    for x in 0..FRAME_WIDTH {
+                        self.framebuffer[y * FRAME_WIDTH + x] = bg;
+                    }
                 }
+
+                self.clear_cram_dot_line_if_matches(self.scanline);
             }
 
             // H-interrupt counter
@@ -438,7 +772,7 @@ impl Vdp {
         }
 
         self.scanline = self.scanline.wrapping_add(1);
-        if self.scanline == 224 {
+        if self.scanline == self.vblank_start {
             self.status |= 0x0008; // VBlank flag in status
             self.status |= 0x0080; // F flag (VInt pending)
             // Z80 /INT is directly connected to VBlank, independent of VINT_EN
@@ -447,7 +781,7 @@ impl Vdp {
                 self.vblank_flag = true;
             }
         }
-        if self.scanline >= 262 {
+        if self.scanline >= self.total_scanlines {
             self.scanline = 0;
             self.frame += 1;
             self.status ^= 0x0004; // Toggle odd/even frame
@@ -501,20 +835,20 @@ impl Vdp {
         // 2=per-tile (8-pixel row), 3=per-line
         let (hscroll_a, hscroll_b) = match self.hscroll_mode() {
             0 | 1 => {
-                let a = (Self::read_vram_word(&self.vram, hs_addr) & 0x03FF) as i16 as i32;
-                let b = (Self::read_vram_word(&self.vram, hs_addr + 2) & 0x03FF) as i16 as i32;
+                let a = Self::decode_hscroll(Self::read_vram_word(&self.vram, hs_addr));
+                let b = Self::decode_hscroll(Self::read_vram_word(&self.vram, hs_addr + 2));
                 (a, b)
             }
             2 => {
                 let row = (y & !7) * 4;
-                let a = (Self::read_vram_word(&self.vram, hs_addr + row) & 0x03FF) as i16 as i32;
-                let b = (Self::read_vram_word(&self.vram, hs_addr + row + 2) & 0x03FF) as i16 as i32;
+                let a = Self::decode_hscroll(Self::read_vram_word(&self.vram, hs_addr + row));
+                let b = Self::decode_hscroll(Self::read_vram_word(&self.vram, hs_addr + row + 2));
                 (a, b)
             }
             _ => {
                 let row = y * 4;
-                let a = (Self::read_vram_word(&self.vram, hs_addr + row) & 0x03FF) as i16 as i32;
-                let b = (Self::read_vram_word(&self.vram, hs_addr + row + 2) & 0x03FF) as i16 as i32;
+                let a = Self::decode_hscroll(Self::read_vram_word(&self.vram, hs_addr + row));
+                let b = Self::decode_hscroll(Self::read_vram_word(&self.vram, hs_addr + row + 2));
                 (a, b)
             },
         };
@@ -543,6 +877,9 @@ impl Vdp {
         if has_any_window {
             // Render scroll A only for non-window pixels
             self.render_scroll_line(self.scroll_a_addr(), hscroll_a, vscroll_a, 0, per_col_vscroll, y, &mut plane_a_buf);
+            if !win_right {
+                self.apply_left_window_distortion_bug(hscroll_a, win_h_cell, &mut plane_a_buf);
+            }
             // Overwrite window area with window plane tiles
             let win_row = y / 8;
             let win_py = y % 8;
@@ -589,68 +926,17 @@ impl Vdp {
                 let is_highlight_op = (front_ci & 0x3F) == 0x3E; // palette 3, index 14
                 let sprite_is_normal_intensity = (front_ci & 0x0F) == 0x0E && !is_highlight_op;
 
-                let found_sprite = front_sprite.0 != 0;
-                let found_a = a_idx != 0;
-                let found_b = b_idx != 0;
-
-                // Exodus lookup-table logic, expanded directly.
-                let (layer_idx, color_idx, mut shadow, mut highlight);
-
-                if found_sprite && front_sprite.1 && !is_shadow_op && !is_highlight_op {
-                    layer_idx = 0;
-                    color_idx = front_sprite.0;
-                    shadow = false;
-                    highlight = false;
-                } else if found_a && a_pri {
-                    layer_idx = 1;
-                    color_idx = a_idx;
-                    shadow = false;
-                    highlight = false;
-                    if found_sprite && front_sprite.1 && is_shadow_op { shadow = true; }
-                    else if found_sprite && front_sprite.1 && is_highlight_op { highlight = true; }
-                } else if found_b && b_pri {
-                    layer_idx = 2;
-                    color_idx = b_idx;
-                    shadow = false;
-                    highlight = false;
-                    if found_sprite && front_sprite.1 && is_shadow_op { shadow = true; }
-                    else if found_sprite && front_sprite.1 && is_highlight_op { highlight = true; }
-                } else if found_sprite && !is_shadow_op && !is_highlight_op {
-                    layer_idx = 0;
-                    color_idx = front_sprite.0;
-                    shadow = !a_pri && !b_pri;
-                    highlight = false;
-                } else if found_a {
-                    layer_idx = 1;
-                    color_idx = a_idx;
-                    shadow = !a_pri && !b_pri;
-                    highlight = false;
-                    if is_shadow_op { shadow = true; }
-                    if is_highlight_op { highlight = true; }
-                } else if found_b {
-                    layer_idx = 2;
-                    color_idx = b_idx;
-                    shadow = !a_pri && !b_pri;
-                    highlight = false;
-                    if is_shadow_op { shadow = true; }
-                    if is_highlight_op { highlight = true; }
-                } else {
-                    layer_idx = 3;
-                    color_idx = bg_idx;
-                    shadow = !a_pri && !b_pri;
-                    highlight = false;
-                    if is_shadow_op { shadow = true; }
-                    if is_highlight_op { highlight = true; }
-                }
+                let (layer_idx, color_idx, mut shadow, mut highlight) = Self::lookup_shadow_highlight_priority(
+                    (b_idx, b_pri),
+                    (a_idx, a_pri),
+                    front_sprite,
+                    bg_idx,
+                    is_shadow_op,
+                    is_highlight_op,
+                );
 
                 // Sprite palette index 14 on palette rows other than row 3 stays normal.
-                if layer_idx == 0 && sprite_is_normal_intensity {
-                    shadow = false;
-                    highlight = false;
-                }
-
-                // Shadow and highlight cancel each other out (Exodus-verified)
-                if shadow && highlight {
+                if layer_idx == LAYER_INDEX_SPRITE && sprite_is_normal_intensity {
                     shadow = false;
                     highlight = false;
                 }
@@ -670,6 +956,9 @@ impl Vdp {
         for x in screen_w..FRAME_WIDTH {
             self.framebuffer[y * FRAME_WIDTH + x] = bg_color;
         }
+
+        // CRAM write artifacts can propagate color along the currently drawn scanline.
+        self.apply_cram_dots_for_line(y, screen_w);
 
         // Left column blanking: Register 0 bit 5 blanks leftmost 8 pixels
         if self.left_column_blank() {
@@ -709,11 +998,16 @@ impl Vdp {
         self.pending_command = None;
         self.data_write_count += 1;
         let bytes = value.to_be_bytes();
+        let access_code = self.code & 0x0F;
+        let write_addr = self.address as usize;
         match self.code & 0x0F {
             0x01 => Self::write_pair(&mut self.vram, self.address as usize, bytes),
             0x03 => Self::write_pair(&mut self.cram, self.address as usize, bytes),
             0x05 => Self::write_pair(&mut self.vsram, self.address as usize, bytes),
             _ => Self::write_pair(&mut self.vram, self.address as usize, bytes),
+        }
+        if access_code == 0x03 {
+            self.record_cram_dot_write(write_addr);
         }
 
         // Handle DMA fill: after the initial data write, fill remaining bytes
@@ -901,6 +1195,15 @@ impl Vdp {
         ((data[addr] as u16) << 8) | data[addr + 1] as u16
     }
 
+    fn decode_hscroll(raw: u16) -> i32 {
+        let v = (raw & 0x03FF) as i32;
+        if (v & 0x0200) != 0 {
+            v - 0x0400
+        } else {
+            v
+        }
+    }
+
     // ===== Debug rendering =====
 
     /// Render entire scroll plane (A or B) as ARGB framebuffer.
@@ -1019,7 +1322,10 @@ impl Vdp {
 
 #[cfg(test)]
 mod tests {
-    use super::{DmaRequest, DmaTarget, Vdp};
+    use super::{
+        DmaRequest, DmaTarget, Vdp, LAYER_INDEX_A, LAYER_INDEX_BG, LAYER_INDEX_SPRITE,
+        default_cram_dot_scanline,
+    };
 
     #[test]
     fn data_port_writes_vram() {
@@ -1121,5 +1427,176 @@ mod tests {
         vdp.step_scanline();
         assert_eq!(vdp.scanline, 0);
         assert_eq!(vdp.status & 0x0008, 0, "VBlank should be cleared at new frame");
+    }
+
+    #[test]
+    fn shadow_highlight_lookup_prefers_high_priority_plane_a_over_operator_sprite() {
+        let (layer_idx, color_idx, shadow, highlight) = Vdp::lookup_shadow_highlight_priority(
+            (0, false),
+            (0x12, true),
+            (0x3F, true),
+            0,
+            true,
+            false,
+        );
+
+        assert_eq!(layer_idx, LAYER_INDEX_A);
+        assert_eq!(color_idx, 0x12);
+        assert!(shadow);
+        assert!(!highlight);
+    }
+
+    #[test]
+    fn shadow_highlight_lookup_shadows_low_priority_sprite_when_planes_are_low_priority() {
+        let (layer_idx, color_idx, shadow, highlight) = Vdp::lookup_shadow_highlight_priority(
+            (0, false),
+            (0, false),
+            (0x21, false),
+            0x05,
+            false,
+            false,
+        );
+
+        assert_eq!(layer_idx, LAYER_INDEX_SPRITE);
+        assert_eq!(color_idx, 0x21);
+        assert!(shadow);
+        assert!(!highlight);
+    }
+
+    #[test]
+    fn shadow_highlight_lookup_cancels_shadow_and_highlight_when_both_apply() {
+        let (layer_idx, color_idx, shadow, highlight) = Vdp::lookup_shadow_highlight_priority(
+            (0, false),
+            (0, false),
+            (0x3E, false),
+            0x05,
+            false,
+            true,
+        );
+
+        assert_eq!(layer_idx, LAYER_INDEX_BG);
+        assert_eq!(color_idx, 0x05);
+        assert!(!shadow);
+        assert!(!highlight);
+    }
+
+    #[test]
+    fn left_window_distortion_shifts_first_pixels_of_following_2cell_column() {
+        let vdp = Vdp::default();
+        let mut line = (0..256).map(|x| (x as u8, false)).collect::<Vec<_>>();
+
+        // Boundary at pixel 24 (3 cells): non-window starts in column 1 (16..31).
+        // hscroll=3 -> pattern displacement=3, odd mapping parity => distorted count 11.
+        vdp.apply_left_window_distortion_bug(3, 3, &mut line);
+
+        assert_eq!(line[24].0, 40);
+        assert_eq!(line[25].0, 41);
+        assert_eq!(line[26].0, 42);
+        assert_eq!(line[27].0, 27);
+    }
+
+    #[test]
+    fn vscroll_source_column_uses_left_scrolled_column_when_hscroll_is_unaligned() {
+        assert_eq!(Vdp::vscroll_source_column(0, 0, true), 0);
+        assert_eq!(Vdp::vscroll_source_column(15, 0, true), 0);
+        assert_eq!(Vdp::vscroll_source_column(16, 0, true), 1);
+
+        assert_eq!(Vdp::vscroll_source_column(0, 1, true), -1);
+        assert_eq!(Vdp::vscroll_source_column(15, 1, true), -1);
+        assert_eq!(Vdp::vscroll_source_column(16, 1, true), 0);
+    }
+
+    #[test]
+    fn invalid_hsz_mode_masks_mapping_address_bits_6_7() {
+        let mut vdp = Vdp::default();
+        vdp.registers[0x10] = 0x02; // HSZ=2 (invalid), VSZ=0
+        let base = 0xC000usize;
+
+        let addr = vdp.mapping_entry_address(base, 5, 19);
+        assert_eq!(addr & 0x00C0, 0, "HSZ=2 should clear address bits 6 and 7");
+
+        vdp.registers[0x10] = 0x01; // HSZ=1 (valid)
+        let valid_addr = vdp.mapping_entry_address(base, 5, 19);
+        assert_ne!(valid_addr & 0x00C0, 0, "valid HSZ should keep bits 6/7 meaningful");
+    }
+
+    #[test]
+    fn mapping_entry_address_advances_by_2_bytes_per_cell() {
+        let mut vdp = Vdp::default();
+        vdp.registers[0x10] = 0x01; // valid HSZ mode
+        let base = 0xC000usize;
+
+        let a0 = vdp.mapping_entry_address(base, 0, 0);
+        let a1 = vdp.mapping_entry_address(base, 0, 1);
+        let a2 = vdp.mapping_entry_address(base, 0, 2);
+
+        assert_eq!(a0, base);
+        assert_eq!(a1, base + 2);
+        assert_eq!(a2, base + 4);
+    }
+
+    #[test]
+    fn cram_dots_propagate_latest_color_on_target_scanline() {
+        let mut vdp = Vdp::default();
+        // Display enabled
+        vdp.registers[1] = 0x40;
+
+        // Palette entry 1 and 2 colors
+        vdp.cram[2] = 0x00;
+        vdp.cram[3] = 0x0E;
+        vdp.cram[4] = 0x00;
+        vdp.cram[5] = 0x0C;
+
+        vdp.cram_dot_scanline = 0;
+        vdp.cram_dot_events = vec![(4, 1), (8, 2)];
+        vdp.render_line(0);
+
+        let bg = vdp.cram_to_argb(vdp.bg_color_index());
+        let c1 = vdp.cram_to_argb(1);
+        let c2 = vdp.cram_to_argb(2);
+
+        assert_eq!(vdp.framebuffer[3], bg);
+        assert_eq!(vdp.framebuffer[4], c1);
+        assert_eq!(vdp.framebuffer[7], c1);
+        assert_eq!(vdp.framebuffer[8], c2);
+    }
+
+    #[test]
+    fn cram_dot_state_clears_after_scanline_advance() {
+        let mut vdp = Vdp::default();
+        vdp.registers[1] = 0x40;
+        vdp.cram_dot_scanline = 0;
+        vdp.cram_dot_events.push((2, 1));
+
+        vdp.step_scanline();
+
+        assert!(vdp.cram_dot_events.is_empty());
+        assert_eq!(vdp.cram_dot_scanline, default_cram_dot_scanline());
+    }
+
+    #[test]
+    fn pal_mode_enters_vblank_at_scanline_240() {
+        let mut vdp = Vdp::default();
+        vdp.set_pal_mode(true);
+
+        for _ in 0..239 {
+            vdp.step_scanline();
+        }
+
+        assert_eq!(vdp.scanline, 239);
+        assert_eq!(vdp.status & 0x0008, 0, "VBlank should not be set before PAL line 240");
+
+        vdp.step_scanline();
+
+        assert_eq!(vdp.scanline, 240);
+        assert_ne!(vdp.status & 0x0008, 0, "VBlank should be set at PAL line 240");
+    }
+
+    #[test]
+    fn hscroll_decodes_signed_10bit_values() {
+        assert_eq!(Vdp::decode_hscroll(0x0000), 0);
+        assert_eq!(Vdp::decode_hscroll(0x01FF), 511);
+        assert_eq!(Vdp::decode_hscroll(0x0200), -512);
+        assert_eq!(Vdp::decode_hscroll(0x03FF), -1);
     }
 }

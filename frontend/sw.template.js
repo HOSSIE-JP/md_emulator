@@ -40,7 +40,31 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Network-first: always try fresh content, fall back to cache offline
+  const url = new URL(request.url);
+
+  // Critical assets (.wasm, .js, sw.js): always bypass cache
+  const isCritical = url.pathname.endsWith(".wasm")
+    || url.pathname.endsWith(".js")
+    || url.pathname.endsWith(".html");
+
+  if (isCritical) {
+    event.respondWith(
+      fetch(request, { cache: "no-cache" })
+        .then((response) => {
+          if (response && response.status === 200 && response.type === "basic") {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(request, clone).catch(() => {});
+            });
+          }
+          return response;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
+
+  // Other assets (icons, manifests, ROMs): network-first with cache fallback
   event.respondWith(
     fetch(request)
       .then((response) => {

@@ -1,4 +1,4 @@
-use md_core::{CpuState, Emulator};
+use md_core::{CpuState, Emulator, VideoRegion};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -82,6 +82,27 @@ impl EmulatorHandle {
 
     pub fn run_frame(&mut self) {
         self.emu.run_frame();
+    }
+
+    pub fn get_video_region(&self) -> String {
+        self.emu.video_region().as_str().to_string()
+    }
+
+    pub fn is_video_region_auto(&self) -> bool {
+        self.emu.video_region_auto()
+    }
+
+    pub fn set_video_region(&mut self, region: String) -> Result<(), JsValue> {
+        if let Some(region) = VideoRegion::from_str(&region) {
+            self.emu.set_video_region(region);
+            Ok(())
+        } else {
+            Err(JsValue::from_str("invalid region, expected ntsc or pal"))
+        }
+    }
+
+    pub fn auto_video_region(&mut self) {
+        self.emu.auto_detect_video_region();
     }
 
     pub fn pause(&mut self) {
@@ -214,5 +235,45 @@ impl EmulatorHandle {
         self.emu
             .load_state(&data)
             .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Returns true if the loaded ROM has battery-backed SRAM.
+    pub fn has_sram(&self) -> bool {
+        self.emu.has_sram()
+    }
+
+    /// Returns the current SRAM contents as a byte array.
+    /// Returns an empty Vec if no SRAM is present.
+    pub fn get_sram(&self) -> Vec<u8> {
+        self.emu.get_sram().to_vec()
+    }
+
+    /// Restores SRAM from a byte array (e.g., loaded from IndexedDB).
+    /// No-op if the ROM has no SRAM or the sizes don't match.
+    pub fn load_sram(&mut self, data: Vec<u8>) {
+        if self.emu.has_sram() {
+            self.emu.load_sram(&data);
+        }
+    }
+
+    /// Returns SRAM info as a JS object: { has_sram, start, end, size, flags }.
+    pub fn get_sram_info(&self) -> Result<JsValue, JsValue> {
+        #[derive(Serialize)]
+        struct SramInfo {
+            has_sram: bool,
+            start: u32,
+            end: u32,
+            size: usize,
+            flags: u8,
+        }
+        let (start, end, size, flags) = self.emu.sram_info();
+        let info = SramInfo {
+            has_sram: self.emu.has_sram(),
+            start,
+            end,
+            size,
+            flags,
+        };
+        serde_wasm_bindgen::to_value(&info).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 }

@@ -1,4 +1,5 @@
 use std::collections::{HashSet, VecDeque};
+use std::io::Read;
 
 const Z80_TRACE_RING_CAPACITY: usize = 32768;
 use std::path::Path;
@@ -12,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const NTSC_FRAME_CYCLES_68K: u32 = 488 * 262;
+pub const PAL_FRAME_CYCLES_68K: u32 = 488 * 313;
 const M68K_CLOCK_HZ: i64 = 7_670_454;
 const Z80_CLOCK_HZ: i64 = 3_579_545;
 const VDP_DATA_PORT: u32 = 0xC0_0000;
@@ -50,6 +52,37 @@ pub struct RomInfo {
     pub checksum: u16,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VideoRegion {
+    Ntsc,
+    Pal,
+}
+
+impl Default for VideoRegion {
+    fn default() -> Self {
+        Self::Ntsc
+    }
+}
+
+impl VideoRegion {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ntsc => "ntsc",
+            Self::Pal => "pal",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        let normalized = value.trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "ntsc" | "60hz" | "60" => Some(Self::Ntsc),
+            "pal" | "50hz" | "50" => Some(Self::Pal),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Emulator {
     m68k: M68k,
@@ -72,6 +105,14 @@ pub struct Emulator {
     vdp_cycle_accumulator: u32,
     #[serde(default)]
     z80_cycle_balance: i64,
+    #[serde(default)]
+    video_region: VideoRegion,
+    #[serde(default = "default_region_auto")]
+    video_region_auto: bool,
+}
+
+const fn default_region_auto() -> bool {
+    true
 }
 
 impl Default for Emulator {
@@ -92,6 +133,8 @@ impl Default for Emulator {
             prev_z80_reset: true,
             vdp_cycle_accumulator: 0,
             z80_cycle_balance: 0,
+            video_region: VideoRegion::Ntsc,
+            video_region_auto: true,
         }
     }
 }
@@ -122,12 +165,18 @@ impl Emulator {
         if bytes.is_empty() {
             return Err(EmulatorError::EmptyRom);
         }
-        let rom = if Self::is_smd_format(bytes) {
-            Self::deinterleave_smd(bytes)
+        let raw = if Self::is_zip(bytes) {
+            Self::extract_rom_from_zip(bytes)?
         } else {
             bytes.to_vec()
         };
+        let rom = if Self::is_smd_format(&raw) {
+            Self::deinterleave_smd(&raw)
+        } else {
+            raw
+        };
         self.bus.load_rom(rom);
+        self.auto_detect_video_region();
         self.reset();
         Ok(())
     }
@@ -180,11 +229,48 @@ impl Emulator {
         rom
     }
 
+    /// ROM file extensions recognized inside ZIP archives.
+    const ROM_EXTENSIONS: &'static [&'static str] = &["bin", "md", "gen", "smd", "sms", "32x"];
+
+    /// Check if data starts with the ZIP local-file magic bytes.
+    fn is_zip(bytes: &[u8]) -> bool {
+        bytes.len() >= 4 && bytes[0] == 0x50 && bytes[1] == 0x4B && bytes[2] == 0x03 && bytes[3] == 0x04
+    }
+
+    /// Extract the first ROM file found inside a ZIP archive.
+    fn extract_rom_from_zip(bytes: &[u8]) -> Result<Vec<u8>, EmulatorError> {
+        let cursor = std::io::Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(cursor)
+            .map_err(|e| EmulatorError::RomReadError(format!("invalid zip: {e}")))?;
+
+        // First pass: find ROM by extension
+        let rom_index = (0..archive.len()).find(|&i| {
+            if let Ok(file) = archive.by_index(i) {
+                let name = file.name().to_ascii_lowercase();
+                Self::ROM_EXTENSIONS.iter().any(|ext| name.ends_with(&format!(".{ext}")))
+            } else {
+                false
+            }
+        });
+
+        let index = rom_index.ok_or_else(|| {
+            EmulatorError::RomReadError("no ROM file found in zip".into())
+        })?;
+
+        let mut file = archive.by_index(index)
+            .map_err(|e| EmulatorError::RomReadError(format!("zip entry read error: {e}")))?;
+        let mut buf = Vec::with_capacity(file.size() as usize);
+        file.read_to_end(&mut buf)
+            .map_err(|e| EmulatorError::RomReadError(format!("zip extract error: {e}")))?;
+        Ok(buf)
+    }
+
     pub fn reset(&mut self) {
         self.bus.reset();
         self.m68k.reset();
         self.z80.reset();
         self.vdp.reset();
+        self.vdp.set_pal_mode(matches!(self.video_region, VideoRegion::Pal));
         self.apu.reset();
         self.paused = false;
         self.trace.clear();
@@ -225,7 +311,28 @@ impl Emulator {
         if self.paused {
             return;
         }
-        self.step(NTSC_FRAME_CYCLES_68K);
+        self.step(self.frame_cycles_68k());
+    }
+
+    pub fn video_region(&self) -> VideoRegion {
+        self.video_region
+    }
+
+    pub fn video_region_auto(&self) -> bool {
+        self.video_region_auto
+    }
+
+    pub fn set_video_region(&mut self, region: VideoRegion) {
+        self.video_region = region;
+        self.video_region_auto = false;
+        self.vdp.set_pal_mode(matches!(region, VideoRegion::Pal));
+    }
+
+    pub fn auto_detect_video_region(&mut self) {
+        let detected = self.detect_video_region_from_header();
+        self.video_region = detected;
+        self.video_region_auto = true;
+        self.vdp.set_pal_mode(matches!(detected, VideoRegion::Pal));
     }
 
     pub fn pause(&mut self) {
@@ -309,6 +416,26 @@ impl Emulator {
 
     pub fn get_vsram(&self) -> &[u8] {
         &self.vdp.vsram
+    }
+
+    /// Returns true if the loaded ROM has battery-backed SRAM.
+    pub fn has_sram(&self) -> bool {
+        self.bus.has_sram()
+    }
+
+    /// Returns the current SRAM contents (effective bytes; halved for odd/even-only SRAM).
+    pub fn get_sram(&self) -> &[u8] {
+        self.bus.get_sram()
+    }
+
+    /// Restores SRAM from an external buffer (e.g., loaded from a save file).
+    pub fn load_sram(&mut self, data: &[u8]) {
+        self.bus.load_sram(data);
+    }
+
+    /// Returns SRAM mapping info: (start_addr, end_addr, effective_size_bytes, flags).
+    pub fn sram_info(&self) -> (u32, u32, usize, u8) {
+        self.bus.sram_info()
     }
 
     /// Debug: return APU internal state for diagnostics
@@ -545,12 +672,52 @@ impl Emulator {
         let restored: Emulator =
             serde_json::from_slice(data).map_err(|e| EmulatorError::StateDeserializeError(e.to_string()))?;
         *self = restored;
+        self.vdp.set_pal_mode(matches!(self.video_region, VideoRegion::Pal));
         Ok(())
     }
 
     fn process_vdp_dma(&mut self) {
         if let Some(req) = self.vdp.consume_dma_request() {
             self.vdp.execute_dma_from_memory(req, |addr| BusDevice::read8(&self.bus, addr));
+        }
+    }
+
+    fn frame_cycles_68k(&self) -> u32 {
+        match self.video_region {
+            VideoRegion::Ntsc => NTSC_FRAME_CYCLES_68K,
+            VideoRegion::Pal => PAL_FRAME_CYCLES_68K,
+        }
+    }
+
+    fn detect_video_region_from_header(&self) -> VideoRegion {
+        let region = self.read_header_string(0x1F0, 0x200).to_ascii_uppercase();
+        let mut has_ntsc = false;
+        let mut has_pal = false;
+
+        for ch in region.chars() {
+            match ch {
+                'J' | 'U' => has_ntsc = true,
+                'E' | 'F' | 'G' | 'I' => has_pal = true,
+                '0'..='9' | 'A'..='F' => {
+                    if let Some(bits) = ch.to_digit(16) {
+                        // Common Mega Drive region bit usage:
+                        // bit0=Japan, bit2=USA, bit3=Europe.
+                        if (bits & 0x01) != 0 || (bits & 0x04) != 0 {
+                            has_ntsc = true;
+                        }
+                        if (bits & 0x08) != 0 {
+                            has_pal = true;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if has_pal && !has_ntsc {
+            VideoRegion::Pal
+        } else {
+            VideoRegion::Ntsc
         }
     }
 
@@ -908,7 +1075,7 @@ impl Z80Bus for CoreZ80Bus<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CoreM68kBus, CoreZ80Bus, Emulator};
+    use super::{CoreM68kBus, CoreZ80Bus, Emulator, VideoRegion};
     use md_cpu_m68k::M68kBus;
     use md_cpu_z80::Z80Bus;
 
@@ -1088,6 +1255,75 @@ mod tests {
             assert_eq!(m68k_bus.read8(0xA0_0000), 0xAA);
             assert_eq!(m68k_bus.read8(0xA0_0001), 0xBB);
             assert_eq!(m68k_bus.read8(0xA0_0002), 0xCC);
+        }
+    }
+
+    #[test]
+    fn detects_pal_from_europe_only_region_header() {
+        let mut rom = vec![0u8; 0x400];
+        write_be32(&mut rom, 0x00, 0x00FF_0000);
+        write_be32(&mut rom, 0x04, 0x0000_0200);
+        rom[0x1F0..0x1F1].copy_from_slice(b"E");
+
+        let mut emu = Emulator::new();
+        emu.load_rom_bytes(&rom).expect("load_rom_bytes failed");
+
+        assert_eq!(emu.video_region(), VideoRegion::Pal);
+        assert!(emu.video_region_auto());
+    }
+
+    #[test]
+    fn manual_video_region_override_disables_auto_flag() {
+        let mut emu = Emulator::new();
+        emu.set_video_region(VideoRegion::Pal);
+        assert_eq!(emu.video_region(), VideoRegion::Pal);
+        assert!(!emu.video_region_auto());
+    }
+
+    #[test]
+    fn detects_pal_from_numeric_region_bitmask() {
+        let mut rom = vec![0u8; 0x400];
+        write_be32(&mut rom, 0x00, 0x00FF_0000);
+        write_be32(&mut rom, 0x04, 0x0000_0200);
+        rom[0x1F0] = b'8';
+
+        let mut emu = Emulator::new();
+        emu.load_rom_bytes(&rom).expect("load_rom_bytes failed");
+
+        assert_eq!(emu.video_region(), VideoRegion::Pal);
+    }
+
+    #[test]
+    fn mixed_ntsc_pal_region_prefers_ntsc() {
+        let mut rom = vec![0u8; 0x400];
+        write_be32(&mut rom, 0x00, 0x00FF_0000);
+        write_be32(&mut rom, 0x04, 0x0000_0200);
+        rom[0x1F0..0x1F2].copy_from_slice(b"EU");
+
+        let mut emu = Emulator::new();
+        emu.load_rom_bytes(&rom).expect("load_rom_bytes failed");
+
+        assert_eq!(emu.video_region(), VideoRegion::Ntsc);
+    }
+
+    #[test]
+    fn ssf2_bank_register_changes_rom_window_mapping() {
+        let mut rom = vec![0u8; 0x500000];
+        rom[0x080000] = 0x11; // page 1 offset 0
+        rom[0x100000] = 0x22; // page 2 offset 0
+
+        let mut emu = Emulator::new();
+        emu.load_rom_bytes(&rom).expect("load_rom_bytes failed");
+
+        {
+            let mut m68k_bus = CoreM68kBus {
+                bus: &mut emu.bus,
+                vdp: &mut emu.vdp,
+            };
+            assert_eq!(m68k_bus.read8(0x080000), 0x11);
+            // SSF2 bank register for window 0 (0x080000-0x0FFFFF)
+            m68k_bus.write8(0xA1_30F3, 0x02);
+            assert_eq!(m68k_bus.read8(0x080000), 0x22);
         }
     }
 }

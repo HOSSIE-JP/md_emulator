@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mega Drive Emulator — 組み込みサンプル</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      color: #eee;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 24px;
+    }
+    canvas {
+      display: block;
+      width: 640px;
+      height: 448px;
+      image-rendering: pixelated;
+      background: #000;
+      border: 2px solid #444;
+    }
+    .controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    button, label {
+      padding: 6px 14px;
+      cursor: pointer;
+      background: #333;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    button:disabled { opacity: 0.4; cursor: default; }
+    #status { font-size: 13px; color: #aaa; min-height: 1.4em; }
+    #romInput { display: none; }
+  </style>
+</head>
+<body>
+
+  <canvas id="screen" width="320" height="224"></canvas>
+
+  <div class="controls">
+    <label for="romInput">ROM を開く</label>
+    <input type="file" id="romInput" accept=".bin,.md,.gen,.smd" />
+    <button id="btnPlay"  disabled>▶ Play</button>
+    <button id="btnPause" disabled>⏸ Pause</button>
+    <button id="btnReset" disabled>⟳ Reset</button>
+    <button id="btnMute"  disabled>🔊 Mute</button>
+  </div>
+  <div id="status">初期化中...</div>
+
+  <script type="module">
+    // ──────────────────────────────────────────────
+    // 1. MdEmulator をインポートする
+    //    pkg/ ディレクトリをこの HTML と同じ場所に置くこと。
+    // ──────────────────────────────────────────────
+    import MdEmulator from './md-emulator.js';
+
+    const emu = new MdEmulator({
+      wasmJsUrl: './pkg/md_wasm.js',
+      audio: true,
+      sram:  true,
+    });
+
+    const statusEl = document.getElementById('status');
+    const btnPlay  = document.getElementById('btnPlay');
+    const btnPause = document.getElementById('btnPause');
+    const btnReset = document.getElementById('btnReset');
+    const btnMute  = document.getElementById('btnMute');
+    const romInput = document.getElementById('romInput');
+
+    // ──────────────────────────────────────────────
+    // 2. WASM を初期化して canvas にアタッチする
+    // ──────────────────────────────────────────────
+    emu.addEventListener('ready', () => {
+      statusEl.textContent = 'Ready — ROM をドロップまたは「ROM を開く」で選択';
+      emu.attachCanvas(document.getElementById('screen'));
+      romInput.disabled = false;
+    });
+
+    emu.addEventListener('romloaded', (ev) => {
+      const { sramRestored } = ev.detail;
+      statusEl.textContent = `ROM ロード完了${sramRestored ? ' (SRAM 復元済み)' : ''}`;
+      [btnPlay, btnPause, btnReset, btnMute].forEach(b => b.disabled = false);
+      emu.play();
+    });
+
+    emu.addEventListener('error', (ev) => {
+      statusEl.textContent = `エラー: ${ev.detail.message}`;
+      console.error(ev.detail.cause);
+    });
+
+    await emu.init();
+
+    // ──────────────────────────────────────────────
+    // 3. UI イベントを接続する
+    // ──────────────────────────────────────────────
+    romInput.addEventListener('change', async () => {
+      const file = romInput.files[0];
+      if (file) await emu.loadRom(file);
+    });
+
+    btnPlay.addEventListener('click',  () => emu.play());
+    btnPause.addEventListener('click', () => emu.pause());
+    btnReset.addEventListener('click', () => { emu.reset(); emu.play(); });
+    btnMute.addEventListener('click',  () => {
+      const muted = !emu.muted;
+      emu.setMuted(muted);
+      btnMute.textContent = muted ? '🔇 Unmute' : '🔊 Mute';
+    });
+
+    // ──────────────────────────────────────────────
+    // 4. キーボード入力（矢印 / WASD / UJKL / Enter）
+    // ──────────────────────────────────────────────
+    const B = MdEmulator.Buttons;
+    const pressed = new Set();
+
+    function updateInput() {
+      let buttons = 0;
+      if (pressed.has('ArrowUp')    || pressed.has('KeyW')) buttons |= B.UP;
+      if (pressed.has('ArrowDown')  || pressed.has('KeyS')) buttons |= B.DOWN;
+      if (pressed.has('ArrowLeft')  || pressed.has('KeyA')) buttons |= B.LEFT;
+      if (pressed.has('ArrowRight') || pressed.has('KeyD')) buttons |= B.RIGHT;
+      if (pressed.has('KeyJ'))  buttons |= B.B;
+      if (pressed.has('KeyK'))  buttons |= B.C;
+      if (pressed.has('KeyU'))  buttons |= B.A;
+      if (pressed.has('Enter')) buttons |= B.START;
+      emu.setInput(1, buttons);
+    }
+
+    document.addEventListener('keydown', (e) => { pressed.add(e.code);    updateInput(); });
+    document.addEventListener('keyup',   (e) => { pressed.delete(e.code); updateInput(); });
+
+    // ──────────────────────────────────────────────
+    // 5. ドラッグ & ドロップ
+    // ──────────────────────────────────────────────
+    document.addEventListener('dragover',  (e) => e.preventDefault());
+    document.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      const file = e.dataTransfer?.files[0];
+      if (file) await emu.loadRom(file);
+    });
+  </script>
+</body>
+</html>

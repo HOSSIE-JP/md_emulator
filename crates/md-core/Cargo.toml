@@ -8,6 +8,7 @@ license.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+zip.workspace = true
 md-bus = { path = "../md-bus" }
 md-cpu-m68k = { path = "../md-cpu-m68k" }
 md-cpu-z80 = { path = "../md-cpu-z80" }

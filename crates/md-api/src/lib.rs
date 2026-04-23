@@ -7,7 +7,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use md_core::Emulator;
+use md_core::{Emulator, VideoRegion};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tower_http::cors::CorsLayer;
@@ -84,6 +84,17 @@ pub struct SaveStateRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct BreakpointRequest {
+    pub address: u32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VideoRegionRequest {
+    pub region: Option<String>,
+    pub auto: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct RpcRequest {
     pub id: Option<Value>,
     pub method: String,
@@ -120,11 +131,15 @@ pub fn router(emulator: Arc<Mutex<Emulator>>) -> Router {
         .route("/api/v1/logging", get(get_logging).post(set_logging))
         .route("/api/v1/input/controller", post(set_controller_input))
         .route("/api/v1/emulator/reset", post(reset))
+        .route("/api/v1/emulator/resume", post(resume))
         .route("/api/v1/emulator/step", post(step))
+        .route("/api/v1/emulator/step-instruction", post(step_instruction))
+        .route("/api/v1/emulator/breakpoint", post(set_breakpoint))
         .route("/api/v1/emulator/load-rom", post(load_rom))
         .route("/api/v1/emulator/load-rom-path", post(load_rom_path))
         .route("/api/v1/emulator/save-state", get(save_state))
         .route("/api/v1/emulator/load-state", post(load_state))
+        .route("/api/v1/emulator/region", get(get_video_region).post(set_video_region))
         .route("/api/v1/rom/info", get(rom_info))
         .route("/api/v1/cpu/state", get(cpu_state))
         .route("/api/v1/cpu/memory", get(memory).post(write_memory))
@@ -141,6 +156,7 @@ pub fn router(emulator: Arc<Mutex<Emulator>>) -> Router {
         .route("/api/v1/vdp/scanline-vsram", get(vdp_scanline_vsram))
         .route("/api/v1/audio/samples", get(audio_samples))
         .route("/api/v1/apu/state", get(apu_state))
+        .route("/api/v1/emulator/sram", get(get_sram).post(post_sram))
         .route("/api/v1/ws", get(ws_upgrade))
         .route("/api/v1/mcp/rpc", post(mcp_rpc))
         .layer(CorsLayer::permissive())
@@ -184,6 +200,14 @@ async fn reset(State(state): State<ApiState>) -> impl IntoResponse {
     Json(OkResponse { ok: true })
 }
 
+async fn resume(State(state): State<ApiState>) -> impl IntoResponse {
+    log_if_enabled(&state, "POST /api/v1/emulator/resume");
+    if let Ok(mut emu) = state.emulator.lock() {
+        emu.resume();
+    }
+    Json(OkResponse { ok: true })
+}
+
 async fn set_controller_input(
     State(state): State<ApiState>,
     Json(body): Json<ControllerRequest>,
@@ -220,6 +244,29 @@ async fn step(State(state): State<ApiState>, Json(body): Json<StepRequest>) -> i
         }
     }
     Json(OkResponse { ok: true })
+}
+
+async fn step_instruction(State(state): State<ApiState>) -> impl IntoResponse {
+    log_if_enabled(&state, "POST /api/v1/emulator/step-instruction");
+    if let Ok(mut emu) = state.emulator.lock() {
+        emu.step_instruction();
+    }
+    Json(OkResponse { ok: true })
+}
+
+async fn set_breakpoint(
+    State(state): State<ApiState>,
+    Json(body): Json<BreakpointRequest>,
+) -> impl IntoResponse {
+    log_if_enabled(
+        &state,
+        format!("POST /api/v1/emulator/breakpoint address=0x{:08X}", body.address),
+    );
+    if let Ok(mut emu) = state.emulator.lock() {
+        emu.set_breakpoint(body.address);
+        return Json(json!({"ok": true, "address": body.address}));
+    }
+    Json(json!({"ok": false, "error": "lock failed"}))
 }
 
 async fn load_rom(State(state): State<ApiState>, Json(body): Json<LoadRomRequest>) -> impl IntoResponse {
@@ -270,6 +317,42 @@ async fn load_state(State(state): State<ApiState>, Json(body): Json<SaveStateReq
         let _ = emu.load_state(&body.data);
     }
     Json(OkResponse { ok: true })
+}
+
+async fn get_video_region(State(state): State<ApiState>) -> impl IntoResponse {
+    log_if_enabled(&state, "GET /api/v1/emulator/region");
+    if let Ok(emu) = state.emulator.lock() {
+        return Json(json!({
+            "region": emu.video_region().as_str(),
+            "auto_detected": emu.video_region_auto(),
+        }));
+    }
+    Json(json!({"error": "lock failed"}))
+}
+
+async fn set_video_region(
+    State(state): State<ApiState>,
+    Json(body): Json<VideoRegionRequest>,
+) -> impl IntoResponse {
+    log_if_enabled(
+        &state,
+        format!(
+            "POST /api/v1/emulator/region region={:?} auto={:?}",
+            body.region, body.auto
+        ),
+    );
+    if let Ok(mut emu) = state.emulator.lock() {
+        if body.auto.unwrap_or(false) {
+            emu.auto_detect_video_region();
+            return Json(json!({"ok": true, "region": emu.video_region().as_str(), "auto_detected": true}));
+        }
+        if let Some(region) = body.region.as_deref().and_then(VideoRegion::from_str) {
+            emu.set_video_region(region);
+            return Json(json!({"ok": true, "region": emu.video_region().as_str(), "auto_detected": false}));
+        }
+        return Json(json!({"ok": false, "error": "invalid region. use ntsc/pal or set auto=true"}));
+    }
+    Json(json!({"ok": false, "error": "lock failed"}))
 }
 
 async fn cpu_state(State(state): State<ApiState>) -> impl IntoResponse {
@@ -478,6 +561,57 @@ async fn apu_state(State(state): State<ApiState>) -> impl IntoResponse {
     Json(json!({"error": "lock failed"}))
 }
 
+/// GET /api/v1/emulator/sram
+/// Returns: { has_sram, start, end, size, flags, data_base64 }
+async fn get_sram(State(state): State<ApiState>) -> impl IntoResponse {
+    if let Ok(emu) = state.emulator.lock() {
+        let (start, end, size, flags) = emu.sram_info();
+        let has_sram = emu.has_sram();
+        let data_base64 = if has_sram {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD.encode(emu.get_sram())
+        } else {
+            String::new()
+        };
+        return Json(json!({
+            "has_sram": has_sram,
+            "start": start,
+            "end": end,
+            "size": size,
+            "flags": flags,
+            "data_base64": data_base64,
+        }));
+    }
+    Json(json!({"error": "lock failed"}))
+}
+
+#[derive(Debug, Deserialize)]
+struct SramRequest {
+    data_base64: String,
+}
+
+/// POST /api/v1/emulator/sram
+/// Body: { data_base64: "<base64 encoded SRAM bytes>" }
+async fn post_sram(
+    State(state): State<ApiState>,
+    Json(req): Json<SramRequest>,
+) -> impl IntoResponse {
+    use base64::Engine as _;
+    match base64::engine::general_purpose::STANDARD.decode(&req.data_base64) {
+        Ok(bytes) => {
+            if let Ok(mut emu) = state.emulator.lock() {
+                if emu.has_sram() {
+                    emu.load_sram(&bytes);
+                    return Json(json!({"ok": true, "loaded_bytes": bytes.len()}));
+                }
+                return Json(json!({"ok": false, "error": "ROM has no SRAM"}));
+            }
+            Json(json!({"error": "lock failed"}))
+        }
+        Err(e) => Json(json!({"ok": false, "error": format!("base64 decode failed: {e}")})),
+    }
+}
+
 async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<ApiState>) -> impl IntoResponse {
     log_if_enabled(&state, "GET /api/v1/ws (upgrade)");
     ws.on_upgrade(move |socket| ws_session(socket, state))
@@ -566,8 +700,50 @@ fn handle_rpc(req: RpcRequest, state: &ApiState) -> RpcResponse {
                 emu.run_frame();
                 Some(json!({"ok": true}))
             }
+            "get_video_region" => {
+                Some(json!({
+                    "region": emu.video_region().as_str(),
+                    "auto_detected": emu.video_region_auto(),
+                }))
+            }
+            "set_video_region" => {
+                let region = req
+                    .params
+                    .as_ref()
+                    .and_then(|v| v.get("region"))
+                    .and_then(|v| v.as_str())
+                    .and_then(VideoRegion::from_str);
+                if let Some(region) = region {
+                    emu.set_video_region(region);
+                    Some(json!({"ok": true, "region": emu.video_region().as_str(), "auto_detected": false}))
+                } else {
+                    None
+                }
+            }
+            "auto_video_region" => {
+                emu.auto_detect_video_region();
+                Some(json!({"ok": true, "region": emu.video_region().as_str(), "auto_detected": true}))
+            }
             "pause" => {
                 emu.pause();
+                Some(json!({"ok": true}))
+            }
+            "resume" => {
+                emu.resume();
+                Some(json!({"ok": true}))
+            }
+            "set_breakpoint" => {
+                let address = req
+                    .params
+                    .as_ref()
+                    .and_then(|v| v.get("address"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                emu.set_breakpoint(address);
+                Some(json!({"ok": true, "address": address}))
+            }
+            "step_instruction" => {
+                emu.step_instruction();
                 Some(json!({"ok": true}))
             }
             "set_controller_state" => {
@@ -586,7 +762,9 @@ fn handle_rpc(req: RpcRequest, state: &ApiState) -> RpcResponse {
                 emu.set_controller_state(player, buttons);
                 Some(json!({"ok": true, "player": player, "buttons": buttons}))
             }
+            "get_registers" => Some(json!({"registers": emu.get_registers()})),
             "get_cpu_state" => Some(json!({"cpu": emu.get_cpu_state()})),
+            "trace_execution" => Some(json!({"trace": emu.trace_execution()})),
             "get_rom_info" => Some(json!({"loaded": emu.rom_loaded(), "info": emu.get_rom_info()})),
             "get_memory" => {
                 let addr = req
@@ -603,6 +781,8 @@ fn handle_rpc(req: RpcRequest, state: &ApiState) -> RpcResponse {
                     .unwrap_or(16) as usize;
                 Some(json!({"address": addr, "data": emu.get_memory(addr, len)}))
             }
+            "get_vram" => Some(json!({"vram": emu.get_vram()})),
+            "get_cram" => Some(json!({"cram": emu.get_cram()})),
             "save_state" => {
                 if let Ok(data) = emu.save_state() {
                     Some(json!({"state": data}))

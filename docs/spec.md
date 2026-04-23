@@ -16,6 +16,16 @@
 - デバッグ: `set_breakpoint`, `trace_execution`
 - 入力注入: `set_controller_state`
 - 状態保存復元: `save_state`, `load_state`
+- SRAM: `has_sram`, `get_sram`, `load_sram`, `sram_info`
+- ビデオリージョン: `video_region`, `set_video_region`, `auto_detect_video_region`
+
+`run_frame()` は固定値ではなくリージョン依存サイクルで実行されます。
+
+- NTSC: `488 * 262` cycles/frame
+- PAL: `488 * 313` cycles/frame
+
+ROMロード時はヘッダの region 文字列（`0x1F0-0x1FF`）から自動判定します。
+`set_video_region()` を呼ぶと手動overrideに切り替わり、`auto_detect_video_region()` で再び自動判定へ戻せます。
 
 `reset()` 時にROMがロード済みの場合は、ベクタテーブル先頭から初期SSP/初期PCを読み取ってM68Kへ反映します。
 
@@ -46,6 +56,9 @@
 - VBlank/HBlank割り込みフラグ管理、ステータスレジスタ
 - フレームバッファ生成（320×224 ARGB）
 - デバッグ用プレーン/タイル/スプライト/パレットAPI
+- リージョン依存タイミング（NTSC/PAL）:
+	- NTSC: total scanlines = 262, VBlank start = 224
+	- PAL: total scanlines = 313, VBlank start = 240
 
 ### APU (`md-apu`)
 
@@ -91,3 +104,18 @@
 - API仕様は今後拡張されるため、変更可能性があります
 - `md-api` はサーバープロセスが必要（Pages 単体では稼働しない）
 - `md-wasm` フロントエンドは HTTP(S) サーブ必須（`file://` 直接起動は非対応）
+
+## カートリッジマッピング
+
+### SRAM制御
+
+- `$A130F1`:
+	- bit0: SRAM enable/mapping
+	- bit1: SRAM write protect
+
+### SSF2系 ROM バンク切替
+
+- 対象: 4MBを超えるROMで有効
+- レジスタ: `$A130F3`, `$A130F5`, `$A130F7`, `$A130F9`, `$A130FB`, `$A130FD`, `$A130FF`
+- 各レジスタは `0x080000-0x3FFFFF` の 512KB ウィンドウを別ページへマップ
+- 未対応: SSF2系以外の一部派生マッパー（今後拡張予定）

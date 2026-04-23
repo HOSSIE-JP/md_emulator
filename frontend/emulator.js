@@ -89,6 +89,18 @@ function showJson(data) {
   out.textContent = JSON.stringify(data, null, 2);
 }
 
+function parseAddress(text) {
+  const s = String(text ?? "").trim();
+  if (!s) return null;
+  if (/^0x[0-9a-f]+$/i.test(s)) {
+    return Number.parseInt(s, 16) >>> 0;
+  }
+  if (/^[0-9]+$/.test(s)) {
+    return Number.parseInt(s, 10) >>> 0;
+  }
+  return null;
+}
+
 async function request(url, method = "GET", body = null) {
   return requestEx(url, method, body, { quiet: false });
 }
@@ -302,6 +314,72 @@ document.getElementById("step10").addEventListener("click", async () => {
   } catch {
   }
 });
+
+const setBreakpointButton = document.getElementById("setBreakpoint");
+if (setBreakpointButton) {
+  setBreakpointButton.addEventListener("click", async () => {
+    const bpInput = document.getElementById("breakpointAddr");
+    const address = parseAddress(bpInput?.value);
+    if (address === null) {
+      setStatus("invalid breakpoint address");
+      return;
+    }
+    try {
+      const data = await request(`${API_BASE}/api/v1/emulator/breakpoint`, "POST", { address });
+      showJson(data);
+    } catch {
+    }
+  });
+}
+
+const stepInstructionButton = document.getElementById("stepInstruction");
+if (stepInstructionButton) {
+  stepInstructionButton.addEventListener("click", async () => {
+    try {
+      const data = await request(`${API_BASE}/api/v1/emulator/step-instruction`, "POST");
+      const [cpu, trace] = await Promise.all([
+        request(`${API_BASE}/api/v1/cpu/state`, "GET"),
+        request(`${API_BASE}/api/v1/cpu/trace`, "GET"),
+      ]);
+      await refreshFrame();
+      showJson({ step_instruction: data, cpu, trace });
+    } catch {
+    }
+  });
+}
+
+const resumeButton = document.getElementById("resume");
+if (resumeButton) {
+  resumeButton.addEventListener("click", async () => {
+    try {
+      const data = await request(`${API_BASE}/api/v1/emulator/resume`, "POST");
+      showJson(data);
+    } catch {
+    }
+  });
+}
+
+const registersButton = document.getElementById("registers");
+if (registersButton) {
+  registersButton.addEventListener("click", async () => {
+    try {
+      const cpu = await request(`${API_BASE}/api/v1/cpu/state`, "GET");
+      showJson({ registers: cpu?.cpu?.m68k ?? cpu?.cpu ?? cpu });
+    } catch {
+    }
+  });
+}
+
+const traceButton = document.getElementById("trace");
+if (traceButton) {
+  traceButton.addEventListener("click", async () => {
+    try {
+      const trace = await request(`${API_BASE}/api/v1/cpu/trace`, "GET");
+      showJson(trace);
+    } catch {
+    }
+  });
+}
 
 document.getElementById("loadRomPath").addEventListener("click", async () => {
   try {

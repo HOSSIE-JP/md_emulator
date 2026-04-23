@@ -70,6 +70,53 @@ Invoke-RestMethod -Method Post `
   -Body '{"frames":1}'
 ```
 
+### ビデオリージョンを確認/切替する
+
+現在の設定を取得:
+
+```powershell
+Invoke-RestMethod -Method Get http://127.0.0.1:8080/api/v1/emulator/region
+```
+
+PALへ手動切替:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/emulator/region `
+  -ContentType 'application/json' `
+  -Body '{"region":"pal"}'
+```
+
+ROMヘッダに基づく自動判定へ戻す:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/emulator/region `
+  -ContentType 'application/json' `
+  -Body '{"auto":true}'
+```
+
+### 1命令だけ進める（REST）
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:8080/api/v1/emulator/step-instruction
+```
+
+### ブレークポイントを追加（REST）
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/emulator/breakpoint `
+  -ContentType 'application/json' `
+  -Body '{"address":4096}'
+```
+
+### Pause 後に再開（REST）
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:8080/api/v1/emulator/resume
+```
+
 ### CPU状態を取得
 
 ```powershell
@@ -97,6 +144,14 @@ ROMロード状態と実行進行をまとめて確認できます。
 
 `Run Preview` を押すとVBlank同期ベース（60fps目標）で `step + video/frame取得` を繰り返し、Canvasにフレームが描画されます。
 `Toggle API Log` でサーバーログをON/OFFできます。
+
+`api-client.html` のデバッグ系ボタン:
+
+- `Set Breakpoint`: `breakpointAddr`（`0x...` または 10進数）を `/api/v1/emulator/breakpoint` に送信
+- `Step 1 instruction`: `/api/v1/emulator/step-instruction` を実行し、CPU状態とトレースを更新
+- `Resume`: `/api/v1/emulator/resume` を実行
+- `Registers`: `/api/v1/cpu/state` の M68K レジスタ部分を表示
+- `Trace`: `/api/v1/cpu/trace` を表示
 
 ### オーディオ再生
 
@@ -207,6 +262,73 @@ Invoke-RestMethod -Method Post `
   -Body '{"jsonrpc":"2.0","id":2,"method":"load_rom_path","params":{"path":"D:/homebrew/rom.bin"}}'
 ```
 
+ブレークポイント設定と命令ステップ実行のJSON-RPC例:
+
+```powershell
+# 0x00001000 にブレークポイントを設定
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
+  -ContentType 'application/json' `
+  -Body '{"jsonrpc":"2.0","id":3,"method":"set_breakpoint","params":{"address":4096}}'
+
+# 1命令だけ進める
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
+  -ContentType 'application/json' `
+  -Body '{"jsonrpc":"2.0","id":4,"method":"step_instruction"}'
+
+# 一時停止から再開
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
+  -ContentType 'application/json' `
+  -Body '{"jsonrpc":"2.0","id":5,"method":"resume"}'
+
+# ビデオリージョンを取得
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
+  -ContentType 'application/json' `
+  -Body '{"jsonrpc":"2.0","id":6,"method":"get_video_region"}'
+
+# ビデオリージョンをPALに設定
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
+  -ContentType 'application/json' `
+  -Body '{"jsonrpc":"2.0","id":7,"method":"set_video_region","params":{"region":"pal"}}'
+
+# ROMヘッダからリージョン自動判定を再適用
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
+  -ContentType 'application/json' `
+  -Body '{"jsonrpc":"2.0","id":8,"method":"auto_video_region"}'
+```
+
+CPU/トレース/VDPメモリ取得のJSON-RPC例:
+
+```powershell
+# M68Kレジスタのみ取得
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
+  -ContentType 'application/json' `
+  -Body '{"jsonrpc":"2.0","id":6,"method":"get_registers"}'
+
+# 実行トレース取得
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
+  -ContentType 'application/json' `
+  -Body '{"jsonrpc":"2.0","id":7,"method":"trace_execution"}'
+
+# VRAM/CRAMダンプ
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
+  -ContentType 'application/json' `
+  -Body '{"jsonrpc":"2.0","id":8,"method":"get_vram"}'
+
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
+  -ContentType 'application/json' `
+  -Body '{"jsonrpc":"2.0","id":9,"method":"get_cram"}'
+```
+
 ## 8) テストで動作確認
 
 ```powershell
@@ -244,3 +366,40 @@ cargo test -p md-core --lib
 - `WASM: Rebuild and Refresh ROMs`
 
 `WASM: Rebuild and Refresh ROMs` を実行すれば、開発で必要なWASM再ビルドとBundled ROM更新をまとめて実施できます。
+
+## 10) 他プロジェクトへの組み込み
+
+WASM 版エミュレーターを外部の Web アプリや Electron アプリに組み込む場合は、
+`frontend/md-emulator.js` ラッパーと `frontend/pkg/` を使用します。
+
+### 最小例
+
+```bash
+# 1. WASM をビルド
+wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg
+
+# 2. 必要ファイルを自分のプロジェクトにコピー
+cp -r frontend/pkg/   your-project/public/pkg/
+cp frontend/md-emulator.js   your-project/public/
+cp frontend/md-emulator.d.ts your-project/public/   # TypeScript の場合
+```
+
+```js
+// your-project/main.js
+import MdEmulator from './md-emulator.js';
+
+const emu = new MdEmulator({ wasmJsUrl: './pkg/md_wasm.js' });
+await emu.init();
+emu.attachCanvas(document.querySelector('canvas'));
+await emu.loadRom(romBytes);
+emu.play();
+```
+
+動作確認用の最小サンプルは `frontend/embed-example.html` です:
+
+```bash
+# http://localhost:8000/embed-example.html を開く
+python3 -m http.server 8000 --directory frontend
+```
+
+**詳細な手順・Electron 対応・TypeScript 利用方法は [docs/embedding.md](embedding.md) を参照してください。**

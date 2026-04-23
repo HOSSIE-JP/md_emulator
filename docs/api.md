@@ -1,5 +1,8 @@
 # HTTP / WebSocket / JSON-RPC API
 
+> **WASM として他プロジェクトへ組み込む場合は [docs/embedding.md](embedding.md) を参照してください。**  
+> このドキュメントは REST/WebSocket/JSON-RPC API サーバー (`md-api`) の仕様を説明します。
+
 ベースURL: `http://127.0.0.1:8080`
 
 ## REST エンドポイント
@@ -47,6 +50,23 @@
 
 - 用途: エミュレーターのリセット
 
+### POST /api/v1/emulator/resume
+
+- 用途: `pause` 済みエミュレーターの実行を再開
+
+### POST /api/v1/emulator/step-instruction
+
+- 用途: M68K 命令を 1 命令だけ実行（デバッグ用）
+
+### POST /api/v1/emulator/breakpoint
+
+- 用途: M68K ブレークポイントを追加
+- Body例:
+
+```json
+{"address": 4096}
+```
+
 ### POST /api/v1/emulator/step
 
 - 用途: サイクルまたはフレーム単位で進める
@@ -93,6 +113,64 @@
 ```json
 {"data": [1,2,3]}
 ```
+
+### GET /api/v1/emulator/region
+
+- 用途: 現在のビデオリージョン設定（NTSC/PAL）と自動判定状態を取得
+- レスポンス例:
+
+```json
+{
+  "region": "ntsc",
+  "auto_detected": true
+}
+```
+
+### POST /api/v1/emulator/region
+
+- 用途: ビデオリージョンの手動設定、またはROMヘッダからの自動再判定
+- Body例（手動設定）:
+
+```json
+{"region": "pal"}
+```
+
+- Body例（自動判定に戻す）:
+
+```json
+{"auto": true}
+```
+
+- 備考:
+  - `region` は `ntsc` / `pal`
+  - `auto: true` 指定時は `region` を無視して ROM ヘッダ（`0x1F0-0x1FF`）から再判定
+
+### GET /api/v1/emulator/sram
+
+- 用途: カートリッジ SRAM データ取得（バッテリーバックアップセーブ）
+- レスポンス例:
+
+```json
+{
+  "has_sram": true,
+  "start": 2097152,
+  "end": 2162687,
+  "size": 32768,
+  "flags": 32,
+  "data_base64": "<base64 encoded SRAM bytes>"
+}
+```
+
+### POST /api/v1/emulator/sram
+
+- 用途: カートリッジ SRAM データ書き込み（ファイルからのセーブ復元など）
+- Body例:
+
+```json
+{"data_base64": "<base64 encoded SRAM bytes>"}
+```
+
+- レスポンス例: `{"ok": true, "loaded_bytes": 32768}`
 
 ### GET /api/v1/cpu/state
 
@@ -282,11 +360,21 @@
 - `reset`
 - `step` (`params.cycles`)
 - `run_frame`
+- `get_video_region`
+- `set_video_region` (`params.region` = `"ntsc" | "pal"`)
+- `auto_video_region`
 - `pause`
+- `resume`
+- `set_breakpoint` (`params.address`)
+- `step_instruction`
 - `set_controller_state` (`params.player`, `params.buttons`)
+- `get_registers`
 - `get_cpu_state`
+- `trace_execution`
 - `get_rom_info`
 - `get_memory` (`params.address`, `params.length`)
+- `get_vram`
+- `get_cram`
 - `save_state`
 - `load_state` (`params.state`)
 
