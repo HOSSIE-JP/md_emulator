@@ -1,0 +1,18 @@
+{
+  "name": "md-emulator-electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron shell for md_emulator (WASM + REST modes)",
+  "main": "main.js",
+  "scripts": {
+    "copy-pkg": "node scripts/copy-pkg.js",
+    "start": "npm run copy-pkg && electron .",
+    "dev": "npm run start",
+    "build:mac": "npm run copy-pkg && electron-builder --mac",
+    "build:win": "npm run copy-pkg && electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^41.3.0",
+    "electron-builder": "^26.8.1"
+  }
+}

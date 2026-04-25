@@ -227,6 +227,9 @@ webpack は非同期モジュールとして自動的に処理します。
 
 Electron の Renderer プロセスはブラウザ環境のため、WASM をそのまま使用できます。
 
+> このリポジトリ内で Electron アプリを立ち上げる場合は、`electron/` ディレクトリに分離済みの土台があります。
+> `cd electron && npm install && npm start` で起動できます（詳細は [docs/usage.md](usage.md) を参照）。
+
 ### `main.js` (Main プロセス)
 
 ```js

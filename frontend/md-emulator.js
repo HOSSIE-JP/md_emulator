@@ -236,41 +236,6 @@ export default class MdEmulator extends EventTarget {
   }
 
   /**
-   * 現在のビデオリージョンを返す（"ntsc" | "pal"）。
-   * @returns {string}
-   */
-  getVideoRegion() {
-    this._assertReady();
-    return this._handle.get_video_region();
-  }
-
-  /**
-   * リージョン自動判定が有効か返す。
-   * @returns {boolean}
-   */
-  isVideoRegionAuto() {
-    this._assertReady();
-    return this._handle.is_video_region_auto();
-  }
-
-  /**
-   * ビデオリージョンを手動で設定する。
-   * @param {"ntsc"|"pal"} region
-   */
-  setVideoRegion(region) {
-    this._assertReady();
-    this._handle.set_video_region(region);
-  }
-
-  /**
-   * ROMヘッダからリージョンを再自動判定する。
-   */
-  autoVideoRegion() {
-    this._assertReady();
-    this._handle.auto_video_region();
-  }
-
-  /**
    * 1 M68K 命令だけ進める（デバッグ用）。
    */
   stepInstruction() {

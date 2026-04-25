@@ -70,53 +70,6 @@ Invoke-RestMethod -Method Post `
   -Body '{"frames":1}'
 ```
 
-### ビデオリージョンを確認/切替する
-
-現在の設定を取得:
-
-```powershell
-Invoke-RestMethod -Method Get http://127.0.0.1:8080/api/v1/emulator/region
-```
-
-PALへ手動切替:
-
-```powershell
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8080/api/v1/emulator/region `
-  -ContentType 'application/json' `
-  -Body '{"region":"pal"}'
-```
-
-ROMヘッダに基づく自動判定へ戻す:
-
-```powershell
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8080/api/v1/emulator/region `
-  -ContentType 'application/json' `
-  -Body '{"auto":true}'
-```
-
-### 1命令だけ進める（REST）
-
-```powershell
-Invoke-RestMethod -Method Post http://127.0.0.1:8080/api/v1/emulator/step-instruction
-```
-
-### ブレークポイントを追加（REST）
-
-```powershell
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8080/api/v1/emulator/breakpoint `
-  -ContentType 'application/json' `
-  -Body '{"address":4096}'
-```
-
-### Pause 後に再開（REST）
-
-```powershell
-Invoke-RestMethod -Method Post http://127.0.0.1:8080/api/v1/emulator/resume
-```
-
 ### CPU状態を取得
 
 ```powershell
@@ -144,14 +97,6 @@ ROMロード状態と実行進行をまとめて確認できます。
 
 `Run Preview` を押すとVBlank同期ベース（60fps目標）で `step + video/frame取得` を繰り返し、Canvasにフレームが描画されます。
 `Toggle API Log` でサーバーログをON/OFFできます。
-
-`api-client.html` のデバッグ系ボタン:
-
-- `Set Breakpoint`: `breakpointAddr`（`0x...` または 10進数）を `/api/v1/emulator/breakpoint` に送信
-- `Step 1 instruction`: `/api/v1/emulator/step-instruction` を実行し、CPU状態とトレースを更新
-- `Resume`: `/api/v1/emulator/resume` を実行
-- `Registers`: `/api/v1/cpu/state` の M68K レジスタ部分を表示
-- `Trace`: `/api/v1/cpu/trace` を表示
 
 ### オーディオ再生
 
@@ -262,73 +207,6 @@ Invoke-RestMethod -Method Post `
   -Body '{"jsonrpc":"2.0","id":2,"method":"load_rom_path","params":{"path":"D:/homebrew/rom.bin"}}'
 ```
 
-ブレークポイント設定と命令ステップ実行のJSON-RPC例:
-
-```powershell
-# 0x00001000 にブレークポイントを設定
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
-  -ContentType 'application/json' `
-  -Body '{"jsonrpc":"2.0","id":3,"method":"set_breakpoint","params":{"address":4096}}'
-
-# 1命令だけ進める
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
-  -ContentType 'application/json' `
-  -Body '{"jsonrpc":"2.0","id":4,"method":"step_instruction"}'
-
-# 一時停止から再開
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
-  -ContentType 'application/json' `
-  -Body '{"jsonrpc":"2.0","id":5,"method":"resume"}'
-
-# ビデオリージョンを取得
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
-  -ContentType 'application/json' `
-  -Body '{"jsonrpc":"2.0","id":6,"method":"get_video_region"}'
-
-# ビデオリージョンをPALに設定
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
-  -ContentType 'application/json' `
-  -Body '{"jsonrpc":"2.0","id":7,"method":"set_video_region","params":{"region":"pal"}}'
-
-# ROMヘッダからリージョン自動判定を再適用
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
-  -ContentType 'application/json' `
-  -Body '{"jsonrpc":"2.0","id":8,"method":"auto_video_region"}'
-```
-
-CPU/トレース/VDPメモリ取得のJSON-RPC例:
-
-```powershell
-# M68Kレジスタのみ取得
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
-  -ContentType 'application/json' `
-  -Body '{"jsonrpc":"2.0","id":6,"method":"get_registers"}'
-
-# 実行トレース取得
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
-  -ContentType 'application/json' `
-  -Body '{"jsonrpc":"2.0","id":7,"method":"trace_execution"}'
-
-# VRAM/CRAMダンプ
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
-  -ContentType 'application/json' `
-  -Body '{"jsonrpc":"2.0","id":8,"method":"get_vram"}'
-
-Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8080/api/v1/mcp/rpc `
-  -ContentType 'application/json' `
-  -Body '{"jsonrpc":"2.0","id":9,"method":"get_cram"}'
-```
-
 ## 8) テストで動作確認
 
 ```powershell
@@ -340,6 +218,50 @@ cargo test --workspace
 ```powershell
 cargo test -p md-cpu-m68k
 cargo test -p md-cpu-z80
+
+## 9) Electron デスクトップ版（土台）を試す
+
+このリポジトリには、既存の `frontend/` と分離した Electron アプリ土台を `electron/` 配下に用意しています。
+
+### 前提
+
+- Node.js 18+
+- `frontend/pkg/` が生成済みであること（未生成なら先に `wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg` を実行）
+
+### 初回セットアップ
+
+```bash
+cd electron
+npm install
+```
+
+### 開発起動
+
+```bash
+cd electron
+npm start
+```
+
+`npm start` は以下を順に実行します。
+
+1. `npm run copy-pkg` で `frontend/pkg/` と `frontend/md-emulator.js` を `electron/` 配下へコピー
+2. Electron アプリを起動
+
+### 使い方
+
+- `Mode` を `WASM (Renderer)` にすると、Renderer 内で wasm を直接実行
+- `Mode` を `REST API (md-api)` にすると、`Start API` で `md-api` を起動し REST で制御
+- `Open ROM` または `File > Open ROM...` で ROM をロード
+
+### 配布ビルド
+
+```bash
+cd electron
+npm run build:mac
+npm run build:win
+```
+
+出力先は `electron/dist/` です。
 cargo test -p md-vdp
 cargo test -p md-apu
 cargo test -p md-core --lib

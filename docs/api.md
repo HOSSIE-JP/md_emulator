@@ -50,23 +50,6 @@
 
 - 用途: エミュレーターのリセット
 
-### POST /api/v1/emulator/resume
-
-- 用途: `pause` 済みエミュレーターの実行を再開
-
-### POST /api/v1/emulator/step-instruction
-
-- 用途: M68K 命令を 1 命令だけ実行（デバッグ用）
-
-### POST /api/v1/emulator/breakpoint
-
-- 用途: M68K ブレークポイントを追加
-- Body例:
-
-```json
-{"address": 4096}
-```
-
 ### POST /api/v1/emulator/step
 
 - 用途: サイクルまたはフレーム単位で進める
@@ -113,37 +96,6 @@
 ```json
 {"data": [1,2,3]}
 ```
-
-### GET /api/v1/emulator/region
-
-- 用途: 現在のビデオリージョン設定（NTSC/PAL）と自動判定状態を取得
-- レスポンス例:
-
-```json
-{
-  "region": "ntsc",
-  "auto_detected": true
-}
-```
-
-### POST /api/v1/emulator/region
-
-- 用途: ビデオリージョンの手動設定、またはROMヘッダからの自動再判定
-- Body例（手動設定）:
-
-```json
-{"region": "pal"}
-```
-
-- Body例（自動判定に戻す）:
-
-```json
-{"auto": true}
-```
-
-- 備考:
-  - `region` は `ntsc` / `pal`
-  - `auto: true` 指定時は `region` を無視して ROM ヘッダ（`0x1F0-0x1FF`）から再判定
 
 ### GET /api/v1/emulator/sram
 
@@ -360,21 +312,11 @@
 - `reset`
 - `step` (`params.cycles`)
 - `run_frame`
-- `get_video_region`
-- `set_video_region` (`params.region` = `"ntsc" | "pal"`)
-- `auto_video_region`
 - `pause`
-- `resume`
-- `set_breakpoint` (`params.address`)
-- `step_instruction`
 - `set_controller_state` (`params.player`, `params.buttons`)
-- `get_registers`
 - `get_cpu_state`
-- `trace_execution`
 - `get_rom_info`
 - `get_memory` (`params.address`, `params.length`)
-- `get_vram`
-- `get_cram`
 - `save_state`
 - `load_state` (`params.state`)
 

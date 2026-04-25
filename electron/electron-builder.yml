@@ -1,0 +1,19 @@
+appId: com.mdemulator.desktop
+productName: MegaDriveEmulator
+files:
+  - main.js
+  - preload.js
+  - renderer/**
+  - pkg/**
+  - md-emulator.js
+  - md-emulator.d.ts
+extraMetadata:
+  main: main.js
+mac:
+  target:
+    - dmg
+win:
+  target:
+    - nsis
+directories:
+  output: dist
