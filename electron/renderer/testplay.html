@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>テストプレイ</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", sans-serif; background: #0a0c10; color: #e6edf3; display: flex; flex-direction: column; height: 100vh; }
+    .topbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #101520; border-bottom: 1px solid #1e2535; flex-shrink: 0; }
+    .topbar h1 { margin: 0; font-size: 15px; color: #4aa3ff; }
+    .topbar .rom-name { font-size: 12px; color: #9ba7b8; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    button { padding: 6px 12px; border-radius: 7px; border: 1px solid #2a2f3a; background: #202633; color: #e6edf3; cursor: pointer; font-size: 13px; }
+    button:hover { border-color: #4aa3ff; }
+    .icon-btn { width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+    .screen-area { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
+    canvas#screen { image-rendering: pixelated; background: #000; }
+    .status-bar { padding: 4px 14px; font-size: 11px; color: #9ba7b8; background: #0f1117; border-top: 1px solid #1e2535; }
+    svg { width: 16px; height: 16px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>テストプレイ</h1>
+    <span class="rom-name" id="romName">読み込み中...</span>
+
+    <button id="btnPlay" class="icon-btn" title="Play/Pause">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon id="iconPlay" points="5,3 19,12 5,21" fill="currentColor" stroke="none"/>
+      </svg>
+    </button>
+    <button id="btnReset" class="icon-btn" title="Reset">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v5h5"/>
+      </svg>
+    </button>
+    <button id="btnMute" class="icon-btn" title="Mute">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 14h4l5 4V6l-5 4H4z"/><path d="M16 9a4 4 0 0 1 0 6"/>
+      </svg>
+    </button>
+
+    <label style="font-size:12px; color:#9ba7b8;">Scale:
+      <select id="scaleSelect" style="padding:4px;background:#202633;border:1px solid #2a2f3a;color:#e6edf3;border-radius:6px;">
+        <option value="1">1x</option>
+        <option value="2" selected>2x</option>
+        <option value="3">3x</option>
+      </select>
+    </label>
+
+    <button id="btnDebug" title="デバッグウィンドウ">Debug</button>
+  </div>
+
+  <div class="screen-area">
+    <canvas id="screen" width="320" height="224"></canvas>
+  </div>
+  <div class="status-bar" id="statusBar">初期化中...</div>
+
+  <script type="module">
+    import MdEmulator from '../md-emulator.js';
+
+    const WASM_JS_URL = new URL('../pkg/md_wasm.js', import.meta.url).href;
+
+    const params = new URLSearchParams(window.location.search);
+    const romPath = params.get('romPath') || '';
+
+    const canvas = document.getElementById('screen');
+    const statusBar = document.getElementById('statusBar');
+    const romNameEl = document.getElementById('romName');
+
+    let emu = null;
+    let running = false;
+    let muted = false;
+
+    function setStatus(text) { statusBar.textContent = text; }
+
+    function applyScale(scale) {
+      const s = Number(scale) || 2;
+      canvas.style.width = `${320 * s}px`;
+      canvas.style.height = `${224 * s}px`;
+    }
+
+    async function init() {
+      if (!romPath) {
+        setStatus('ROM パスが指定されていません');
+        return;
+      }
+
+      const baseName = romPath.split(/[\\/]/).pop();
+      romNameEl.textContent = baseName;
+      document.title = `テストプレイ: ${baseName}`;
+
+      try {
+        setStatus('WASM エミュレータ初期化中...');
+        emu = new MdEmulator({ wasmJsUrl: WASM_JS_URL, audio: true, sram: true });
+        emu.attachCanvas(canvas);
+        emu.addEventListener('error', (ev) => setStatus(`エラー: ${ev?.detail?.message}`));
+        await emu.init();
+
+        setStatus('ROM を読み込み中...');
+        const bytes = await window.electronTestPlay.readRomFile(romPath);
+        await emu.loadRom(new Uint8Array(bytes), baseName);
+        emu.play();
+        running = true;
+        updatePlayButton();
+        setStatus(`実行中: ${baseName}`);
+      } catch (err) {
+        setStatus(`初期化エラー: ${err.message || err}`);
+      }
+    }
+
+    function updatePlayButton() {
+      const btn = document.getElementById('btnPlay');
+      const icon = document.getElementById('iconPlay');
+      if (running) {
+        // Pause icon
+        icon.outerHTML = '<g id="iconPlay"><rect x="6" y="4" width="4" height="16" fill="currentColor"/><rect x="14" y="4" width="4" height="16" fill="currentColor"/></g>';
+        btn.title = 'Pause';
+      } else {
+        icon.outerHTML = '<polygon id="iconPlay" points="5,3 19,12 5,21" fill="currentColor" stroke="none"/>';
+        btn.title = 'Play';
+      }
+    }
+
+    document.getElementById('btnPlay').addEventListener('click', () => {
+      if (!emu) return;
+      if (running) { emu.pause(); running = false; setStatus('一時停止'); }
+      else { emu.play(); running = true; setStatus('実行中'); }
+      updatePlayButton();
+    });
+
+    document.getElementById('btnReset').addEventListener('click', () => {
+      if (!emu) return;
+      emu.reset();
+      emu.play();
+      running = true;
+      updatePlayButton();
+      setStatus('リセット');
+    });
+
+    document.getElementById('btnMute').addEventListener('click', () => {
+      if (!emu) return;
+      muted = !muted;
+      emu.setMuted(muted);
+    });
+
+    document.getElementById('scaleSelect').addEventListener('change', (e) => applyScale(e.target.value));
+
+    document.getElementById('btnDebug').addEventListener('click', () => {
+      window.electronTestPlay.openDebugWindow({ mode: 'wasm' });
+    });
+
+    applyScale(2);
+    init();
+
+    // デバッグブリッジ（debug-wasm.html からアクセス）
+    window.__mdDebugBridge = {
+      getWasmDebugSnapshot: async (palette = 0) => {
+        if (!emu?.handle) return { ok: false, error: 'emulator not ready' };
+        try {
+          const h = emu.handle;
+          const parse = (v) => { try { return typeof v === 'string' ? JSON.parse(v) : v; } catch { return v; } };
+          return {
+            ok: true, source: 'wasm', palette,
+            registers: parse(h.get_vdp_registers_json()),
+            planes: { A: parse(h.debug_render_plane('A')), B: parse(h.debug_render_plane('B')), W: parse(h.debug_render_plane('W')) },
+            tiles: parse(h.debug_render_tiles(palette)),
+            cram: parse(h.debug_cram_colors_json()),
+            sprites: parse(h.debug_sprites_json()),
+            frame: { width: 320, height: 224, pixels_argb: Array.from(h.get_framebuffer_argb()) },
+          };
+        } catch (err) {
+          return { ok: false, error: String(err?.message || err) };
+        }
+      },
+    };
+  </script>
+</body>
+</html>

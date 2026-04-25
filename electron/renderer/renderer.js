@@ -1,560 +1,448 @@
-import MdEmulator from '../md-emulator.js';
+/**
+ * MD Game Editor - renderer.js
+ * エディタのフロントエンドロジック
+ */
 
-const WASM_JS_URL = new URL('../pkg/md_wasm.js', import.meta.url).href;
-
+// ------------------------------------------------------------------ state --
 const state = {
-  mode: 'wasm',
-  emu: null,
-  muted: false,
-  wasmRunning: false,
-  apiRunning: false,
-  apiPort: 8080,
-  screenScale: 2.0,
-  logCollapsed: false,
+  currentPage: 'assets',
+  logOpen: false,
+  building: false,
+  lastRomPath: null,
+  projectConfig: { romName: 'MY GAME', author: 'AUTHOR', region: 'JP' },
 };
+
+// -------------------------------------------------------------------- DOM --
+const $ = (id) => document.getElementById(id);
 
 const el = {
-  modeTabs: Array.from(document.querySelectorAll('.mode-tab')),
-  modeOnly: Array.from(document.querySelectorAll('[data-mode-only]')),
-  content: document.querySelector('.content'),
-  screen: document.querySelector('#screen'),
-  screenPanel: document.querySelector('#screenPanel'),
-  apiPanel: document.querySelector('#apiPanel'),
-  apiModeStatus: document.querySelector('#apiModeStatus'),
-  screenScaleSelect: document.querySelector('#screenScaleSelect'),
-  openRom: document.querySelector('#openRomButton'),
-  playPause: document.querySelector('#playPauseButton'),
-  reset: document.querySelector('#resetButton'),
-  mute: document.querySelector('#muteButton'),
-  apiPower: document.querySelector('#apiPowerButton'),
-  apiStep: document.querySelector('#apiStepButton'),
-  openDebug: document.querySelector('#openDebugButton'),
-  logSection: document.querySelector('#logSection'),
-  copyLog: document.querySelector('#copyLogButton'),
-  toggleLog: document.querySelector('#toggleLogButton'),
-  status: document.querySelector('#statusLine'),
-  log: document.querySelector('#logPanel'),
+  btnBuild:       $('btnBuild'),
+  btnTestPlay:    $('btnTestPlay'),
+  btnDebug:       $('btnDebug'),
+  btnSetup:       $('btnSetup'),
+  projectName:    $('projectName'),
+  buildLog:       $('buildLog'),
+  buildLogBar:    $('buildLogBar'),
+  buildLogBody:   $('buildLogBody'),
+  buildStatusBadge: $('buildStatusBadge'),
+  buildRomSize:   $('buildRomSize'),
+  btnCopyLog:     $('btnCopyLog'),
+  btnToggleLog:   $('btnToggleLog'),
+  btnClearLog:    $('btnClearLog'),
+  buildLogHeader: $('buildLogHeader'),
+  mainLayout:     document.querySelector('.main-layout'),
+  // code page
+  codeEditor:     $('codeEditor'),
+  codeStatus:     $('codeStatus'),
+  btnGenSample:   $('btnGenSample'),
+  btnSaveCode:    $('btnSaveCode'),
+  btnCopyCode:    $('btnCopyCode'),
+  // settings page
+  settingRomName:  $('settingRomName'),
+  settingAuthor:   $('settingAuthor'),
+  settingRegion:   $('settingRegion'),
+  settingOutputPath: $('settingOutputPath'),
+  btnSaveSettings:  $('btnSaveSettings'),
+  settingsSavedMsg: $('settingsSavedMsg'),
 };
 
-function setButtonIcon(button, iconId, title) {
-  const use = button.querySelector('use');
-  if (use) {
-    use.setAttribute('href', `#${iconId}`);
+// ============================================================ BUILD LOG ===
+
+function appendBuildLog(text, level = 'info') {
+  const pre = el.buildLog;
+  if (level === 'error') {
+    pre.textContent += text + '\n';
+  } else {
+    pre.textContent += text + '\n';
   }
-  button.title = title;
-  button.setAttribute('aria-label', title);
+  pre.scrollTop = pre.scrollHeight;
 }
 
-function normalizeJsonPayload(value) {
-  if (typeof value === 'string') {
-    try {
-      return JSON.parse(value);
-    } catch (_err) {
-      return value;
-    }
-  }
-  return value;
+function clearBuildLog() {
+  el.buildLog.textContent = '';
 }
 
-function appendLog(message, level = 'info') {
-  const timestamp = new Date().toLocaleTimeString();
-  el.log.textContent += `[${timestamp}] [${level.toUpperCase()}] ${message}\n`;
-  el.log.scrollTop = el.log.scrollHeight;
-}
-
-function setStatus(text) {
-  el.status.textContent = text;
-}
-
-function updateModeTabs() {
-  for (const tab of el.modeTabs) {
-    const active = tab.dataset.mode === state.mode;
-    tab.classList.toggle('active', active);
-    tab.setAttribute('aria-selected', String(active));
-  }
-}
-
-function applyModeView() {
-  const isWasm = state.mode === 'wasm';
-
-  el.screenPanel.classList.toggle('hidden', !isWasm);
-  el.apiPanel.classList.toggle('hidden', isWasm);
-  el.screenScaleSelect.disabled = !isWasm;
-
-  for (const node of el.modeOnly) {
-    node.classList.toggle('hidden', node.dataset.modeOnly !== state.mode);
-  }
-
-  if (!isWasm) {
-    el.apiModeStatus.textContent = `REST API モードです (port=${state.apiPort})。ROM をロードすると md-api 側で再生を開始します。`;
-  }
-}
-
-function updateRunButtons() {
-  setButtonIcon(el.playPause, state.wasmRunning ? 'icon-pause' : 'icon-play', state.wasmRunning ? 'Pause' : 'Play');
-  el.playPause.classList.toggle('active-toggle', state.wasmRunning);
-
-  setButtonIcon(el.mute, state.muted ? 'icon-mute' : 'icon-volume', state.muted ? 'Unmute' : 'Mute');
-  el.mute.classList.toggle('active-toggle', !state.muted);
-
-  setButtonIcon(el.apiPower, 'icon-power', state.apiRunning ? 'Stop API' : 'Start API');
-  el.apiPower.classList.toggle('danger-toggle', state.apiRunning);
-
-  el.apiModeStatus.textContent = `REST API モードです (port=${state.apiPort})。API は ${state.apiRunning ? '稼働中' : '停止中'} です。ROM をロードすると md-api 側で再生を開始します。`;
-}
-
-function applyLogCollapsed() {
-  el.logSection.classList.toggle('collapsed', state.logCollapsed);
-  el.toggleLog.setAttribute('aria-expanded', String(!state.logCollapsed));
-  el.toggleLog.title = state.logCollapsed ? 'Expand Log' : 'Collapse Log';
-  el.toggleLog.setAttribute('aria-label', state.logCollapsed ? 'Expand Log' : 'Collapse Log');
-}
-
-function applyScreenScale(scale) {
-  const allowed = [0.5, 1, 2];
-  const numeric = Number(scale);
-  const next = allowed.includes(numeric) ? numeric : 2;
-  state.screenScale = next;
-  el.screen.style.setProperty('--screen-scale', String(state.screenScale));
-  el.screenScaleSelect.value = String(state.screenScale);
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function ensureWasmEmulator() {
-  if (state.emu) {
-    return state.emu;
-  }
-
-  const emu = new MdEmulator({
-    wasmJsUrl: WASM_JS_URL,
-    audio: true,
-    sram: true,
-  });
-
-  emu.attachCanvas(el.screen);
-  emu.addEventListener('ready', () => appendLog(`WASM ready (build=${emu.buildVersion})`));
-  emu.addEventListener('romloaded', () => appendLog('ROM loaded')); 
-  emu.addEventListener('error', (ev) => appendLog(ev?.detail?.message || 'unknown error', 'error'));
-
-  appendLog(`WASM module URL: ${WASM_JS_URL}`);
-
-  await emu.init();
-  state.emu = emu;
-
-  return emu;
-}
-
-async function loadRomInWasm(filePath) {
-  const bytes = await window.electronAPI.readRomFile(filePath);
-  const data = new Uint8Array(bytes);
-  const emu = await ensureWasmEmulator();
-
-  await emu.loadRom(data, filePath.split(/[\\/]/).pop());
-  emu.play();
-  state.wasmRunning = true;
-  updateRunButtons();
-  appendLog('Auto play started (WASM)');
-  setStatus(`Loaded (WASM): ${filePath}`);
-}
-
-async function loadRomInApi(filePath) {
-  const endpoint = `http://127.0.0.1:${state.apiPort}/api/v1/emulator/load-rom-path`;
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: filePath }),
-  });
-
-  if (!res.ok) {
-    throw new Error(`API load-rom-path failed (${res.status})`);
-  }
-
-  await callApi('/api/v1/emulator/resume', {
-    method: 'POST',
-  });
-  appendLog('Auto play started (API resume)');
-
-  setStatus(`Loaded (API): ${filePath}`);
-}
-
-async function waitForApiHealth(maxRetries = 20, intervalMs = 250) {
-  for (let i = 0; i < maxRetries; i += 1) {
-    try {
-      await callApi('/api/v1/health');
-      return true;
-    } catch (_err) {
-      await sleep(intervalMs);
-    }
-  }
-  return false;
-}
-
-async function ensureApiReady() {
-  const running = await window.electronAPI.isApiServerRunning();
-  if (running?.port) {
-    state.apiPort = Number(running.port);
-  }
-
-  if (!running?.running) {
-    await startApi();
-  }
-
-  const ok = await waitForApiHealth();
-  if (!ok) {
-    throw new Error(`md-api health check timed out (port=${state.apiPort})`);
-  }
-}
-
-async function handleOpenRom(filePathFromMenu) {
-  try {
-    let filePath = filePathFromMenu;
-
-    if (!filePath) {
-      const result = await window.electronAPI.openRomDialog();
-      if (result.canceled || !result.filePath) {
-        return;
-      }
-      filePath = result.filePath;
-    }
-
-    appendLog(`Selected ROM: ${filePath}`);
-
-    if (state.mode === 'wasm') {
-      await loadRomInWasm(filePath);
-      appendLog('ROM loaded in WASM mode');
-    } else {
-      await ensureApiReady();
-      await loadRomInApi(filePath);
-      appendLog('ROM loaded via REST API mode');
-    }
-  } catch (err) {
-    appendLog(err.message || String(err), 'error');
-    setStatus('ROM load failed');
-  }
-}
-
-async function callApi(path, options = {}) {
-  const url = `http://127.0.0.1:${state.apiPort}${path}`;
-  const res = await fetch(url, options);
-  if (!res.ok) {
-    throw new Error(`API ${path} failed (${res.status})`);
-  }
-
-  const contentType = res.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    return res.json();
-  }
-
-  return res.text();
-}
-
-async function startApi() {
-  try {
-    const result = await window.electronAPI.startApiServer({ port: state.apiPort });
-    if (result?.port) {
-      state.apiPort = Number(result.port);
-    }
-
-    if (result?.alreadyRunning) {
-      appendLog(`md-api is already running on port ${state.apiPort}`);
-    } else {
-      appendLog(`md-api start requested on port ${state.apiPort}`);
-      if (result?.fallbackUsed) {
-        appendLog(`Requested port ${result.requestedPort} was busy. Switched to ${result.port}.`, 'warn');
-      }
-    }
-
-    await callApi('/api/v1/health');
-    state.apiRunning = true;
-    updateRunButtons();
-    setStatus(`API healthy (127.0.0.1:${state.apiPort})`);
-    appendLog(`API health check ok on port ${state.apiPort}`);
-  } catch (err) {
-    appendLog(err.message || String(err), 'error');
-  }
-}
-
-async function stopApi() {
-  const result = await window.electronAPI.stopApiServer();
-  state.apiRunning = false;
-  updateRunButtons();
-  appendLog(result?.stopped ? 'md-api stopped' : 'md-api was not running');
-}
-
-async function onPlay() {
-  try {
-    if (state.mode === 'wasm') {
-      const emu = await ensureWasmEmulator();
-      if (state.wasmRunning) {
-        emu.pause();
-        state.wasmRunning = false;
-        setStatus('Paused');
-      } else {
-        emu.play();
-        state.wasmRunning = true;
-        setStatus('Running (WASM)');
-      }
-      updateRunButtons();
-      return;
-    }
-
-    await callApi('/api/v1/emulator/step', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ frames: 1 }),
-    });
-    setStatus('Stepped 1 frame (API)');
-  } catch (err) {
-    appendLog(err.message || String(err), 'error');
-  }
-}
-
-async function onApiStep() {
-  try {
-    await ensureApiReady();
-    await callApi('/api/v1/emulator/step', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ frames: 1 }),
-    });
-    setStatus('Stepped 1 frame (API)');
-  } catch (err) {
-    appendLog(err.message || String(err), 'error');
-  }
-}
-
-function onPause() {
-  if (state.mode !== 'wasm') {
-    setStatus('Pause is WASM-only in this scaffold');
-    return;
-  }
-
-  if (state.emu) {
-    state.emu.pause();
-    setStatus('Paused');
-  }
-}
-
-async function onReset() {
-  try {
-    if (state.mode === 'wasm') {
-      if (state.emu) {
-        state.emu.reset();
-        setStatus('Reset (WASM)');
-      }
-      return;
-    }
-
-    await callApi('/api/v1/emulator/reset', { method: 'POST' });
-    setStatus('Reset (API)');
-  } catch (err) {
-    appendLog(err.message || String(err), 'error');
-  }
-}
-
-async function onMuteToggle() {
-  state.muted = !state.muted;
-
-  if (state.mode === 'wasm' && state.emu) {
-    state.emu.setMuted(state.muted);
-  }
-
-  updateRunButtons();
-  setStatus(state.muted ? 'Muted' : 'Unmuted');
-}
-
-async function copyRuntimeLog() {
-  const text = el.log.textContent || '';
+async function copyBuildLog() {
+  const text = el.buildLog.textContent || '';
   if (!text.trim()) {
-    setStatus('Runtime Log is empty');
     return;
   }
 
   try {
     await navigator.clipboard.writeText(text);
-    setStatus('Runtime Log copied');
-    appendLog('Runtime Log copied to clipboard');
+    el.btnCopyLog.title = 'コピーしました';
+    setTimeout(() => {
+      if (el.btnCopyLog) {
+        el.btnCopyLog.title = 'ログをコピー';
+      }
+    }, 1200);
   } catch (_err) {
-    const area = document.createElement('textarea');
-    area.value = text;
-    document.body.appendChild(area);
-    area.select();
+    const range = document.createRange();
+    range.selectNodeContents(el.buildLog);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
     document.execCommand('copy');
-    document.body.removeChild(area);
-    setStatus('Runtime Log copied (fallback)');
-    appendLog('Runtime Log copied via fallback');
+    selection.removeAllRanges();
   }
 }
 
-async function openDebugWindow() {
+function setBuildStatus(type, text) {
+  const badge = el.buildStatusBadge;
+  badge.textContent = text;
+  badge.className = 'build-status-badge ' + (type || '');
+}
+
+function setLogOpen(open) {
+  state.logOpen = open;
+  el.buildLogBar.classList.toggle('open', open);
+  el.mainLayout.classList.toggle('log-open', open);
+  // chevron
+  const use = el.btnToggleLog.querySelector('use');
+  if (use) use.setAttribute('href', open ? '#icon-chevron-down' : '#icon-chevron-up');
+}
+
+// ============================================================= PAGE NAV ===
+
+function switchPage(page) {
+  state.currentPage = page;
+  document.querySelectorAll('.nav-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.page === page);
+  });
+  document.querySelectorAll('.editor-page').forEach((sec) => {
+    sec.classList.toggle('active', sec.id === `page-${page}`);
+  });
+}
+
+// ========================================================== SAMPLE CODE ===
+
+const HELLO_WORLD_C = `/**
+ * Hello World - MD Game Editor サンプル
+ * SGDK を使った最小限のメガドライブゲーム
+ */
+#include <genesis.h>
+
+int main(void)
+{
+    /* 背景色を設定（パレット 0, カラー 0: 濃い青） */
+    PAL_setColor(0, RGB24_TO_VDPCOLOR(0x000060));
+
+    /* テキスト表示 */
+    VDP_drawText("*** HELLO, MEGA WORLD! ***", 3, 10);
+    VDP_drawText("MD GAME EDITOR SAMPLE", 6, 13);
+    VDP_drawText("PRESS START", 10, 18);
+
+    /* メインループ */
+    while (1)
+    {
+        SYS_doVBlankProcess();
+    }
+
+    return 0;
+}
+`;
+
+function loadSampleCode() {
+  el.codeEditor.value = HELLO_WORLD_C;
+  el.codeStatus.textContent = 'Hello World サンプルを読み込みました。Build ボタンでビルドできます。';
+}
+
+// ============================================================== SETTINGS ===
+
+function updateProjectNameDisplay() {
+  el.projectName.textContent = state.projectConfig.romName || 'MY GAME';
+}
+
+async function loadProjectConfig() {
   try {
-    await window.electronAPI.openDebugWindow({ mode: state.mode, apiPort: state.apiPort });
-    appendLog('Debug subwindow opened');
-  } catch (err) {
-    appendLog(err.message || String(err), 'error');
+    const cfg = await window.electronAPI.getProjectConfig();
+    if (cfg) {
+      state.projectConfig = { ...state.projectConfig, ...cfg };
+      el.settingRomName.value  = cfg.romName  || state.projectConfig.romName;
+      el.settingAuthor.value   = cfg.author   || state.projectConfig.author;
+      el.settingRegion.value   = cfg.region   || state.projectConfig.region;
+      updateProjectNameDisplay();
+    }
+    const romPath = await window.electronAPI.getRomPath();
+    if (romPath) {
+      state.lastRomPath = romPath;
+      el.settingOutputPath.value = romPath;
+    }
+  } catch (_err) {
+    // 初回起動など、設定が無い場合は無視
   }
 }
 
-function isRomPath(filePath) {
-  return /\.(bin|md|gen|smd|sms|zip)$/i.test(filePath || '');
-}
-
-function bindDragAndDrop() {
-  const getDropTarget = () => (state.mode === 'wasm' ? el.screenPanel : el.apiPanel);
-  const activate = () => getDropTarget().classList.add('drag-over');
-  const deactivate = () => {
-    el.screenPanel.classList.remove('drag-over');
-    el.apiPanel.classList.remove('drag-over');
+async function saveSettings() {
+  const cfg = {
+    romName: el.settingRomName.value.trim() || 'MY GAME',
+    author:  el.settingAuthor.value.trim()  || 'AUTHOR',
+    region:  el.settingRegion.value,
   };
+  state.projectConfig = cfg;
+  updateProjectNameDisplay();
+  // 保存は generateProject 時に行うため、ここではメモリのみ更新
+  el.settingsSavedMsg.textContent = '✓ 設定を保存しました';
+  setTimeout(() => { el.settingsSavedMsg.textContent = ''; }, 2000);
+}
 
-  window.addEventListener('dragover', (ev) => {
-    ev.preventDefault();
-    activate();
-  });
+// ============================================================== BUILD ===
 
-  window.addEventListener('dragleave', (ev) => {
-    if (ev.relatedTarget == null) {
-      deactivate();
-    }
-  });
+async function runBuild() {
+  if (state.building) return;
 
-  window.addEventListener('drop', async (ev) => {
-    ev.preventDefault();
-    deactivate();
+  const sourceCode = el.codeEditor.value.trim();
+  if (!sourceCode) {
+    switchPage('code');
+    el.codeStatus.textContent = '⚠ ソースコードが空です。サンプル生成ボタンでサンプルを読み込んでください。';
+    setLogOpen(true);
+    setBuildStatus('error', 'ソースコードが空です');
+    return;
+  }
 
-    const file = ev.dataTransfer?.files?.[0];
-    if (!file?.path) {
-      appendLog('Drop ignored: no file path found', 'warn');
+  state.building = true;
+  el.btnBuild.classList.add('building');
+  el.btnBuild.disabled = true;
+  clearBuildLog();
+  setLogOpen(true);
+  setBuildStatus('building', 'ビルド中...');
+  el.buildRomSize.textContent = '';
+  appendBuildLog('=== MD Game Editor Build ===');
+  appendBuildLog(`プロジェクト: ${state.projectConfig.romName}`);
+  appendBuildLog('');
+
+  try {
+    // 1. ソースを生成
+    const genResult = await window.electronAPI.generateProject(sourceCode, state.projectConfig);
+    if (!genResult.ok) {
+      appendBuildLog(`[ERROR] プロジェクト生成失敗: ${genResult.error}`, 'error');
+      setBuildStatus('error', 'プロジェクト生成失敗');
       return;
     }
+    appendBuildLog(`[INFO] プロジェクト生成: ${genResult.projectDir}`);
 
-    if (!isRomPath(file.path)) {
-      appendLog(`Drop ignored: unsupported file type (${file.path})`, 'warn');
-      return;
+    // 2. ビルド実行（ログは IPC イベントでストリーム）
+    const buildResult = await window.electronAPI.runBuild();
+
+    if (buildResult.success) {
+      state.lastRomPath = buildResult.romPath;
+      el.settingOutputPath.value = buildResult.romPath;
+      const sizeKb = buildResult.romSize != null ? `${(buildResult.romSize / 1024).toFixed(1)} KB` : '';
+      el.buildRomSize.textContent = sizeKb ? `ROM: ${sizeKb}` : '';
+      setBuildStatus('success', '✓ ビルド成功');
+      appendBuildLog('');
+      appendBuildLog(`=== ビルド成功 (${sizeKb}) ===`);
+    } else {
+      setBuildStatus('error', '✕ ビルド失敗');
+      appendBuildLog('');
+      appendBuildLog(`=== ビルド失敗: ${buildResult.error || ''} ===`, 'error');
     }
+  } catch (err) {
+    const msg = err.message || String(err);
+    appendBuildLog(`[ERROR] ${msg}`, 'error');
+    setBuildStatus('error', '✕ エラー');
+  } finally {
+    state.building = false;
+    el.btnBuild.classList.remove('building');
+    el.btnBuild.disabled = false;
+  }
+}
 
-    appendLog(`Dropped ROM: ${file.path}`);
-    await handleOpenRom(file.path);
+// ========================================================= TEST PLAY ===
+
+async function openTestPlay() {
+  const romPath = state.lastRomPath || (await window.electronAPI.getRomPath());
+  if (!romPath) {
+    setLogOpen(true);
+    appendBuildLog('[WARN] ROM が見つかりません。先に Build を実行してください。');
+    setBuildStatus('error', 'ROM なし');
+    return;
+  }
+  try {
+    await window.electronAPI.openTestPlayWindow(romPath);
+  } catch (err) {
+    appendBuildLog(`[ERROR] テストプレイ起動失敗: ${err.message}`, 'error');
+  }
+}
+
+// ========================================================= MAP CANVAS ===
+
+function drawDummyMap() {
+  const canvas = $('mapCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const COLS = 64, ROWS = 56, TILE = 8;
+  canvas.width  = COLS * TILE;
+  canvas.height = ROWS * TILE;
+  const colors = ['#0a1428', '#0e1e38', '#0a2818', '#1a1020'];
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const ci = Math.floor(Math.random() * colors.length);
+      ctx.fillStyle = colors[ci];
+      ctx.fillRect(c * TILE, r * TILE, TILE, TILE);
+    }
+  }
+  ctx.strokeStyle = '#1e2a40';
+  ctx.lineWidth = 0.5;
+  for (let r = 0; r <= ROWS; r++) {
+    ctx.beginPath(); ctx.moveTo(0, r * TILE); ctx.lineTo(COLS * TILE, r * TILE); ctx.stroke();
+  }
+  for (let c = 0; c <= COLS; c++) {
+    ctx.beginPath(); ctx.moveTo(c * TILE, 0); ctx.lineTo(c * TILE, ROWS * TILE); ctx.stroke();
+  }
+}
+
+function buildTilePalette() {
+  const grid = $('tilePaletteGrid');
+  if (!grid) return;
+  const palColors = [
+    '#0a1428','#0e1e38','#0a2818','#1a1020',
+    '#1e3060','#203828','#381e60','#382018',
+    '#4040a0','#40a060','#a04080','#a08040',
+  ];
+  palColors.forEach((color, i) => {
+    const div = document.createElement('div');
+    div.className = 'tile-swatch' + (i === 0 ? ' active' : '');
+    div.style.background = color;
+    div.title = `Tile ${i}`;
+    div.addEventListener('click', () => {
+      grid.querySelectorAll('.tile-swatch').forEach((s) => s.classList.remove('active'));
+      div.classList.add('active');
+    });
+    grid.appendChild(div);
   });
 }
+
+// ======================================================= ASSET TABLE ===
+
+function bindAssetTable() {
+  const rows = document.querySelectorAll('.asset-row');
+  const assetData = {
+    player_sprite: { name: 'player_sprite', type: 'Sprite', size: '16 × 16 px', palette: 'PAL0', color: '#1e3060' },
+    bg_tileset:    { name: 'bg_tileset',    type: 'Tileset', size: '16 tiles (128px)', palette: 'PAL1', color: '#1e3828' },
+    main_bgm:      { name: 'main_bgm',      type: 'Music (BGM)', size: '2:30 / XGM2', palette: '—', color: '#2e1e3a' },
+  };
+  rows.forEach((row) => {
+    row.addEventListener('click', () => {
+      rows.forEach((r) => r.classList.remove('active'));
+      row.classList.add('active');
+      const key = row.dataset.asset;
+      const d = assetData[key];
+      if (d) {
+        $('infoName').textContent    = d.name;
+        $('infoType').textContent    = d.type;
+        $('infoSize').textContent    = d.size;
+        $('infoPalette').textContent = d.palette;
+        const preview = $('assetPreview');
+        preview.innerHTML = '';
+        const box = document.createElement('div');
+        box.style.cssText = `width:80px;height:80px;border-radius:8px;background:${d.color};display:flex;align-items:center;justify-content:center;font-size:11px;color:#8b98ab;`;
+        box.textContent = d.type;
+        preview.appendChild(box);
+      }
+    });
+  });
+}
+
+// ====================================================== EVENT BINDING ===
 
 function bindEvents() {
-  for (const tab of el.modeTabs) {
-    tab.addEventListener('click', () => {
-      state.mode = tab.dataset.mode;
-      updateModeTabs();
-      applyModeView();
-      setStatus(`Mode: ${state.mode}`);
-      appendLog(`Mode switched to ${state.mode}`);
-    });
-  }
-
-  el.screenScaleSelect.addEventListener('change', (ev) => {
-    applyScreenScale(ev.target.value);
+  // Sidebar navigation
+  document.querySelectorAll('.nav-btn').forEach((btn) => {
+    btn.addEventListener('click', () => switchPage(btn.dataset.page));
   });
 
-  el.openRom.addEventListener('click', () => handleOpenRom());
-  el.playPause.addEventListener('click', onPlay);
-  el.reset.addEventListener('click', onReset);
-  el.mute.addEventListener('click', onMuteToggle);
-  el.apiPower.addEventListener('click', () => {
-    if (state.apiRunning) {
-      stopApi();
+  // Topbar buttons
+  el.btnBuild.addEventListener('click', runBuild);
+  el.btnTestPlay.addEventListener('click', openTestPlay);
+  el.btnDebug.addEventListener('click', () => {
+    window.electronAPI.openDebugWindow({ mode: 'wasm' });
+  });
+  el.btnSetup.addEventListener('click', () => {
+    window.electronAPI.openSetupWindow();
+  });
+
+  // Code page
+  el.btnGenSample.addEventListener('click', () => {
+    loadSampleCode();
+    switchPage('code');
+  });
+  el.btnSaveCode.addEventListener('click', async () => {
+    const code = el.codeEditor.value;
+    try {
+      await window.electronAPI.generateProject(code, state.projectConfig);
+      el.codeStatus.textContent = '✓ コードを保存しました';
+      setTimeout(() => { el.codeStatus.textContent = ''; }, 2000);
+    } catch (err) {
+      el.codeStatus.textContent = `保存エラー: ${err.message}`;
+    }
+  });
+  el.btnCopyCode.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(el.codeEditor.value);
+      el.codeStatus.textContent = '✓ クリップボードにコピーしました';
+      setTimeout(() => { el.codeStatus.textContent = ''; }, 2000);
+    } catch (_err) {
+      el.codeStatus.textContent = 'コピーに失敗しました';
+    }
+  });
+
+  // Settings page
+  el.btnSaveSettings.addEventListener('click', saveSettings);
+  el.settingRomName.addEventListener('input', () => {
+    state.projectConfig.romName = el.settingRomName.value;
+    updateProjectNameDisplay();
+  });
+
+  // Build log
+  el.buildLogHeader.addEventListener('click', () => setLogOpen(!state.logOpen));
+  el.btnCopyLog.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await copyBuildLog();
+  });
+  el.btnClearLog.addEventListener('click', (e) => { e.stopPropagation(); clearBuildLog(); });
+  el.btnToggleLog.addEventListener('click', (e) => { e.stopPropagation(); setLogOpen(!state.logOpen); });
+
+  // IPC events
+  window.electronAPI.onBuildLog((payload) => {
+    appendBuildLog(payload.text || '', payload.level);
+    setLogOpen(true);
+  });
+
+  window.electronAPI.onBuildEnd((payload) => {
+    if (payload.success) {
+      state.lastRomPath = payload.romPath;
+      if (payload.romPath) el.settingOutputPath.value = payload.romPath;
+      const sizeKb = payload.romSize != null ? `${(payload.romSize / 1024).toFixed(1)} KB` : '';
+      el.buildRomSize.textContent = sizeKb ? `ROM: ${sizeKb}` : '';
+      setBuildStatus('success', '✓ ビルド成功');
     } else {
-      startApi();
-    }
-  });
-  el.apiStep.addEventListener('click', onApiStep);
-  el.openDebug.addEventListener('click', openDebugWindow);
-  el.copyLog.addEventListener('click', copyRuntimeLog);
-  el.toggleLog.addEventListener('click', () => {
-    state.logCollapsed = !state.logCollapsed;
-    applyLogCollapsed();
-  });
-
-  window.electronAPI.onRomSelected((payload) => {
-    if (payload?.filePath) {
-      handleOpenRom(payload.filePath);
+      setBuildStatus('error', '✕ ビルド失敗');
     }
   });
 
-  window.electronAPI.onApiLog((payload) => {
-    appendLog(payload?.message?.trim?.() || String(payload?.message || ''), payload?.level || 'info');
-  });
-
-  window.electronAPI.onApiExit((payload) => {
-    state.apiRunning = false;
-    updateRunButtons();
-    appendLog(`md-api exited (code=${payload?.code}, signal=${payload?.signal})`, 'warn');
+  // Keyboard shortcut: Ctrl/Cmd+B = Build
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+      e.preventDefault();
+      runBuild();
+    }
   });
 }
+
+// ============================================================ BOOTSTRAP ===
 
 async function bootstrap() {
   bindEvents();
-  bindDragAndDrop();
-  updateModeTabs();
-  applyModeView();
-  applyLogCollapsed();
-  applyScreenScale(state.screenScale);
-  updateRunButtons();
-  setStatus('Bootstrapping...');
+  bindAssetTable();
+  drawDummyMap();
+  buildTilePalette();
+  await loadProjectConfig();
 
-  try {
-    await ensureWasmEmulator();
-    setStatus('Ready (WASM mode)');
-  } catch (err) {
-    appendLog(err.message || String(err), 'error');
-    setStatus('WASM init failed');
+  // サンプルコードを初期表示
+  if (!el.codeEditor.value) {
+    loadSampleCode();
   }
-
-  const running = await window.electronAPI.isApiServerRunning();
-  if (running?.port) {
-    state.apiPort = Number(running.port);
-  }
-  state.apiRunning = !!running?.running;
-  updateRunButtons();
-  appendLog(running?.running ? `md-api already running (port=${state.apiPort})` : 'md-api not running');
-
-  window.__mdDebugBridge = {
-    getWasmDebugSnapshot: async (palette = 0) => {
-      if (!state.emu || !state.emu.handle) {
-        return { ok: false, error: 'WASM emulator is not initialized' };
-      }
-
-      try {
-        const h = state.emu.handle;
-        const registers = normalizeJsonPayload(h.get_vdp_registers_json());
-        const planeA = normalizeJsonPayload(h.debug_render_plane('A'));
-        const planeB = normalizeJsonPayload(h.debug_render_plane('B'));
-        const planeW = normalizeJsonPayload(h.debug_render_plane('W'));
-        const tiles = normalizeJsonPayload(h.debug_render_tiles(Number(palette) || 0));
-        const cram = normalizeJsonPayload(h.debug_cram_colors_json());
-        const sprites = normalizeJsonPayload(h.debug_sprites_json());
-        const framePixels = Array.from(h.get_framebuffer_argb());
-
-        return {
-          ok: true,
-          source: 'wasm',
-          palette: Number(palette) || 0,
-          registers,
-          planes: { A: planeA, B: planeB, W: planeW },
-          tiles,
-          cram,
-          sprites,
-          frame: {
-            width: 320,
-            height: 224,
-            pixels_argb: framePixels,
-          },
-        };
-      } catch (err) {
-        return { ok: false, error: String(err?.message || err) };
-      }
-    },
-  };
 }
 
 bootstrap();

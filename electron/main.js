@@ -4,9 +4,13 @@ const net = require('net');
 const { shell } = require('electron');
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const { spawn } = require('child_process');
+const setupManager = require('./setup-manager');
+const buildSystem = require('./build-system');
 
 let mainWindow = null;
 let debugWindow = null;
+let setupWindow = null;
+let testPlayWindow = null;
 let apiServerProcess = null;
 let apiServerPort = null;
 
@@ -129,6 +133,13 @@ function sendToRenderer(channel, payload) {
     return;
   }
   mainWindow.webContents.send(channel, payload);
+}
+
+function sendToSetupWindow(channel, payload) {
+  if (!setupWindow || setupWindow.isDestroyed()) {
+    return;
+  }
+  setupWindow.webContents.send(channel, payload);
 }
 
 function createMenu() {
@@ -341,8 +352,13 @@ ipcMain.handle('window:openDebug', async (_event, options) => {
 });
 
 ipcMain.handle('debug:getWasmSnapshot', async (_event, options) => {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    return { ok: false, error: 'main window is not available' };
+  // testPlayWindow (または mainWindow) から debug bridge を読む
+  const targetWin = (testPlayWindow && !testPlayWindow.isDestroyed()) ? testPlayWindow
+    : (mainWindow && !mainWindow.isDestroyed()) ? mainWindow
+    : null;
+
+  if (!targetWin) {
+    return { ok: false, error: 'no available window' };
   }
 
   const palette = Number(options?.palette ?? 0);
@@ -356,11 +372,141 @@ ipcMain.handle('debug:getWasmSnapshot', async (_event, options) => {
   `;
 
   try {
-    const result = await mainWindow.webContents.executeJavaScript(script, true);
+    const result = await targetWin.webContents.executeJavaScript(script, true);
     return result;
   } catch (error) {
     return { ok: false, error: String(error?.message || error) };
   }
+});
+
+// ---- Setup window ----
+ipcMain.handle('window:openSetup', async () => {
+  if (setupWindow && !setupWindow.isDestroyed()) {
+    setupWindow.focus();
+    return { opened: true, reused: true };
+  }
+  setupWindow = new BrowserWindow({
+    width: 720,
+    height: 640,
+    title: 'Setup - MD Game Editor',
+    backgroundColor: '#0f1117',
+    webPreferences: {
+      preload: path.join(__dirname, 'setup-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  setupWindow.loadFile(path.join(__dirname, 'renderer', 'setup.html'));
+  setupWindow.on('closed', () => { setupWindow = null; });
+  return { opened: true, reused: false };
+});
+
+ipcMain.handle('setup:getStatus', async () => {
+  return setupManager.getStatus();
+});
+
+ipcMain.handle('setup:listSgdkVersions', async () => {
+  return setupManager.listSgdkReleases(30);
+});
+
+ipcMain.handle('setup:downloadSgdk', async (_event, tag) => {
+  return setupManager.downloadSgdk(tag, (progress) => {
+    sendToSetupWindow('setup-progress', progress);
+  });
+});
+
+ipcMain.handle('setup:downloadJava', async () => {
+  return setupManager.downloadJava((progress) => {
+    sendToSetupWindow('setup-progress', progress);
+  });
+});
+
+ipcMain.handle('setup:setSgdkPath', async (_event, p) => {
+  return setupManager.setSgdkPath(p);
+});
+
+ipcMain.handle('setup:listMarsdevVersions', async () => {
+  return setupManager.listMarsdevReleases(30);
+});
+
+ipcMain.handle('setup:downloadMarsdev', async (_event, tag) => {
+  return setupManager.downloadMarsdev(tag, (progress) => {
+    sendToSetupWindow('setup-progress', progress);
+  });
+});
+
+ipcMain.handle('setup:setMarsdevPath', async (_event, p) => {
+  return setupManager.setMarsdevPath(p);
+});
+
+// ---- Test play window ----
+ipcMain.handle('window:openTestPlay', async (_event, romPath) => {
+  if (testPlayWindow && !testPlayWindow.isDestroyed()) {
+    testPlayWindow.focus();
+    return { opened: true, reused: true };
+  }
+  testPlayWindow = new BrowserWindow({
+    width: 800,
+    height: 720,
+    title: 'Test Play - MD Game Editor',
+    backgroundColor: '#0f1117',
+    webPreferences: {
+      preload: path.join(__dirname, 'testplay-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  const romQuery = romPath ? `?romPath=${encodeURIComponent(romPath)}` : '';
+  testPlayWindow.loadFile(path.join(__dirname, 'renderer', 'testplay.html'), { search: romQuery });
+  testPlayWindow.on('closed', () => { testPlayWindow = null; });
+  return { opened: true, reused: false };
+});
+
+// ---- Build IPC ----
+ipcMain.handle('build:generateProject', async (_event, sourceCode, config) => {
+  try {
+    const result = await buildSystem.generateProject(sourceCode, config);
+    return { ok: true, projectDir: result.projectDir };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
+ipcMain.handle('build:run', async () => {
+  try {
+    const toolchainPath = setupManager.getToolchainDir();
+    const javaPath = setupManager.getJavaExePath();
+    if (!toolchainPath) {
+      return { success: false, error: 'ツールチェーンが設定されていません。Setup を実行してください。' };
+    }
+    const result = await buildSystem.buildProject(toolchainPath, javaPath, (line, level) => {
+      sendToRenderer('build-log', { text: line, level: level || 'info' });
+    });
+    sendToRenderer('build-end', result);
+    return result;
+  } catch (err) {
+    const r = { success: false, error: err.message || String(err) };
+    sendToRenderer('build-end', r);
+    return r;
+  }
+});
+
+ipcMain.handle('build:getRomPath', async () => {
+  return buildSystem.getLastRomPath();
+});
+
+ipcMain.handle('build:getProjectConfig', async () => {
+  return buildSystem.loadProjectConfig();
+});
+
+ipcMain.handle('build:getSampleCode', async () => {
+  const samplePath = path.join(__dirname, 'sample', 'src', 'main.c');
+  if (fs.existsSync(samplePath)) {
+    return fs.readFileSync(samplePath, 'utf-8');
+  }
+  return null;
 });
 
 app.whenReady().then(() => {

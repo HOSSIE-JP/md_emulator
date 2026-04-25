@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // --- 既存 ---
   openRomDialog: () => ipcRenderer.invoke('dialog:openRomFile'),
   readRomFile: (filePath) => ipcRenderer.invoke('fs:readRomFile', filePath),
   startApiServer: (options) => ipcRenderer.invoke('api:startServer', options),
@@ -15,5 +16,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onApiExit: (callback) => {
     ipcRenderer.on('api-exit', (_event, payload) => callback(payload));
+  },
+  // --- エディタ追加 ---
+  openSetupWindow: () => ipcRenderer.invoke('window:openSetup'),
+  openTestPlayWindow: (romPath) => ipcRenderer.invoke('window:openTestPlay', romPath),
+  generateProject: (sourceCode, config) => ipcRenderer.invoke('build:generateProject', sourceCode, config),
+  runBuild: () => ipcRenderer.invoke('build:run'),
+  getRomPath: () => ipcRenderer.invoke('build:getRomPath'),
+  getProjectConfig: () => ipcRenderer.invoke('build:getProjectConfig'),
+  generateSample: () => ipcRenderer.invoke('build:getSampleCode'),
+  onBuildLog: (callback) => {
+    ipcRenderer.on('build-log', (_event, payload) => callback(payload));
+  },
+  onBuildEnd: (callback) => {
+    ipcRenderer.on('build-end', (_event, payload) => callback(payload));
   },
 });

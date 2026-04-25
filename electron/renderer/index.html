@@ -3,102 +3,236 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mega Drive Emulator Desktop</title>
+  <title>MD Game Editor</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
+  <!-- SVG アイコン -->
   <svg class="icon-sprite" aria-hidden="true" focusable="false">
     <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H10l2 2h6.5A2.5 2.5 0 0 1 21 8.5v9A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-build" viewBox="0 0 24 24"><path d="M15 5.5L18.5 2 22 5.5l-3.5 3.5-3.5-3.5zM2 22l7-7 3.5 3.5-7 7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 7l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
     <symbol id="icon-play" viewBox="0 0 24 24"><path d="M8 6l10 6-10 6z" fill="currentColor"/></symbol>
-    <symbol id="icon-pause" viewBox="0 0 24 24"><path d="M8 6h3v12H8zm5 0h3v12h-3z" fill="currentColor"/></symbol>
-    <symbol id="icon-volume" viewBox="0 0 24 24"><path d="M4 14h4l5 4V6l-5 4H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M16 9a4 4 0 0 1 0 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
-    <symbol id="icon-mute" viewBox="0 0 24 24"><path d="M4 14h4l5 4V6l-5 4H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M16 9l4 6M20 9l-4 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
-    <symbol id="icon-power" viewBox="0 0 24 24"><path d="M12 3v8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7.8 5.8a8 8 0 1 0 8.4 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
-    <symbol id="icon-reset" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 3-6.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M4 4v5h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-    <symbol id="icon-step" viewBox="0 0 24 24"><path d="M7 6l8 6-8 6zM18 6v12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-    <symbol id="icon-bug" viewBox="0 0 24 24"><path d="M9 8V6a3 3 0 1 1 6 0v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="7" y="8" width="10" height="10" rx="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 10h3m10 0h3M4 14h3m10 0h3M8 4L6 2m10 2 2-2M8 20l-2 2m10-2 2 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="icon-bug" viewBox="0 0 24 24"><path d="M9 8V6a3 3 0 1 1 6 0v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="7" y="8" width="10" height="10" rx="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 10h3m10 0h3M4 14h3m10 0h3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="icon-setup" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.67 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.67a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="icon-assets" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="3" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="3" y="14" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="14" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="icon-map" viewBox="0 0 24 24"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 3v15M15 6v15" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="icon-code" viewBox="0 0 24 24"><path d="M8 9l-4 3 4 3M16 9l4 3-4 3M13 7l-2 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.67 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.67a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="icon-chevron-up" viewBox="0 0 24 24"><path d="M18 15l-6-6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="icon-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="10" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M6 15H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
-    <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="M8 10l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-add" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="icon-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M17 21v-8H7v8M7 3v5h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </svg>
+
+  <!-- TOP BAR -->
   <header class="topbar">
-    <div class="title-wrap">
-      <h1>Mega Drive Emulator</h1>
-      <p class="subtitle">Electron Shell (WASM / REST mode)</p>
+    <div class="topbar-left">
+      <span class="app-logo">🎮</span>
+      <span class="app-name">MD Game Editor</span>
+      <span class="project-name" id="projectName">MY GAME</span>
     </div>
-
-    <div class="toolbar">
-      <div class="mode-tabs" role="tablist" aria-label="Runtime mode">
-        <button class="mode-tab active" id="modeTabWasm" data-mode="wasm" role="tab" aria-selected="true">WASM</button>
-        <button class="mode-tab" id="modeTabApi" data-mode="api" role="tab" aria-selected="false">API</button>
-      </div>
-
-      <label class="scale-picker" for="screenScaleSelect">
-        Screen
-        <select id="screenScaleSelect">
-          <option value="0.5">0.5x</option>
-          <option value="1">1.0x</option>
-          <option value="2" selected>2.0x</option>
-        </select>
-      </label>
-
-      <button id="openRomButton" class="icon-button" title="Open ROM" aria-label="Open ROM">
-        <svg class="icon"><use href="#icon-folder"></use></svg>
+    <div class="topbar-actions">
+      <button class="action-btn build-btn" id="btnBuild">
+        <svg class="icon"><use href="#icon-build"></use></svg>
+        Build
       </button>
-      <button id="playPauseButton" class="icon-button" data-mode-only="wasm" title="Play" aria-label="Play">
+      <button class="action-btn testplay-btn" id="btnTestPlay">
         <svg class="icon"><use href="#icon-play"></use></svg>
+        Test Play
       </button>
-      <button id="muteButton" class="icon-button" data-mode-only="wasm" title="Mute" aria-label="Mute">
-        <svg class="icon"><use href="#icon-volume"></use></svg>
-      </button>
-
-      <button id="apiPowerButton" class="icon-button" data-mode-only="api" title="Start API" aria-label="Start API">
-        <svg class="icon"><use href="#icon-power"></use></svg>
-      </button>
-      <button id="apiStepButton" class="icon-button" data-mode-only="api" title="Step 1 frame" aria-label="Step 1 frame">
-        <svg class="icon"><use href="#icon-step"></use></svg>
-      </button>
-
-      <button id="resetButton" class="icon-button" title="Reset" aria-label="Reset">
-        <svg class="icon"><use href="#icon-reset"></use></svg>
-      </button>
-      <button id="openDebugButton" class="icon-button" title="Open Debug Window" aria-label="Open Debug Window">
+      <button class="action-btn" id="btnDebug">
         <svg class="icon"><use href="#icon-bug"></use></svg>
+        Debug
+      </button>
+      <button class="action-btn setup-btn" id="btnSetup">
+        <svg class="icon"><use href="#icon-setup"></use></svg>
+        Setup
       </button>
     </div>
   </header>
 
-  <main class="content">
-    <section class="runtime-area">
-      <section class="screen-panel" id="screenPanel" data-mode-panel="wasm">
-        <div class="screen-wrap">
-          <canvas id="screen" width="320" height="224"></canvas>
+  <!-- MAIN LAYOUT -->
+  <div class="main-layout">
+    <!-- SIDEBAR -->
+    <nav class="sidebar">
+      <button class="nav-btn active" data-page="assets">
+        <svg class="icon"><use href="#icon-assets"></use></svg>
+        <span class="nav-label">Assets</span>
+      </button>
+      <button class="nav-btn" data-page="map">
+        <svg class="icon"><use href="#icon-map"></use></svg>
+        <span class="nav-label">Map</span>
+      </button>
+      <button class="nav-btn" data-page="code">
+        <svg class="icon"><use href="#icon-code"></use></svg>
+        <span class="nav-label">Code</span>
+      </button>
+      <button class="nav-btn" data-page="settings">
+        <svg class="icon"><use href="#icon-settings"></use></svg>
+        <span class="nav-label">Settings</span>
+      </button>
+    </nav>
+
+    <!-- EDITOR PANELS -->
+    <main class="editor-area">
+
+      <!-- ASSETS PAGE -->
+      <section class="editor-page active" id="page-assets">
+        <div class="page-header">
+          <h2>アセット一覧</h2>
+          <div class="page-actions">
+            <button class="icon-btn" id="btnAddAsset" title="アセット追加">
+              <svg class="icon"><use href="#icon-add"></use></svg>
+            </button>
+          </div>
         </div>
-        <p id="statusLine" class="status">Ready</p>
-        <p class="hint">ROM ファイルをこの領域へドロップしてロードできます</p>
+        <div class="assets-layout">
+          <div class="asset-list-panel">
+            <table class="asset-table">
+              <thead>
+                <tr><th>名前</th><th>タイプ</th><th>サイズ</th><th></th></tr>
+              </thead>
+              <tbody id="assetTableBody">
+                <tr class="asset-row active" data-asset="player_sprite">
+                  <td><span class="asset-icon sprite">SP</span> player_sprite</td>
+                  <td><span class="type-badge">Sprite</span></td>
+                  <td>16×16</td>
+                  <td><button class="icon-btn-sm"><svg class="icon-sm"><use href="#icon-trash"></use></svg></button></td>
+                </tr>
+                <tr class="asset-row" data-asset="bg_tileset">
+                  <td><span class="asset-icon tile">TL</span> bg_tileset</td>
+                  <td><span class="type-badge tileset">Tileset</span></td>
+                  <td>16 tiles</td>
+                  <td><button class="icon-btn-sm"><svg class="icon-sm"><use href="#icon-trash"></use></svg></button></td>
+                </tr>
+                <tr class="asset-row" data-asset="main_bgm">
+                  <td><span class="asset-icon music">MU</span> main_bgm</td>
+                  <td><span class="type-badge music">Music</span></td>
+                  <td>2:30</td>
+                  <td><button class="icon-btn-sm"><svg class="icon-sm"><use href="#icon-trash"></use></svg></button></td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="hint-text">※ ダミーデータ表示。アセット編集機能は今後実装予定です。</p>
+          </div>
+          <div class="asset-preview-panel">
+            <div class="preview-box" id="assetPreview">
+              <div class="preview-placeholder">
+                <svg class="icon" style="width:40px;height:40px;opacity:0.2"><use href="#icon-assets"></use></svg>
+                <p>アセットを選択するとプレビューが表示されます</p>
+              </div>
+            </div>
+            <div class="preview-info">
+              <div class="info-row"><span class="info-label">名前</span><span id="infoName">player_sprite</span></div>
+              <div class="info-row"><span class="info-label">タイプ</span><span id="infoType">Sprite</span></div>
+              <div class="info-row"><span class="info-label">サイズ</span><span id="infoSize">16 × 16 px</span></div>
+              <div class="info-row"><span class="info-label">パレット</span><span id="infoPalette">PAL0</span></div>
+            </div>
+          </div>
+        </div>
       </section>
 
-      <section class="screen-panel hidden" id="apiPanel" data-mode-panel="api">
-        <h2>API Runtime</h2>
-        <p class="status" id="apiModeStatus">REST API モードです。ROM をロードすると md-api 側で再生を開始します。</p>
-        <p class="hint">デバッグは Debug ボタンからサブウィンドウで開けます。</p>
-      </section>
-    </section>
-
-    <section class="side-panel" id="logSection">
-      <div class="panel-header">
-        <h2>Runtime Log</h2>
-        <div class="panel-actions">
-          <button id="copyLogButton" class="icon-button" title="Copy Log" aria-label="Copy Log">
-            <svg class="icon"><use href="#icon-copy"></use></svg>
-          </button>
-          <button id="toggleLogButton" class="icon-button" title="Collapse Log" aria-label="Collapse Log" aria-expanded="true">
-            <svg class="icon chevron-icon"><use href="#icon-chevron"></use></svg>
-          </button>
+      <!-- MAP PAGE -->
+      <section class="editor-page" id="page-map">
+        <div class="page-header">
+          <h2>マップエディタ</h2>
+          <p class="page-desc">スクロールプレーン A へのタイル配置（ダミー表示）</p>
         </div>
+        <div class="map-layout">
+          <div class="map-canvas-wrap">
+            <canvas id="mapCanvas" width="512" height="448"></canvas>
+          </div>
+          <div class="map-palette-panel">
+            <h3>タイルパレット</h3>
+            <div class="tile-palette" id="tilePaletteGrid"></div>
+            <p class="hint-text">※ マップ編集機能は今後実装予定です。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- CODE PAGE -->
+      <section class="editor-page" id="page-code">
+        <div class="page-header">
+          <h2>コードエディタ (main.c)</h2>
+          <div class="page-actions">
+            <button class="btn-sm" id="btnGenSample">サンプル生成</button>
+            <button class="icon-btn" id="btnSaveCode" title="保存">
+              <svg class="icon"><use href="#icon-save"></use></svg>
+            </button>
+            <button class="icon-btn" id="btnCopyCode" title="コピー">
+              <svg class="icon"><use href="#icon-copy"></use></svg>
+            </button>
+          </div>
+        </div>
+        <div class="code-area">
+          <div class="code-filename">📄 src/main.c</div>
+          <textarea id="codeEditor" class="code-editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+        </div>
+        <div class="code-status" id="codeStatus">コードを入力してください。「サンプル生成」で Hello World を読み込めます。</div>
+      </section>
+
+      <!-- SETTINGS PAGE -->
+      <section class="editor-page" id="page-settings">
+        <div class="page-header">
+          <h2>プロジェクト設定</h2>
+        </div>
+        <div class="settings-form">
+          <div class="form-group">
+            <label class="form-label">ROM 名</label>
+            <input type="text" class="form-input" id="settingRomName" value="MY GAME" maxlength="48" />
+            <p class="form-hint">Mega Drive ROM ヘッダに記録される名称（最大 48 文字）</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label">作者名</label>
+            <input type="text" class="form-input" id="settingAuthor" value="AUTHOR" maxlength="16" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">リージョン</label>
+            <select class="form-select" id="settingRegion">
+              <option value="JP" selected>JP (日本)</option>
+              <option value="US">US (北米)</option>
+              <option value="EU">EU (ヨーロッパ)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">出力 ROM パス</label>
+            <input type="text" class="form-input form-input-mono" id="settingOutputPath" readonly />
+            <p class="form-hint">ビルド後に <code>out/rom.bin</code> へ出力されます</p>
+          </div>
+          <div class="form-actions">
+            <button class="btn-primary" id="btnSaveSettings">設定を保存</button>
+          </div>
+          <div class="form-saved" id="settingsSavedMsg"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- BUILD LOG (bottom fixed) -->
+  <div class="build-log-bar" id="buildLogBar">
+    <div class="build-log-header" id="buildLogHeader">
+      <div class="build-log-title-row">
+        <span class="build-log-title">ビルドログ</span>
+        <span class="build-status-badge" id="buildStatusBadge"></span>
       </div>
-      <pre id="logPanel" class="log-panel"></pre>
-    </section>
-  </main>
+      <div class="build-log-controls">
+        <span class="rom-size-label" id="buildRomSize"></span>
+        <button class="icon-btn-flat" id="btnCopyLog" title="ログをコピー">
+          <svg class="icon"><use href="#icon-copy"></use></svg>
+        </button>
+        <button class="icon-btn-flat" id="btnClearLog" title="クリア">✕</button>
+        <button class="icon-btn-flat" id="btnToggleLog" title="展開/折り畳み">
+          <svg class="icon"><use href="#icon-chevron-up"></use></svg>
+        </button>
+      </div>
+    </div>
+    <div class="build-log-body" id="buildLogBody">
+      <pre class="build-log-pre" id="buildLog">ビルドログがここに表示されます。Build ボタンを押してビルドを開始してください。</pre>
+    </div>
+  </div>
 
   <script type="module" src="./renderer.js"></script>
 </body>

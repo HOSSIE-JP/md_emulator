@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>環境セットアップ</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", "Noto Sans JP", sans-serif; background: #0f1117; color: #e6edf3; }
+    h1 { font-size: 18px; margin: 0 0 4px; color: #4aa3ff; }
+    .subtitle { font-size: 12px; color: #9ba7b8; margin: 0 0 20px; }
+    .container { max-width: 680px; margin: 0 auto; padding: 24px; }
+    .card { background: #171a22; border: 1px solid #2a2f3a; border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; }
+    .card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .card-title { font-size: 15px; font-weight: 600; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 10px; border-radius: 20px; font-weight: 500; }
+    .badge.ok { background: rgba(63,185,80,0.15); color: #3fb950; border: 1px solid rgba(63,185,80,0.3); }
+    .badge.ng { background: rgba(226,109,92,0.15); color: #e26d5c; border: 1px solid rgba(226,109,92,0.3); }
+    .badge.warn { background: rgba(210,153,34,0.15); color: #d2991e; border: 1px solid rgba(210,153,34,0.3); }
+    .path-text { font-size: 11px; font-family: monospace; color: #9ba7b8; word-break: break-all; margin: 4px 0 8px; }
+    .desc { font-size: 12px; color: #9ba7b8; margin-bottom: 12px; line-height: 1.6; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .btn { padding: 8px 16px; border-radius: 7px; border: 1px solid #2a2f3a; background: #202633; color: #e6edf3; cursor: pointer; font-size: 13px; }
+    .btn:hover { border-color: #4aa3ff; }
+    .btn.primary { background: #1a3a5c; border-color: #2d5a8a; color: #4aa3ff; font-weight: 600; }
+    .btn.primary:hover { background: #204470; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .input-path { flex: 1; padding: 7px 10px; border-radius: 7px; border: 1px solid #2a2f3a; background: #11151d; color: #e6edf3; font-family: monospace; font-size: 12px; }
+    .progress-wrap { margin-top: 10px; display: none; }
+    .progress-wrap.visible { display: block; }
+    .progress-bar-bg { background: #1d2333; border-radius: 4px; height: 8px; overflow: hidden; }
+    .progress-bar { height: 100%; width: 0%; background: #4aa3ff; border-radius: 4px; transition: width 0.2s; }
+    .progress-msg { font-size: 11px; color: #9ba7b8; margin-top: 4px; }
+    .platform-note { background: rgba(210,153,34,0.07); border: 1px solid rgba(210,153,34,0.25); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #d2991e; margin-top: 10px; }
+    .footer { display: flex; justify-content: flex-end; margin-top: 8px; }
+    #statusMsg { font-size: 12px; color: #3fb950; margin-top: 10px; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>環境セットアップ</h1>
+    <p class="subtitle">MD Game Editor の動作に必要なツールをセットアップします</p>
+
+    <!-- SGDK -->
+    <div class="card" id="sgdkCard">
+      <div class="card-header">
+        <span class="card-title">SGDK (Sega Genesis Development Kit)</span>
+        <span id="sgdkBadge" class="badge ng">未インストール</span>
+      </div>
+      <p class="path-text" id="sgdkPath">-</p>
+      <p class="desc">メガドライブ用 C 言語ゲーム開発ライブラリです。ビルドに必要です。<br>
+        GitHub (MIT License): <code>Stephane-D/SGDK</code></p>
+      <div class="row">
+        <select class="input-path" id="sgdkVersionSelect" style="max-width:220px;flex:0 0 220px;"></select>
+        <button class="btn" id="btnReloadVersions">一覧更新</button>
+        <button class="btn primary" id="btnDownloadSgdk">選択バージョンをダウンロード</button>
+        <input type="text" class="input-path" id="sgdkCustomPath" placeholder="または SGDK フォルダのパスを入力..." />
+        <button class="btn" id="btnSetSgdkPath">適用</button>
+      </div>
+      <div class="progress-wrap" id="sgdkProgress">
+        <div class="progress-bar-bg"><div class="progress-bar" id="sgdkBar"></div></div>
+        <div class="progress-msg" id="sgdkMsg">...</div>
+      </div>
+    </div>
+
+    <!-- Marsdev (macOS/Linux only) -->
+    <div class="card" id="marsdevCard" style="display:none;">
+      <div class="card-header">
+        <span class="card-title">Marsdev (クロスコンパイラ)</span>
+        <span id="marsdevBadge" class="badge ng">未インストール</span>
+      </div>
+      <p class="path-text" id="marsdevPath">-</p>
+      <p class="desc">macOS/Linux で推奨されるメガドライブ開発ツール。m68k-elf-gcc を含みます。<br>
+        GitHub (MIT License): <code>andwn/marsdev</code></p>
+      <div class="row">
+        <select class="input-path" id="marsdevVersionSelect" style="max-width:220px;flex:0 0 220px;"></select>
+        <button class="btn" id="btnReloadMarsdevVersions">一覧更新</button>
+        <button class="btn primary" id="btnDownloadMarsdev">選択バージョンをダウンロード</button>
+        <input type="text" class="input-path" id="marsdevCustomPath" placeholder="または Marsdev フォルダのパスを入力..." />
+        <button class="btn" id="btnSetMarsdevPath">適用</button>
+      </div>
+      <div class="progress-wrap" id="marsdevProgress">
+        <div class="progress-bar-bg"><div class="progress-bar" id="marsdevBar"></div></div>
+        <div class="progress-msg" id="marsdevMsg">...</div>
+      </div>
+    </div>
+
+    <!-- Java -->
+    <div class="card" id="javaCard">
+      <div class="card-header">
+        <span class="card-title">Java (rescomp 実行用)</span>
+        <span id="javaBadge" class="badge ng">未検出</span>
+      </div>
+      <p class="path-text" id="javaPath">-</p>
+      <p class="desc" id="javaDesc">SGDK の rescomp.jar (リソースコンパイラ) の実行に必要です。</p>
+      <div id="javaActions"></div>
+      <div class="progress-wrap" id="javaProgress">
+        <div class="progress-bar-bg"><div class="progress-bar" id="javaBar"></div></div>
+        <div class="progress-msg" id="javaMsg">...</div>
+      </div>
+    </div>
+
+    <!-- Toolchain -->
+    <div class="card" id="gccCard">
+      <div class="card-header">
+        <span class="card-title" id="gccTitle">ツールチェーン</span>
+        <span id="gccBadge" class="badge warn">確認待ち</span>
+      </div>
+      <p class="path-text" id="gccPath">-</p>
+      <p class="desc" id="gccDesc">環境に応じて利用するツールチェーンが異なります。</p>
+    </div>
+
+    <div id="statusMsg"></div>
+
+    <div class="footer">
+      <button class="btn" id="btnClose">閉じる</button>
+      <button class="btn primary" id="btnRefresh" style="margin-left:8px;">状態を再確認</button>
+    </div>
+  </div>
+
+  <script>
+    const isWin = navigator.platform.toLowerCase().includes('win');
+
+    async function loadSgdkVersions() {
+      const select = document.getElementById('sgdkVersionSelect');
+      select.innerHTML = '';
+      const loading = document.createElement('option');
+      loading.value = '';
+      loading.textContent = '読込中...';
+      select.appendChild(loading);
+
+      try {
+        const result = await window.electronSetup.listSgdkVersions();
+        const releases = (result && result.releases) ? result.releases : [];
+        select.innerHTML = '';
+
+        if (releases.length === 0) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '最新 (自動選択)';
+          select.appendChild(opt);
+          return;
+        }
+
+        releases.forEach((r, index) => {
+          const opt = document.createElement('option');
+          opt.value = r.tag;
+          opt.textContent = `${r.tag}${index === 0 ? ' (latest)' : ''}${r.prerelease ? ' [pre]' : ''}`;
+          if (index === 0) {
+            opt.selected = true;
+          }
+          select.appendChild(opt);
+        });
+      } catch (_err) {
+        select.innerHTML = '';
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '最新 (取得失敗時は自動)';
+        select.appendChild(opt);
+      }
+    }
+
+    async function loadMarsdevVersions() {
+      const select = document.getElementById('marsdevVersionSelect');
+      select.innerHTML = '';
+      const loading = document.createElement('option');
+      loading.value = '';
+      loading.textContent = '読込中...';
+      select.appendChild(loading);
+
+      try {
+        const result = await window.electronSetup.listMarsdevVersions();
+        const releases = (result && result.releases) ? result.releases : [];
+        select.innerHTML = '';
+
+        if (releases.length === 0) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '最新 (自動選択)';
+          select.appendChild(opt);
+          return;
+        }
+
+        releases.forEach((r, index) => {
+          const opt = document.createElement('option');
+          opt.value = r.tag;
+          opt.textContent = `${r.tag}${index === 0 ? ' (latest)' : ''}${r.prerelease ? ' [pre]' : ''}`;
+          if (index === 0) {
+            opt.selected = true;
+          }
+          select.appendChild(opt);
+        });
+      } catch (_err) {
+        select.innerHTML = '';
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '最新 (取得失敗時は自動)';
+        select.appendChild(opt);
+      }
+    }
+
+    async function loadStatus() {
+      const s = await window.electronSetup.getStatus();
+      updateUI(s);
+    }
+
+    function updateUI(s) {
+      // SGDK
+      const sgdkCard = document.getElementById('sgdkCard');
+      const sgdkBadge = document.getElementById('sgdkBadge');
+      const sgdkPath = document.getElementById('sgdkPath');
+      if (s.sgdk.installed) {
+        sgdkBadge.textContent = `✓ インストール済み (${s.sgdk.version})`;
+        sgdkBadge.className = 'badge ok';
+        sgdkPath.textContent = s.sgdk.path;
+        document.getElementById('sgdkCustomPath').value = s.sgdk.path;
+      } else {
+        sgdkBadge.textContent = '✕ 未インストール';
+        sgdkBadge.className = 'badge ng';
+        sgdkPath.textContent = '—';
+      }
+
+      // Marsdev (platform-specific)
+      const marsdevCard = document.getElementById('marsdevCard');
+      const marsdevBadge = document.getElementById('marsdevBadge');
+      const marsdevPath = document.getElementById('marsdevPath');
+      if (isWin) {
+        marsdevCard.style.display = 'none';
+      } else {
+        marsdevCard.style.display = '';
+        if (s.marsdev && s.marsdev.installed) {
+          marsdevBadge.textContent = `✓ インストール済み (${s.marsdev.version})`;
+          marsdevBadge.className = 'badge ok';
+          marsdevPath.textContent = s.marsdev.path;
+          document.getElementById('marsdevCustomPath').value = s.marsdev.path;
+        } else {
+          marsdevBadge.textContent = '✕ 未インストール';
+          marsdevBadge.className = 'badge ng';
+          marsdevPath.textContent = '—';
+        }
+      }
+
+      // Java
+      const javaBadge = document.getElementById('javaBadge');
+      const javaPathEl = document.getElementById('javaPath');
+      const javaActions = document.getElementById('javaActions');
+      const javaDesc = document.getElementById('javaDesc');
+      if (s.java.installed) {
+        javaBadge.textContent = s.java.system ? '✓ システム Java 検出' : '✓ インストール済み';
+        javaBadge.className = 'badge ok';
+        javaPathEl.textContent = s.java.path;
+      } else {
+        javaBadge.textContent = '✕ 未検出';
+        javaBadge.className = 'badge ng';
+        javaPathEl.textContent = '—';
+      }
+
+      javaActions.innerHTML = '';
+      if (isWin && !s.java.installed) {
+        javaDesc.textContent = 'Windows では Java JRE が必要です。自動インストール可能です (Adoptium Temurin 21 LTS)。';
+        const btn = document.createElement('button');
+        btn.className = 'btn primary';
+        btn.textContent = 'Java JRE を自動インストール';
+        btn.id = 'btnDownloadJava';
+        btn.addEventListener('click', installJava);
+        javaActions.appendChild(btn);
+      } else if (!isWin && !s.java.installed) {
+        javaDesc.textContent = 'Java が見つかりませんでした。Homebrew または公式サイトからインストールしてください。';
+        javaActions.innerHTML = `<div class="platform-note">macOS: <code>brew install temurin</code><br>または <a href="#" style="color:#4aa3ff">adoptium.net</a> から手動インストール</div>`;
+      } else {
+        javaDesc.textContent = 'SGDK の rescomp.jar (リソースコンパイラ) の実行に必要です。';
+      }
+
+      // Toolchain (platform specific)
+      const gccCard = document.getElementById('gccCard');
+      const gccTitle = document.getElementById('gccTitle');
+      const gccBadge = document.getElementById('gccBadge');
+      const gccPathEl = document.getElementById('gccPath');
+      const gccDesc = document.getElementById('gccDesc');
+      gccCard.style.display = '';
+
+      if (s.platform === 'win32') {
+        gccTitle.textContent = 'SGDK 同梱ツールチェーン (Windows)';
+        if (s.gcc.installed) {
+          gccBadge.textContent = '✓ SGDK 内コンパイラ検出';
+          gccBadge.className = 'badge ok';
+          gccPathEl.textContent = s.gcc.path || 'SGDK/bin';
+          gccDesc.textContent = 'Windows は SGDK 同梱コンパイラを使用します。';
+        } else {
+          gccBadge.textContent = '✕ SGDK 内コンパイラ未検出';
+          gccBadge.className = 'badge ng';
+          gccPathEl.textContent = '—';
+          gccDesc.textContent = 'SGDK の再ダウンロード、または SGDK パス設定を確認してください。';
+        }
+      } else {
+        gccTitle.textContent = 'クロスコンパイラ (macOS/Linux)';
+        if (s.gcc.installed) {
+          let sourceLabel = 'システム検出';
+          if (s.gcc.source === 'marsdev') sourceLabel = '✓ Marsdev';
+          else if (s.gcc.source === 'sgdk') sourceLabel = '✓ SGDK ネイティブ';
+          else if (s.gcc.source === 'system') sourceLabel = '✓ システム';
+          gccBadge.textContent = sourceLabel;
+          gccBadge.className = 'badge ok';
+          gccPathEl.textContent = s.gcc.path || 'm68k-elf-gcc';
+          const sourceDesc = s.gcc.source === 'marsdev'
+            ? 'Marsdev のクロスコンパイラを使用しています。'
+            : (s.gcc.source === 'sgdk'
+              ? 'SGDK 内のネイティブツールを使用しています。'
+              : 'システムの m68k-elf-gcc を使用しています。');
+          gccDesc.textContent = sourceDesc;
+        } else {
+          gccBadge.textContent = '✕ 未検出';
+          gccBadge.className = 'badge ng';
+          gccPathEl.textContent = '—';
+          gccDesc.innerHTML = 'Marsdev をセットアップするか、システムのクロスコンパイラをインストールしてください。<br><code style="color:#4aa3ff">brew install gcc-m68k-elf binutils-m68k-elf</code>';
+        }
+      }
+    }
+
+    function setProgress(id, barId, msgId, pct, msg) {
+      const wrap = document.getElementById(id);
+      wrap.classList.add('visible');
+      document.getElementById(barId).style.width = `${pct}%`;
+      document.getElementById(msgId).textContent = msg;
+    }
+
+    async function installSgdk() {
+      const btn = document.getElementById('btnDownloadSgdk');
+      const selectedTag = document.getElementById('sgdkVersionSelect').value || null;
+      btn.disabled = true;
+      document.getElementById('statusMsg').textContent = '';
+      try {
+        window.electronSetup.onProgress((p) => {
+          setProgress('sgdkProgress', 'sgdkBar', 'sgdkMsg', p.percent, p.message);
+        });
+        const result = await window.electronSetup.downloadSgdk(selectedTag);
+        if (result.ok) {
+          document.getElementById('statusMsg').textContent = `SGDK ${result.tag} のインストールが完了しました`;
+          await loadStatus();
+        } else {
+          document.getElementById('statusMsg').textContent = `エラー: ${result.error}`;
+        }
+      } catch (e) {
+        document.getElementById('statusMsg').textContent = `エラー: ${e.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function installJava() {
+      const btn = document.getElementById('btnDownloadJava');
+      if (btn) btn.disabled = true;
+      try {
+        window.electronSetup.onProgress((p) => {
+          setProgress('javaProgress', 'javaBar', 'javaMsg', p.percent, p.message);
+        });
+        const result = await window.electronSetup.downloadJava();
+        if (result.ok) {
+          document.getElementById('statusMsg').textContent = 'Java JRE のインストールが完了しました';
+          await loadStatus();
+        } else {
+          document.getElementById('statusMsg').textContent = `エラー: ${result.error}`;
+        }
+      } catch (e) {
+        document.getElementById('statusMsg').textContent = `エラー: ${e.message}`;
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function installMarsdev() {
+      const btn = document.getElementById('btnDownloadMarsdev');
+      const selectedTag = document.getElementById('marsdevVersionSelect').value || null;
+      btn.disabled = true;
+      document.getElementById('statusMsg').textContent = '';
+      try {
+        window.electronSetup.onProgress((p) => {
+          setProgress('marsdevProgress', 'marsdevBar', 'marsdevMsg', p.percent, p.message);
+        });
+        const result = await window.electronSetup.downloadMarsdev(selectedTag);
+        if (result.ok) {
+          document.getElementById('statusMsg').textContent = `Marsdev ${result.tag} のインストールが完了しました`;
+          await loadStatus();
+        } else {
+          document.getElementById('statusMsg').textContent = `エラー: ${result.error}`;
+        }
+      } catch (e) {
+        document.getElementById('statusMsg').textContent = `エラー: ${e.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById('btnDownloadSgdk').addEventListener('click', installSgdk);
+    document.getElementById('btnReloadVersions').addEventListener('click', async () => {
+      await loadSgdkVersions();
+      document.getElementById('statusMsg').textContent = 'SGDK バージョン一覧を更新しました';
+    });
+
+    document.getElementById('btnSetSgdkPath').addEventListener('click', async () => {
+      const p = document.getElementById('sgdkCustomPath').value.trim();
+      if (!p) return;
+      await window.electronSetup.setSgdkPath(p);
+      await loadStatus();
+      document.getElementById('statusMsg').textContent = 'SGDK パスを更新しました';
+    });
+
+    // Marsdev handlers (macOS/Linux only)
+    const btnDownloadMarsdev = document.getElementById('btnDownloadMarsdev');
+    if (btnDownloadMarsdev) {
+      btnDownloadMarsdev.addEventListener('click', installMarsdev);
+    }
+    const btnReloadMarsdev = document.getElementById('btnReloadMarsdevVersions');
+    if (btnReloadMarsdev) {
+      btnReloadMarsdev.addEventListener('click', async () => {
+        await loadMarsdevVersions();
+        document.getElementById('statusMsg').textContent = 'Marsdev バージョン一覧を更新しました';
+      });
+    }
+    const btnSetMarsdevPath = document.getElementById('btnSetMarsdevPath');
+    if (btnSetMarsdevPath) {
+      btnSetMarsdevPath.addEventListener('click', async () => {
+        const p = document.getElementById('marsdevCustomPath').value.trim();
+        if (!p) return;
+        await window.electronSetup.setMarsdevPath(p);
+        await loadStatus();
+        document.getElementById('statusMsg').textContent = 'Marsdev パスを更新しました';
+      });
+    }
+
+    document.getElementById('btnClose').addEventListener('click', () => window.close());
+    document.getElementById('btnRefresh').addEventListener('click', async () => {
+      document.getElementById('statusMsg').textContent = '確認中...';
+      await loadStatus();
+      document.getElementById('statusMsg').textContent = '状態を更新しました';
+    });
+
+    (async () => {
+      await loadSgdkVersions();
+      if (!isWin) {
+        await loadMarsdevVersions();
+      }
+      await loadStatus();
+    })();
+  </script>
+</body>
+</html>
