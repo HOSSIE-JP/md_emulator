@@ -8,7 +8,7 @@
     "check:licenses:node:gpl": "license-checker-rseidelsohn --summary --excludePrivatePackages --failOn 'GPL;AGPL;LGPL;NGPL'"
   },
   "devDependencies": {
-    "jscpd": "^4.0.8",
-    "license-checker-rseidelsohn": "^4.4.2"
+    "jscpd": "4.0.8",
+    "license-checker-rseidelsohn": "4.4.2"
   }
 }

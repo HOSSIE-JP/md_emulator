@@ -12,7 +12,7 @@
     "build:win": "npm run copy-pkg && electron-builder --win"
   },
   "devDependencies": {
-    "electron": "^41.3.0",
-    "electron-builder": "^26.8.1"
+    "electron": "41.3.0",
+    "electron-builder": "26.8.1"
   }
 }

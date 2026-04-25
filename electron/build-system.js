@@ -220,8 +220,10 @@ function buildProject(sgdkPath, javaPath, onLog) {
 
     if (isWin) {
       command = resolveMakeCommand(buildPaths.sgdkPath, true);
+      // `makefile.gen` runs many tools through sh, so GDK must use POSIX-style separators on Windows.
+      const sgdkPosix = buildPaths.sgdkPath.replace(/\\/g, '/');
       const sgdkWin = buildPaths.sgdkPath.replace(/\//g, '\\');
-      args = ['-f', makefileGen.replace(/\//g, '\\'), `GDK=${sgdkWin}`, `GDK_WIN=${sgdkWin}`, 'release'];
+      args = ['-f', makefileGen.replace(/\//g, '\\'), `GDK=${sgdkPosix}`, `GDK_WIN=${sgdkWin}`, 'release'];
     } else {
       command = resolveMakeCommand(buildPaths.sgdkPath, false);
       args = ['-f', makefileGen, `GDK=${buildPaths.sgdkPath}`, 'release'];
