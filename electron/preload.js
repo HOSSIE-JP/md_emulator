@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   generateProject: (sourceCode, config) => ipcRenderer.invoke('build:generateProject', sourceCode, config),
   runBuild: () => ipcRenderer.invoke('build:run'),
   getRomPath: () => ipcRenderer.invoke('build:getRomPath'),
+  getAppInfo: () => ipcRenderer.invoke('app:getInfo'),
   openPathInExplorer: (targetPath, options) => ipcRenderer.invoke('fs:openPathInExplorer', targetPath, options || {}),
   saveRomAs: (sourcePath) => ipcRenderer.invoke('fs:saveRomAs', sourcePath),
   getProjectConfig: () => ipcRenderer.invoke('build:getProjectConfig'),
@@ -35,5 +36,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onMenuOpenSetup: (callback) => {
     ipcRenderer.on('menu:openSetup', (_event) => callback());
+  },
+  onMenuOpenAbout: (callback) => {
+    ipcRenderer.on('menu:openAbout', (_event) => callback());
   },
 });

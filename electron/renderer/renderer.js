@@ -54,6 +54,20 @@ const el = {
   btnDownloadRom: $('btnDownloadRom'),
   btnSaveSettings:  $('btnSaveSettings'),
   settingsSavedMsg: $('settingsSavedMsg'),
+  aboutModal: $('aboutModal'),
+  aboutBackdrop: $('aboutBackdrop'),
+  btnAboutClose: $('btnAboutClose'),
+  aboutTitle: $('aboutTitle'),
+  aboutDescription: $('aboutDescription'),
+  aboutAppVersion: $('aboutAppVersion'),
+  aboutWasmBuildVersion: $('aboutWasmBuildVersion'),
+  aboutWasmPackageVersion: $('aboutWasmPackageVersion'),
+  aboutElectronVersion: $('aboutElectronVersion'),
+  aboutChromeVersion: $('aboutChromeVersion'),
+  aboutNodeVersion: $('aboutNodeVersion'),
+  aboutPlatform: $('aboutPlatform'),
+  aboutArch: $('aboutArch'),
+  aboutAppPath: $('aboutAppPath'),
 };
 
 const TITLE_MAX = 48;
@@ -457,6 +471,69 @@ function bindAssetTable() {
   });
 }
 
+// ====================================================== ABOUT DIALOG ===
+
+function closeAboutDialog() {
+  if (!el.aboutModal) {
+    return;
+  }
+  el.aboutModal.classList.remove('open');
+  el.aboutModal.setAttribute('aria-hidden', 'true');
+}
+
+async function openAboutDialog() {
+  if (!el.aboutModal) {
+    return;
+  }
+  el.aboutModal.classList.add('open');
+  el.aboutModal.setAttribute('aria-hidden', 'false');
+
+  try {
+    const info = await window.electronAPI.getAppInfo();
+    if (!info) {
+      return;
+    }
+    const wasm = info.embeddedWasm || {};
+    if (el.aboutTitle) {
+      el.aboutTitle.textContent = info.appName || 'MD Game Editor';
+    }
+    if (el.aboutDescription) {
+      el.aboutDescription.textContent = info.appDescription || 'Embedded emulator information';
+    }
+    if (el.aboutAppVersion) {
+      el.aboutAppVersion.textContent = info.appVersion || 'unknown';
+    }
+    if (el.aboutWasmBuildVersion) {
+      el.aboutWasmBuildVersion.textContent = wasm.buildVersion || 'unknown';
+    }
+    if (el.aboutWasmPackageVersion) {
+      el.aboutWasmPackageVersion.textContent = wasm.packageVersion || 'unknown';
+    }
+    if (el.aboutElectronVersion) {
+      el.aboutElectronVersion.textContent = info.electronVersion || 'unknown';
+    }
+    if (el.aboutChromeVersion) {
+      el.aboutChromeVersion.textContent = info.chromeVersion || 'unknown';
+    }
+    if (el.aboutNodeVersion) {
+      el.aboutNodeVersion.textContent = info.nodeVersion || 'unknown';
+    }
+    if (el.aboutPlatform) {
+      el.aboutPlatform.textContent = info.platform || 'unknown';
+    }
+    if (el.aboutArch) {
+      el.aboutArch.textContent = info.arch || 'unknown';
+    }
+    if (el.aboutAppPath) {
+      el.aboutAppPath.textContent = info.appPath || 'unknown';
+    }
+  } catch (_err) {
+    if (el.aboutWasmBuildVersion) {
+      el.aboutWasmBuildVersion.textContent = 'failed to load';
+    }
+  }
+}
+
 // ====================================================== EVENT BINDING ===
 
 function bindEvents() {
@@ -532,6 +609,13 @@ function bindEvents() {
     }
   });
 
+  if (el.btnAboutClose) {
+    el.btnAboutClose.addEventListener('click', closeAboutDialog);
+  }
+  if (el.aboutBackdrop) {
+    el.aboutBackdrop.addEventListener('click', closeAboutDialog);
+  }
+
   // Build log
   el.buildLogHeader.addEventListener('click', () => setLogOpen(!state.logOpen));
   el.btnCopyLog.addEventListener('click', async (e) => {
@@ -592,8 +676,17 @@ function bindEvents() {
     window.electronAPI.openSetupWindow();
   });
 
+  window.electronAPI.onMenuOpenAbout?.(() => {
+    openAboutDialog();
+  });
+
   // Keyboard shortcut: Ctrl/Cmd+B = Build
   window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && el.aboutModal?.classList.contains('open')) {
+      e.preventDefault();
+      closeAboutDialog();
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
       e.preventDefault();
       runBuild();

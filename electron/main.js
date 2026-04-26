@@ -4,6 +4,7 @@ const net = require('net');
 const { shell } = require('electron');
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const { spawn } = require('child_process');
+const electronPackageJson = require('./package.json');
 
 // ── Portable mode detection ────────────────────────────────────────────────
 // Must run before any app.getPath() call (including those inside require'd modules).
@@ -194,9 +195,51 @@ function createMenu() {
       label: 'View',
       submenu: [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }],
     },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'About MD Game Editor',
+          click: () => {
+            sendToRenderer('menu:openAbout');
+          },
+        },
+      ],
+    },
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function readEmbeddedWasmInfo() {
+  const pkgPath = path.join(__dirname, 'pkg', 'package.json');
+  const buildMetaPath = path.join(__dirname, 'pkg', 'build_meta.js');
+  let packageVersion = 'unknown';
+  let buildVersion = 'unknown';
+
+  try {
+    if (fs.existsSync(pkgPath)) {
+      const pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      packageVersion = String(pkgJson.version || 'unknown');
+    }
+  } catch (_err) {
+  }
+
+  try {
+    if (fs.existsSync(buildMetaPath)) {
+      const meta = fs.readFileSync(buildMetaPath, 'utf-8');
+      const m = meta.match(/__BUILD_META_VERSION\s*=\s*"([^"]+)"/);
+      if (m && m[1]) {
+        buildVersion = m[1];
+      }
+    }
+  } catch (_err) {
+  }
+
+  return {
+    packageVersion,
+    buildVersion,
+  };
 }
 
 function stopApiServer() {
@@ -608,6 +651,22 @@ ipcMain.handle('build:getSampleCode', async () => {
     return fs.readFileSync(samplePath, 'utf-8');
   }
   return null;
+});
+
+ipcMain.handle('app:getInfo', async () => {
+  const wasm = readEmbeddedWasmInfo();
+  return {
+    appName: app.getName(),
+    appVersion: app.getVersion(),
+    appDescription: electronPackageJson.description || '',
+    appPath: app.getAppPath(),
+    platform: process.platform,
+    arch: process.arch,
+    electronVersion: process.versions.electron,
+    chromeVersion: process.versions.chrome,
+    nodeVersion: process.versions.node,
+    embeddedWasm: wasm,
+  };
 });
 
 app.whenReady().then(() => {

@@ -232,6 +232,39 @@
     </div>
   </div>
 
+  <div class="about-modal" id="aboutModal" aria-hidden="true">
+    <div class="about-backdrop" id="aboutBackdrop"></div>
+    <section class="about-panel" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+      <button class="about-close" id="btnAboutClose" aria-label="閉じる">✕</button>
+      <div class="about-header">
+        <img class="about-app-icon" src="../build/icon.png" alt="MD Game Editor icon" />
+        <div class="about-heading">
+          <h2 id="aboutTitle">MD Game Editor</h2>
+          <p id="aboutDescription">Embedded emulator information</p>
+        </div>
+      </div>
+      <div class="about-section">
+        <h3>バージョン情報</h3>
+        <dl class="about-list">
+          <div class="about-row"><dt>アプリ</dt><dd id="aboutAppVersion">-</dd></div>
+          <div class="about-row"><dt>内蔵 WASM (build)</dt><dd id="aboutWasmBuildVersion">-</dd></div>
+          <div class="about-row"><dt>内蔵 WASM (package)</dt><dd id="aboutWasmPackageVersion">-</dd></div>
+          <div class="about-row"><dt>Electron</dt><dd id="aboutElectronVersion">-</dd></div>
+          <div class="about-row"><dt>Chrome</dt><dd id="aboutChromeVersion">-</dd></div>
+          <div class="about-row"><dt>Node.js</dt><dd id="aboutNodeVersion">-</dd></div>
+        </dl>
+      </div>
+      <div class="about-section">
+        <h3>パッケージ情報</h3>
+        <dl class="about-list">
+          <div class="about-row"><dt>Platform</dt><dd id="aboutPlatform">-</dd></div>
+          <div class="about-row"><dt>Architecture</dt><dd id="aboutArch">-</dd></div>
+          <div class="about-row"><dt>App Path</dt><dd id="aboutAppPath">-</dd></div>
+        </dl>
+      </div>
+    </section>
+  </div>
+
   <script type="module" src="./renderer.js"></script>
 </body>
 </html>

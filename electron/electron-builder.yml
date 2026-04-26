@@ -7,6 +7,7 @@ files:
   - pkg/**
   - md-emulator.js
   - md-emulator.d.ts
+  - build/icon.png
   - build/icon.ico
 extraResources:
   - from: bin
@@ -16,6 +17,7 @@ extraResources:
 extraMetadata:
   main: main.js
 mac:
+  icon: build/icon.icns
   target:
     - dmg
 win:
