@@ -31,6 +31,8 @@ const electronPackageJson = require('./package.json');
 
 const setupManager = require('./setup-manager');
 const buildSystem = require('./build-system');
+const rescompManager = require('./rescomp-manager');
+const pluginManager = require('./plugin-manager');
 
 let mainWindow = null;
 let debugWindow = null;
@@ -77,6 +79,7 @@ function openDebugWindow(options = {}) {
     width: 1100,
     height: 760,
     backgroundColor: '#101217',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'debug-preload.js'),
       contextIsolation: true,
@@ -443,6 +446,131 @@ ipcMain.handle('fs:saveRomAs', async (_event, sourcePath) => {
   }
 });
 
+ipcMain.handle('res:listDefinitions', async () => {
+  try {
+    const projectDir = buildSystem.getProjectDir();
+    const data = rescompManager.listResDefinitions(projectDir);
+    return { ok: true, ...data };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('res:createFile', async (_event, relativePath) => {
+  try {
+    const projectDir = buildSystem.getProjectDir();
+    const result = rescompManager.createResFile(projectDir, relativePath);
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('res:reorderEntries', async (_event, payload) => {
+  try {
+    const projectDir = buildSystem.getProjectDir();
+    const result = rescompManager.reorderResEntries(projectDir, payload?.file, payload?.orderedLineNumbers || []);
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('res:addEntry', async (_event, payload) => {
+  try {
+    const projectDir = buildSystem.getProjectDir();
+    const result = rescompManager.addResEntry(projectDir, payload?.file, payload?.entry || {});
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('res:updateEntry', async (_event, payload) => {
+  try {
+    const projectDir = buildSystem.getProjectDir();
+    const result = rescompManager.updateResEntry(projectDir, payload?.file, payload?.lineNumber, payload?.entry || {});
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('res:deleteEntry', async (_event, payload) => {
+  try {
+    const projectDir = buildSystem.getProjectDir();
+    const result = rescompManager.deleteResEntry(projectDir, payload?.file, payload?.lineNumber);
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('res:openDirectory', async () => {
+  try {
+    const resRoot = path.join(buildSystem.getProjectDir(), 'res');
+    fs.mkdirSync(resRoot, { recursive: true });
+    const error = await shell.openPath(resRoot);
+    if (error) {
+      return { ok: false, error };
+    }
+    return { ok: true, path: resRoot };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('res:pickAssetSource', async () => {
+  const owner = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : undefined;
+  const result = await dialog.showOpenDialog(owner, {
+    properties: ['openFile'],
+    filters: [
+      { name: 'Assets', extensions: ['png', 'bmp', 'pal', 'tsx', 'tmx', 'vgm', 'xgm', 'wav'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { canceled: true };
+  }
+
+  const sourcePath = result.filePaths[0];
+  return {
+    canceled: false,
+    sourcePath,
+    fileName: path.basename(sourcePath),
+    ext: path.extname(sourcePath).toLowerCase(),
+  };
+});
+
+ipcMain.handle('res:readFileAsDataUrl', async (_event, sourcePath) => {
+  try {
+    if (!sourcePath || !fs.existsSync(sourcePath)) {
+      return { ok: false, error: 'source file not found' };
+    }
+    const ext = path.extname(sourcePath).toLowerCase();
+    const mime = ext === '.png'
+      ? 'image/png'
+      : ext === '.bmp'
+        ? 'image/bmp'
+        : 'application/octet-stream';
+    const data = fs.readFileSync(sourcePath).toString('base64');
+    return { ok: true, dataUrl: `data:${mime};base64,${data}` };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('res:writeAssetFile', async (_event, payload) => {
+  try {
+    const projectDir = buildSystem.getProjectDir();
+    const result = rescompManager.writeAssetIntoRes(projectDir, payload || {});
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 ipcMain.handle('api:startServer', async (_event, options) => {
   return startApiServer(options?.port ?? 8080);
 });
@@ -487,6 +615,41 @@ ipcMain.handle('debug:getWasmSnapshot', async (_event, options) => {
   }
 });
 
+// ---- Plugin handlers ----
+ipcMain.handle('plugins:list', () => {
+  return pluginManager.listPlugins();
+});
+
+ipcMain.handle('plugins:setEnabled', (_event, { id, enabled }) => {
+  pluginManager.setEnabled(id, Boolean(enabled));
+  return { ok: true };
+});
+
+ipcMain.handle('plugins:runGenerator', async (_event, { id }) => {
+  const projectDir = buildSystem.getProjectDir();
+  // 現在のプロジェクトの全アセットを収集
+  let allAssets = [];
+  try {
+    const defs = rescompManager.listResDefinitions(projectDir);
+    (defs.files || []).forEach((f) => {
+      (f.entries || []).forEach((e) => allAssets.push(e));
+    });
+  } catch (_) {}
+
+  const genResult = pluginManager.runGenerator(id, allAssets);
+  if (!genResult.ok) return genResult;
+
+  // src/main.c に書き込む
+  const srcPath = path.join(projectDir, 'src', 'main.c');
+  try {
+    fs.mkdirSync(path.dirname(srcPath), { recursive: true });
+    fs.writeFileSync(srcPath, genResult.sourceCode, 'utf-8');
+  } catch (err) {
+    return { ok: false, error: `main.c の書き込みに失敗: ${err.message}` };
+  }
+  return { ok: true, srcPath };
+});
+
 ipcMain.handle('testplay:getSettings', async () => {
   return setupManager.getTestPlaySettings();
 });
@@ -511,6 +674,7 @@ ipcMain.handle('window:openTestPlaySettings', async () => {
     height: 760,
     title: 'Test Play Settings - MD Game Editor',
     backgroundColor: '#0f1117',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'testplay-settings-preload.js'),
       contextIsolation: true,
@@ -534,6 +698,7 @@ ipcMain.handle('window:openSetup', async () => {
     height: 640,
     title: 'Setup - MD Game Editor',
     backgroundColor: '#0f1117',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'setup-preload.js'),
       contextIsolation: true,
@@ -595,6 +760,7 @@ ipcMain.handle('window:openTestPlay', async (_event, romPath) => {
     height: 720,
     title: 'Test Play - MD Game Editor',
     backgroundColor: '#0f1117',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'testplay-preload.js'),
       contextIsolation: true,
@@ -612,6 +778,16 @@ ipcMain.handle('window:openTestPlay', async (_event, romPath) => {
 ipcMain.handle('build:generateProject', async (_event, sourceCode, config) => {
   try {
     const result = await buildSystem.generateProject(sourceCode, config);
+    return { ok: true, projectDir: result.projectDir };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
+});
+
+// src/main.c を上書きせずプロジェクト構造だけ整備する (プラグインビルド用)
+ipcMain.handle('build:generateStructureOnly', async (_event, config) => {
+  try {
+    const result = buildSystem.generateProjectStructureOnly(config);
     return { ok: true, projectDir: result.projectDir };
   } catch (err) {
     return { ok: false, error: err.message || String(err) };
@@ -645,12 +821,22 @@ ipcMain.handle('build:getProjectConfig', async () => {
   return buildSystem.loadProjectConfig();
 });
 
+ipcMain.handle('build:getBuilderPlugin', async () => {
+  return { id: buildSystem.getBuilderPlugin() };
+});
+
+ipcMain.handle('build:setBuilderPlugin', async (_event, { id }) => {
+  buildSystem.setBuilderPlugin(id || null);
+  return { ok: true };
+});
+
+ipcMain.handle('build:getCurrentSource', async () => {
+  return buildSystem.loadCurrentSource();
+});
+
 ipcMain.handle('build:getSampleCode', async () => {
-  const samplePath = path.join(__dirname, 'sample', 'src', 'main.c');
-  if (fs.existsSync(samplePath)) {
-    return fs.readFileSync(samplePath, 'utf-8');
-  }
-  return null;
+  const samplePath = buildSystem.getSampleSourceCode();
+  return samplePath || null;
 });
 
 ipcMain.handle('app:getInfo', async () => {
@@ -667,6 +853,56 @@ ipcMain.handle('app:getInfo', async () => {
     nodeVersion: process.versions.node,
     embeddedWasm: wasm,
   };
+});
+
+ipcMain.handle('project:getCurrent', async () => {
+  try {
+    return { ok: true, ...buildSystem.getProjectInfo() };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('project:list', async () => {
+  try {
+    return { ok: true, ...buildSystem.listProjects() };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('project:openExisting', async (_event, payload) => {
+  try {
+    const projectName = String(payload?.projectName || '').trim();
+    if (!projectName) {
+      return { ok: false, error: 'project name is empty' };
+    }
+    const info = buildSystem.openProjectByName(projectName);
+    return { ok: true, ...info };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('project:createNew', async (_event, payload) => {
+  try {
+    const projectName = String(payload?.projectName || '').trim();
+    if (!projectName) {
+      return { ok: false, error: 'project name is empty' };
+    }
+
+    const created = buildSystem.createProjectInRoot(projectName, payload?.config || {}, payload?.sourceCode || null);
+    return {
+      ok: true,
+      projectDir: created.projectDir,
+      projectName: path.basename(created.projectDir),
+      title: payload?.config?.title || payload?.projectName,
+      defaultProjectDir: buildSystem.getDefaultProjectDir(),
+      projectsRootDir: buildSystem.getProjectsRootDir(),
+    };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
 });
 
 app.whenReady().then(() => {

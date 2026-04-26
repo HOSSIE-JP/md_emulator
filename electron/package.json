@@ -1,8 +1,8 @@
 {
-  "name": "md-emulator-electron",
+  "name": "md-game-editor",
   "version": "0.1.0",
   "private": true,
-  "description": "Electron shell for md_emulator (WASM + REST modes)",
+  "description": "Electron shell for md_game_editor",
   "main": "main.js",
   "scripts": {
     "copy-pkg": "node scripts/copy-pkg.js",
@@ -10,7 +10,8 @@
     "start": "npm run copy-pkg && electron .",
     "dev": "npm run start",
     "build:mac": "npm run prepare:dist && electron-builder --mac",
-    "build:win": "npm run prepare:dist && electron-builder --win"
+    "build:win": "npm run prepare:dist && electron-builder --win zip",
+    "build:win:installer": "npm run prepare:dist && electron-builder --win nsis"
   },
   "devDependencies": {
     "electron": "41.3.0",

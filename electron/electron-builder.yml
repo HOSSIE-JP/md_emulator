@@ -3,7 +3,6 @@ productName: MegaDriveGameEditor
 files:
   - "*.js"
   - renderer/**
-  - sample/**
   - pkg/**
   - md-emulator.js
   - md-emulator.d.ts
@@ -14,6 +13,18 @@ extraResources:
     to: bin
     filter:
       - "**/*"
+  - from: plugins
+    to: plugins
+    filter:
+      - "**/*"
+  - from: projects/sample
+    to: projects/sample
+    filter:
+      - "**/*"
+      - "!out/**"
+extraFiles:
+  - from: build/portable
+    to: portable
 extraMetadata:
   main: main.js
 mac:
@@ -23,8 +34,7 @@ mac:
 win:
   icon: build/icon.ico
   target:
-    - nsis
-    - zip   # ポータブル配布用: zip 展開後に exe と同階層に "portable" ファイルを置くと portable モードで起動
+    - zip
   artifactName: "${productName}-${version}-${arch}.${ext}"
 directories:
   output: dist

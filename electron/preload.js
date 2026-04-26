@@ -21,12 +21,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSetupWindow: () => ipcRenderer.invoke('window:openSetup'),
   openTestPlayWindow: (romPath) => ipcRenderer.invoke('window:openTestPlay', romPath),
   generateProject: (sourceCode, config) => ipcRenderer.invoke('build:generateProject', sourceCode, config),
+  generateStructureOnly: (config) => ipcRenderer.invoke('build:generateStructureOnly', config),
   runBuild: () => ipcRenderer.invoke('build:run'),
+  getBuilderPlugin: () => ipcRenderer.invoke('build:getBuilderPlugin'),
+  setBuilderPlugin: (id) => ipcRenderer.invoke('build:setBuilderPlugin', { id }),
   getRomPath: () => ipcRenderer.invoke('build:getRomPath'),
   getAppInfo: () => ipcRenderer.invoke('app:getInfo'),
   openPathInExplorer: (targetPath, options) => ipcRenderer.invoke('fs:openPathInExplorer', targetPath, options || {}),
   saveRomAs: (sourcePath) => ipcRenderer.invoke('fs:saveRomAs', sourcePath),
   getProjectConfig: () => ipcRenderer.invoke('build:getProjectConfig'),
+  getCurrentSource: () => ipcRenderer.invoke('build:getCurrentSource'),
   generateSample: () => ipcRenderer.invoke('build:getSampleCode'),
   onBuildLog: (callback) => {
     ipcRenderer.on('build-log', (_event, payload) => callback(payload));
@@ -40,4 +44,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMenuOpenAbout: (callback) => {
     ipcRenderer.on('menu:openAbout', (_event) => callback());
   },
+  listResDefinitions: () => ipcRenderer.invoke('res:listDefinitions'),
+  createResFile: (relativePath) => ipcRenderer.invoke('res:createFile', relativePath),
+  addResEntry: (payload) => ipcRenderer.invoke('res:addEntry', payload),
+  updateResEntry: (payload) => ipcRenderer.invoke('res:updateEntry', payload),
+  deleteResEntry: (payload) => ipcRenderer.invoke('res:deleteEntry', payload),
+  openResDirectory: () => ipcRenderer.invoke('res:openDirectory'),
+  reorderResEntries: (payload) => ipcRenderer.invoke('res:reorderEntries', payload),
+  pickAssetSource: () => ipcRenderer.invoke('res:pickAssetSource'),
+  readFileAsDataUrl: (sourcePath) => ipcRenderer.invoke('res:readFileAsDataUrl', sourcePath),
+  writeAssetFile: (payload) => ipcRenderer.invoke('res:writeAssetFile', payload),
+  getCurrentProject: () => ipcRenderer.invoke('project:getCurrent'),
+  listProjects: () => ipcRenderer.invoke('project:list'),
+  openExistingProject: (payload) => ipcRenderer.invoke('project:openExisting', payload),
+  createNewProject: (payload) => ipcRenderer.invoke('project:createNew', payload),
+  // --- プラグイン ---
+  listPlugins: () => ipcRenderer.invoke('plugins:list'),
+  setPluginEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', { id, enabled }),
+  runPluginGenerator: (id) => ipcRenderer.invoke('plugins:runGenerator', { id }),
 });

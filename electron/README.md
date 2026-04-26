@@ -103,15 +103,57 @@ VSCode タスクからも起動できます:
 
 ---
 
+## Rescomp アセット管理（メイン画面 Assets）
+
+メイン画面の Assets ページは、SGDK プロジェクトの `res/*.res` を読み取り、定義をファイル単位で管理できます。
+
+### できること
+
+- `.res` ファイルの選択と新規作成
+- 定義一覧の検索フィルタ（名前 / 種別 / 入力パス）
+- 対応タイプの定義編集
+  - `PALETTE`, `IMAGE`, `BITMAP`, `SPRITE`, `XGM`, `XGM2`, `WAV`, `MAP`, `TILEMAP`, `TILESET`
+- アセット登録（ファイルダイアログ）
+  - 選択したファイルを `res/` 配下へコピー（サブディレクトリ指定可）
+  - その相対パスで `.res` に定義を追加
+
+### 画像減色（16色化）
+
+画像系アセット登録時、16色を超える場合は減色ダイアログを開けます。
+
+- 透明色（パレット 0）の扱い
+  - 指定なし
+  - 元画像の透明情報を利用
+  - 指定色を透明色として利用
+- ディザリング
+  - ON/OFF
+  - ウェイト調整
+  - パターン選択（`diagonal4`, `diagonal2`, `horizontal4`, `horizontal2`, `vertical4`, `vertical2`）
+- 変換前/変換後をリアルタイムプレビュー
+
+Assets ページ上部の `res ディレクトリを開く` ボタンで、現在のプロジェクトの `res/` をエクスプローラーで直接開けます。
+
+---
+
 ## パッケージング (配布ビルド)
 
-### Windows (NSIS インストーラー + ZIP)
+### Windows (既定: ポータブル ZIP)
 
 ```powershell
 cd electron
 npm run build:win
-# → electron/dist/MegaDriveEmulator Setup 0.1.0.exe  (インストーラー)
-# → electron/dist/MegaDriveEmulator-0.1.0-win.zip     (ポータブル配布用)
+# → electron/dist/MegaDriveGameEditor-0.1.0-x64.zip
+```
+
+この ZIP は既に portable モード用に構成されており、展開後すぐに実行できます。
+実行ファイルと同階層に `portable` マーカーを自動同梱するため、設定・ツール・プロジェクトは ZIP 展開先の `data/` に保存されます。
+
+### Windows (任意: NSIS インストーラー)
+
+```powershell
+cd electron
+npm run build:win:installer
+# → electron/dist/MegaDriveGameEditor-0.1.0-x64.exe
 ```
 
 ### macOS (DMG)
@@ -151,6 +193,9 @@ VSCode タスクからも実行できます:
 ### 有効化方法
 
 #### パッケージ済みアプリ (配布版)
+
+Windows の既定ビルド (`npm run build:win`) では、この `portable` ファイルは自動で含まれます。
+手動で作成するのは、インストーラー版などを portable 化したい場合だけです。
 
 `.exe` または `.app` と同じディレクトリに `portable` という名前の**空ファイル**を置きます:
 
