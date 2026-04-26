@@ -39,6 +39,108 @@ function getSettingsPath() {
   return path.join(getToolsDir(), 'settings.json');
 }
 
+const TESTPLAY_ACTIONS = ['UP', 'DOWN', 'LEFT', 'RIGHT', 'A', 'B', 'C', 'START'];
+const TESTPLAY_VRAM_LAYOUTS = ['256x512', '512x256', '128x1024', '1024x128'];
+const DEFAULT_TESTPLAY_SETTINGS = Object.freeze({
+  keyboard: Object.freeze({
+    UP: 'ArrowUp',
+    DOWN: 'ArrowDown',
+    LEFT: 'ArrowLeft',
+    RIGHT: 'ArrowRight',
+    A: 'KeyA',
+    B: 'KeyZ',
+    C: 'KeyX',
+    START: 'Enter',
+  }),
+  gamepad: Object.freeze({
+    UP: 'button:12',
+    DOWN: 'button:13',
+    LEFT: 'button:14',
+    RIGHT: 'button:15',
+    A: 'button:2',
+    B: 'button:0',
+    C: 'button:1',
+    START: 'button:9',
+  }),
+  gamepadDeadzone: 0.5,
+  debug: Object.freeze({
+    autoRefresh: true,
+    vramTileLayout: '256x512',
+  }),
+});
+
+function cloneDefaultTestPlaySettings() {
+  return {
+    keyboard: { ...DEFAULT_TESTPLAY_SETTINGS.keyboard },
+    gamepad: { ...DEFAULT_TESTPLAY_SETTINGS.gamepad },
+    gamepadDeadzone: DEFAULT_TESTPLAY_SETTINGS.gamepadDeadzone,
+    debug: { ...DEFAULT_TESTPLAY_SETTINGS.debug },
+  };
+}
+
+function normalizeBindingMap(candidate, fallback) {
+  const result = { ...fallback };
+  if (!candidate || typeof candidate !== 'object') {
+    return result;
+  }
+  for (const action of TESTPLAY_ACTIONS) {
+    const value = candidate[action];
+    if (typeof value === 'string' && value.trim()) {
+      result[action] = value.trim();
+    }
+  }
+  return result;
+}
+
+function normalizeTestPlaySettings(candidate = {}) {
+  const normalized = cloneDefaultTestPlaySettings();
+  if (!candidate || typeof candidate !== 'object') {
+    return normalized;
+  }
+
+  normalized.keyboard = normalizeBindingMap(candidate.keyboard, DEFAULT_TESTPLAY_SETTINGS.keyboard);
+  normalized.gamepad = normalizeBindingMap(candidate.gamepad, DEFAULT_TESTPLAY_SETTINGS.gamepad);
+
+  if (typeof candidate.gamepadDeadzone === 'number' && Number.isFinite(candidate.gamepadDeadzone)) {
+    normalized.gamepadDeadzone = Math.min(0.95, Math.max(0.05, candidate.gamepadDeadzone));
+  }
+
+  if (candidate.debug && typeof candidate.debug === 'object') {
+    if (typeof candidate.debug.autoRefresh === 'boolean') {
+      normalized.debug.autoRefresh = candidate.debug.autoRefresh;
+    }
+    if (typeof candidate.debug.vramTileLayout === 'string' && TESTPLAY_VRAM_LAYOUTS.includes(candidate.debug.vramTileLayout)) {
+      normalized.debug.vramTileLayout = candidate.debug.vramTileLayout;
+    }
+  }
+
+  return normalized;
+}
+
+function getDefaultTestPlaySettings() {
+  return cloneDefaultTestPlaySettings();
+}
+
+function getTestPlaySettings() {
+  const settings = loadSettings();
+  return normalizeTestPlaySettings(settings.testPlay);
+}
+
+function saveTestPlaySettings(next) {
+  const current = getTestPlaySettings();
+  const merged = {
+    keyboard: { ...current.keyboard, ...(next && typeof next.keyboard === 'object' ? next.keyboard : {}) },
+    gamepad: { ...current.gamepad, ...(next && typeof next.gamepad === 'object' ? next.gamepad : {}) },
+    gamepadDeadzone: next && Object.prototype.hasOwnProperty.call(next, 'gamepadDeadzone')
+      ? next.gamepadDeadzone
+      : current.gamepadDeadzone,
+    debug: { ...current.debug, ...(next && typeof next.debug === 'object' ? next.debug : {}) },
+  };
+  const normalized = normalizeTestPlaySettings(merged);
+  saveSettings({ testPlay: normalized });
+  return normalized;
+}
+
 // ---------------------------------------------------------------- settings --
 
 function loadSettings() {
@@ -858,6 +960,9 @@ module.exports = {
   getStatus,
   listSgdkReleases,
   listMarsdevReleases,
+  getDefaultTestPlaySettings,
+  getTestPlaySettings,
+  saveTestPlaySettings,
   getSgdkPath,
   setSgdkPath,
   getMarsdevPath,

@@ -114,4 +114,3 @@ VS Code タスク
 - OSS: Rust Dependency Policy
 - OSS: Run All Policies
 
-jscpd

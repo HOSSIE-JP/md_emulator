@@ -6,10 +6,11 @@
   "main": "main.js",
   "scripts": {
     "copy-pkg": "node scripts/copy-pkg.js",
+    "prepare:dist": "node scripts/prepare-dist.js",
     "start": "npm run copy-pkg && electron .",
     "dev": "npm run start",
-    "build:mac": "npm run copy-pkg && electron-builder --mac",
-    "build:win": "npm run copy-pkg && electron-builder --win"
+    "build:mac": "npm run prepare:dist && electron-builder --mac",
+    "build:win": "npm run prepare:dist && electron-builder --win"
   },
   "devDependencies": {
     "electron": "41.3.0",

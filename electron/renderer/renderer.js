@@ -7,9 +7,15 @@
 const state = {
   currentPage: 'assets',
   logOpen: false,
+  logOpenHeight: 220,
   building: false,
   lastRomPath: null,
-  projectConfig: { romName: 'MY GAME', author: 'AUTHOR', region: 'JP' },
+  projectConfig: {
+    title: 'MY GAME',
+    author: 'AUTHOR',
+    serial: 'GM 00000000-00',
+    region: 'JUE',
+  },
 };
 
 // -------------------------------------------------------------------- DOM --
@@ -18,8 +24,6 @@ const $ = (id) => document.getElementById(id);
 const el = {
   btnBuild:       $('btnBuild'),
   btnTestPlay:    $('btnTestPlay'),
-  btnDebug:       $('btnDebug'),
-  btnSetup:       $('btnSetup'),
   projectName:    $('projectName'),
   buildLog:       $('buildLog'),
   buildLogBar:    $('buildLogBar'),
@@ -30,6 +34,7 @@ const el = {
   btnToggleLog:   $('btnToggleLog'),
   btnClearLog:    $('btnClearLog'),
   buildLogHeader: $('buildLogHeader'),
+  buildLogResizer: $('buildLogResizer'),
   mainLayout:     document.querySelector('.main-layout'),
   // code page
   codeEditor:     $('codeEditor'),
@@ -38,13 +43,24 @@ const el = {
   btnSaveCode:    $('btnSaveCode'),
   btnCopyCode:    $('btnCopyCode'),
   // settings page
-  settingRomName:  $('settingRomName'),
+  settingTitle:  $('settingTitle'),
   settingAuthor:   $('settingAuthor'),
-  settingRegion:   $('settingRegion'),
+  settingSerial:   $('settingSerial'),
+  settingTitleError: $('settingTitleError'),
+  settingAuthorError: $('settingAuthorError'),
+  settingSerialError: $('settingSerialError'),
   settingOutputPath: $('settingOutputPath'),
+  btnOpenOutputFolder: $('btnOpenOutputFolder'),
+  btnDownloadRom: $('btnDownloadRom'),
   btnSaveSettings:  $('btnSaveSettings'),
   settingsSavedMsg: $('settingsSavedMsg'),
 };
+
+const TITLE_MAX = 48;
+const AUTHOR_MAX = 16;
+const SERIAL_MAX = 14;
+const PRINTABLE_ASCII_RE = /^[\x20-\x7E]+$/;
+const SERIAL_RE = /^[A-Z]{2}\s[0-9A-Z]{8}-[0-9A-Z]{2}$/;
 
 // ============================================================ BUILD LOG ===
 
@@ -60,6 +76,14 @@ function appendBuildLog(text, level = 'info') {
 
 function clearBuildLog() {
   el.buildLog.textContent = '';
+}
+
+function updateRomOutputActions() {
+  const hasRom = !!state.lastRomPath;
+  if (el.btnDownloadRom) {
+    el.btnDownloadRom.disabled = !hasRom;
+    el.btnDownloadRom.style.display = hasRom ? 'inline-flex' : 'none';
+  }
 }
 
 async function copyBuildLog() {
@@ -97,9 +121,20 @@ function setLogOpen(open) {
   state.logOpen = open;
   el.buildLogBar.classList.toggle('open', open);
   el.mainLayout.classList.toggle('log-open', open);
+  if (el.buildLogResizer) {
+    el.buildLogResizer.style.display = open ? 'block' : 'none';
+  }
   // chevron
   const use = el.btnToggleLog.querySelector('use');
   if (use) use.setAttribute('href', open ? '#icon-chevron-down' : '#icon-chevron-up');
+}
+
+function setLogOpenHeight(height) {
+  const minHeight = 140;
+  const maxHeight = Math.max(minHeight, Math.floor(window.innerHeight * 0.75));
+  const next = Math.max(minHeight, Math.min(maxHeight, Number(height) || state.logOpenHeight));
+  state.logOpenHeight = next;
+  document.documentElement.style.setProperty('--log-h-open', `${next}px`);
 }
 
 // ============================================================= PAGE NAV ===
@@ -150,36 +185,104 @@ function loadSampleCode() {
 // ============================================================== SETTINGS ===
 
 function updateProjectNameDisplay() {
-  el.projectName.textContent = state.projectConfig.romName || 'MY GAME';
+  el.projectName.textContent = state.projectConfig.title || 'MY GAME';
+}
+
+function setFieldError(inputEl, errorEl, message) {
+  if (!inputEl || !errorEl) return;
+  const hasError = !!message;
+  inputEl.classList.toggle('invalid', hasError);
+  errorEl.textContent = message || '';
+}
+
+function validateTitle(value) {
+  if (!value) return 'タイトルを入力してください';
+  if (value.length > TITLE_MAX) return `タイトルは ${TITLE_MAX} 文字以内です`;
+  if (!PRINTABLE_ASCII_RE.test(value)) return 'タイトルは半角ASCII文字で入力してください';
+  return '';
+}
+
+function validateAuthor(value) {
+  if (!value) return '作者名を入力してください';
+  if (value.length > AUTHOR_MAX) return `作者名は ${AUTHOR_MAX} 文字以内です`;
+  if (!PRINTABLE_ASCII_RE.test(value)) return '作者名は半角ASCII文字で入力してください';
+  return '';
+}
+
+function validateSerial(value) {
+  if (!value) return 'シリアルナンバーを入力してください';
+  if (value.length !== SERIAL_MAX) return `シリアルナンバーは ${SERIAL_MAX} 文字固定です`;
+  if (!PRINTABLE_ASCII_RE.test(value)) return 'シリアルナンバーは半角ASCII文字で入力してください';
+  if (!SERIAL_RE.test(value)) return '形式が不正です (例: GM 00000000-00)';
+  return '';
+}
+
+function collectAndValidateSettings({ showError = true } = {}) {
+  const title = el.settingTitle.value.trim();
+  const author = el.settingAuthor.value.trim();
+  const serial = el.settingSerial.value.trim().toUpperCase();
+
+  const errors = {
+    title: validateTitle(title),
+    author: validateAuthor(author),
+    serial: validateSerial(serial),
+  };
+
+  if (showError) {
+    setFieldError(el.settingTitle, el.settingTitleError, errors.title);
+    setFieldError(el.settingAuthor, el.settingAuthorError, errors.author);
+    setFieldError(el.settingSerial, el.settingSerialError, errors.serial);
+  }
+
+  const valid = !errors.title && !errors.author && !errors.serial;
+  return {
+    valid,
+    errors,
+    config: {
+      title: title || state.projectConfig.title,
+      author: author || state.projectConfig.author,
+      serial: serial || state.projectConfig.serial,
+      region: 'JUE',
+    },
+  };
 }
 
 async function loadProjectConfig() {
   try {
     const cfg = await window.electronAPI.getProjectConfig();
     if (cfg) {
-      state.projectConfig = { ...state.projectConfig, ...cfg };
-      el.settingRomName.value  = cfg.romName  || state.projectConfig.romName;
-      el.settingAuthor.value   = cfg.author   || state.projectConfig.author;
-      el.settingRegion.value   = cfg.region   || state.projectConfig.region;
+      const normalized = {
+        title: cfg.title || cfg.romName || state.projectConfig.title,
+        author: cfg.author || state.projectConfig.author,
+        serial: cfg.serial || state.projectConfig.serial,
+        region: 'JUE',
+      };
+      state.projectConfig = { ...state.projectConfig, ...normalized };
+      el.settingTitle.value   = state.projectConfig.title;
+      el.settingAuthor.value  = state.projectConfig.author;
+      el.settingSerial.value  = state.projectConfig.serial;
       updateProjectNameDisplay();
+      collectAndValidateSettings({ showError: true });
     }
     const romPath = await window.electronAPI.getRomPath();
     if (romPath) {
       state.lastRomPath = romPath;
       el.settingOutputPath.value = romPath;
     }
+    updateRomOutputActions();
   } catch (_err) {
     // 初回起動など、設定が無い場合は無視
   }
 }
 
 async function saveSettings() {
-  const cfg = {
-    romName: el.settingRomName.value.trim() || 'MY GAME',
-    author:  el.settingAuthor.value.trim()  || 'AUTHOR',
-    region:  el.settingRegion.value,
-  };
-  state.projectConfig = cfg;
+  const result = collectAndValidateSettings({ showError: true });
+  if (!result.valid) {
+    el.settingsSavedMsg.textContent = '✕ 入力内容を修正してください';
+    return;
+  }
+  state.projectConfig = result.config;
+  el.settingSerial.value = state.projectConfig.serial;
   updateProjectNameDisplay();
   // 保存は generateProject 時に行うため、ここではメモリのみ更新
   el.settingsSavedMsg.textContent = '✓ 設定を保存しました';
@@ -208,10 +311,19 @@ async function runBuild() {
   setBuildStatus('building', 'ビルド中...');
   el.buildRomSize.textContent = '';
   appendBuildLog('=== MD Game Editor Build ===');
-  appendBuildLog(`プロジェクト: ${state.projectConfig.romName}`);
+  appendBuildLog(`プロジェクト: ${state.projectConfig.title}`);
   appendBuildLog('');
 
   try {
+    const settingsResult = collectAndValidateSettings({ showError: true });
+    if (!settingsResult.valid) {
+      appendBuildLog('[ERROR] プロジェクト設定に不正な値があります。Settings を確認してください。', 'error');
+      setBuildStatus('error', '設定エラー');
+      return;
+    }
+    state.projectConfig = settingsResult.config;
+    updateProjectNameDisplay();
+
     // 1. ソースを生成
     const genResult = await window.electronAPI.generateProject(sourceCode, state.projectConfig);
     if (!genResult.ok) {
@@ -227,6 +339,7 @@ async function runBuild() {
     if (buildResult.success) {
       state.lastRomPath = buildResult.romPath;
       el.settingOutputPath.value = buildResult.romPath;
+      updateRomOutputActions();
       const sizeKb = buildResult.romSize != null ? `${(buildResult.romSize / 1024).toFixed(1)} KB` : '';
       el.buildRomSize.textContent = sizeKb ? `ROM: ${sizeKb}` : '';
       setBuildStatus('success', '✓ ビルド成功');
@@ -355,10 +468,7 @@ function bindEvents() {
   // Topbar buttons
   el.btnBuild.addEventListener('click', runBuild);
   el.btnTestPlay.addEventListener('click', openTestPlay);
-  el.btnDebug.addEventListener('click', () => {
-    window.electronAPI.openDebugWindow({ mode: 'wasm' });
-  });
-  el.btnSetup.addEventListener('click', () => {
+  $('btnOpenSetup').addEventListener('click', () => {
     window.electronAPI.openSetupWindow();
   });
 
@@ -389,9 +499,37 @@ function bindEvents() {
 
   // Settings page
   el.btnSaveSettings.addEventListener('click', saveSettings);
-  el.settingRomName.addEventListener('input', () => {
-    state.projectConfig.romName = el.settingRomName.value;
+  el.settingTitle.addEventListener('input', () => {
+    state.projectConfig.title = el.settingTitle.value;
     updateProjectNameDisplay();
+    collectAndValidateSettings({ showError: true });
+  });
+  el.settingAuthor.addEventListener('input', () => collectAndValidateSettings({ showError: true }));
+  el.settingSerial.addEventListener('input', () => {
+    el.settingSerial.value = el.settingSerial.value.toUpperCase();
+    collectAndValidateSettings({ showError: true });
+  });
+  el.btnOpenOutputFolder.addEventListener('click', async () => {
+    if (!state.lastRomPath) {
+      el.settingsSavedMsg.textContent = 'ROM 出力先がまだありません。先にビルドしてください。';
+      return;
+    }
+    const result = await window.electronAPI.openPathInExplorer(state.lastRomPath, { parentOnly: true });
+    if (!result?.ok) {
+      el.settingsSavedMsg.textContent = `フォルダを開けませんでした: ${result?.error || 'unknown'}`;
+    }
+  });
+  el.btnDownloadRom.addEventListener('click', async () => {
+    if (!state.lastRomPath) {
+      return;
+    }
+    const result = await window.electronAPI.saveRomAs(state.lastRomPath);
+    if (result?.ok) {
+      el.settingsSavedMsg.textContent = `✓ 保存しました: ${result.path}`;
+      setTimeout(() => { el.settingsSavedMsg.textContent = ''; }, 2500);
+    } else if (!result?.canceled) {
+      el.settingsSavedMsg.textContent = `保存に失敗: ${result?.error || 'unknown'}`;
+    }
   });
 
   // Build log
@@ -403,6 +541,32 @@ function bindEvents() {
   el.btnClearLog.addEventListener('click', (e) => { e.stopPropagation(); clearBuildLog(); });
   el.btnToggleLog.addEventListener('click', (e) => { e.stopPropagation(); setLogOpen(!state.logOpen); });
 
+  if (el.buildLogResizer) {
+    let dragStartY = 0;
+    let dragStartHeight = 0;
+    const onMouseMove = (event) => {
+      const delta = dragStartY - event.clientY;
+      setLogOpenHeight(dragStartHeight + delta);
+    };
+    const onMouseUp = () => {
+      el.buildLogResizer.classList.remove('dragging');
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    el.buildLogResizer.addEventListener('mousedown', (event) => {
+      if (!state.logOpen) {
+        return;
+      }
+      event.preventDefault();
+      dragStartY = event.clientY;
+      dragStartHeight = state.logOpenHeight;
+      el.buildLogResizer.classList.add('dragging');
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    });
+  }
+
   // IPC events
   window.electronAPI.onBuildLog((payload) => {
     appendBuildLog(payload.text || '', payload.level);
@@ -413,12 +577,19 @@ function bindEvents() {
     if (payload.success) {
       state.lastRomPath = payload.romPath;
       if (payload.romPath) el.settingOutputPath.value = payload.romPath;
+      updateRomOutputActions();
       const sizeKb = payload.romSize != null ? `${(payload.romSize / 1024).toFixed(1)} KB` : '';
       el.buildRomSize.textContent = sizeKb ? `ROM: ${sizeKb}` : '';
       setBuildStatus('success', '✓ ビルド成功');
     } else {
       setBuildStatus('error', '✕ ビルド失敗');
     }
+  });
+
+  // Menu → Setup message handler
+  window.electronAPI.onMenuOpenSetup?.(() => {
+    switchPage('settings');
+    window.electronAPI.openSetupWindow();
   });
 
   // Keyboard shortcut: Ctrl/Cmd+B = Build
@@ -433,6 +604,8 @@ function bindEvents() {
 // ============================================================ BOOTSTRAP ===
 
 async function bootstrap() {
+  setLogOpenHeight(state.logOpenHeight);
+  setLogOpen(false);
   bindEvents();
   bindAssetTable();
   drawDummyMap();

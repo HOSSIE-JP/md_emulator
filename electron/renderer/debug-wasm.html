@@ -25,7 +25,9 @@
     .pre-block { font-size: 11px; max-height: 420px; overflow: auto; background: #16162a; border: 1px solid #333; padding: 8px; min-width: 420px; }
     .info-block { font-size: 11px; margin-top: 4px; white-space: pre-wrap; }
     .cram-grid { display: grid; grid-template-columns: repeat(16, 24px); gap: 1px; }
-    .cram-cell { width: 24px; height: 24px; border: 1px solid #555; }
+    .cram-cell { width: 24px; height: 24px; border: 1px solid #555; cursor: pointer; }
+    .picker-row { display: flex; gap: 10px; align-items: center; margin-top: 8px; font-size: 11px; }
+    .picker-row input[type="color"] { width: 48px; height: 32px; padding: 0; border: none; background: transparent; }
     table.sprite-table { font-size: 11px; border-collapse: collapse; }
     table.sprite-table th, table.sprite-table td { border: 1px solid #444; padding: 2px 6px; text-align: right; }
     table.sprite-table th { background: #2a2a4a; }
@@ -40,7 +42,6 @@
   <div class="toolbar">
     <button id="btnRefresh">Refresh All</button>
     <button id="btnAutoRefresh">Auto Refresh: OFF</button>
-
   </div>
   <div id="status">idle</div>
 
@@ -61,19 +62,29 @@
       <div class="panel">
         <div class="panel-header">
           <h2>VRAM Tiles</h2>
-          <label style="font-size:11px;">Palette:
-            <select id="tilePalette" style="font-family:monospace;background:#2a2a4a;color:#e0e0e0;border:1px solid #555;">
-              <option value="0">0</option>
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-            </select>
-          </label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px;">
+            <label>Palette:
+              <select id="tilePalette" style="font-family:monospace;background:#2a2a4a;color:#e0e0e0;border:1px solid #555;">
+                <option value="0">0</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+              </select>
+            </label>
+            <label>Layout:
+              <select id="tileLayout" style="font-family:monospace;background:#2a2a4a;color:#e0e0e0;border:1px solid #555;">
+                <option value="256x512">256x512</option>
+                <option value="512x256">512x256</option>
+                <option value="128x1024">128x1024</option>
+                <option value="1024x128">1024x128</option>
+              </select>
+            </label>
+          </div>
         </div>
         <canvas id="canvasTiles" width="256" height="512" style="width:512px;height:1024px;"></canvas>
         <div id="tilesInfo" class="info-block"></div>
       </div>
-      <div class="panel"><h2>CRAM Palette</h2><div id="cramGrid" class="cram-grid"></div><div id="cramInfo" class="info-block"></div></div>
+      <div class="panel"><h2>CRAM Palette</h2><div id="cramGrid" class="cram-grid"></div><div class="picker-row"><input id="cramPicker" type="color" value="#000000" disabled /><div id="cramHoverInfo">hover a color</div></div><div id="cramInfo" class="info-block"></div></div>
     </div>
   </div>
 
@@ -94,12 +105,46 @@
   </div>
 
   <script>
-    // tilePaletteはPlanesタブ内に移動したため、toolbarから除去
-    document.querySelector('.toolbar label')?.remove();
-
     const statusEl = document.getElementById('status');
+    const VRAM_LAYOUTS = {
+      '128x1024': 16,
+      '256x512': 32,
+      '512x256': 64,
+      '1024x128': 128,
+    };
+    const DEFAULT_SETTINGS = {
+      debug: {
+        autoRefresh: true,
+        vramTileLayout: '256x512',
+      },
+    };
+    const state = {
+      autoTimer: null,
+      settings: structuredClone(DEFAULT_SETTINGS),
+      tilesData: null,
+      tileLayout: '256x512',
+      tileHoverIndex: null,
+    };
 
     function setStatus(text) { statusEl.textContent = text; }
+
+    function mergeSettings(next) {
+      return {
+        debug: { ...DEFAULT_SETTINGS.debug, ...(next?.debug || {}) },
+      };
+    }
+
+    function setAutoRefreshEnabled(enabled) {
+      const button = document.getElementById('btnAutoRefresh');
+      if (state.autoTimer) {
+        clearInterval(state.autoTimer);
+        state.autoTimer = null;
+      }
+      if (enabled) {
+        state.autoTimer = setInterval(refreshAll, 500);
+      }
+      button.textContent = `Auto Refresh: ${enabled ? 'ON' : 'OFF'}`;
+    }
 
     function drawArgbToCanvas(canvas, width, height, pixelsArgb) {
       canvas.width = width;
@@ -124,17 +169,99 @@
       return { width: data.width, height: data.height, pixels: Array.isArray(data.pixels_argb) ? data.pixels_argb.length : 0 };
     }
 
+    function toCssColor(argb) {
+      const c = argb >>> 0;
+      const r = (c >> 16) & 0xff;
+      const g = (c >> 8) & 0xff;
+      const b = c & 0xff;
+      return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+    }
+
+    function relayoutTiles(data, layout) {
+      if (!data?.pixels_argb || !VRAM_LAYOUTS[layout]) {
+        return data;
+      }
+      const tileSize = 8;
+      const srcTileCols = Math.max(1, Math.floor(data.width / tileSize));
+      const srcTileRows = Math.max(1, Math.floor(data.height / tileSize));
+      const tileCount = srcTileCols * srcTileRows;
+      const dstTileCols = VRAM_LAYOUTS[layout];
+      const dstTileRows = Math.ceil(tileCount / dstTileCols);
+      const dstWidth = dstTileCols * tileSize;
+      const dstHeight = dstTileRows * tileSize;
+      const dstPixels = new Array(dstWidth * dstHeight).fill(0xff000000);
+
+      for (let tileIndex = 0; tileIndex < tileCount; tileIndex += 1) {
+        const srcTileX = tileIndex % srcTileCols;
+        const srcTileY = Math.floor(tileIndex / srcTileCols);
+        const dstTileX = tileIndex % dstTileCols;
+        const dstTileY = Math.floor(tileIndex / dstTileCols);
+        for (let py = 0; py < tileSize; py += 1) {
+          for (let px = 0; px < tileSize; px += 1) {
+            const srcX = srcTileX * tileSize + px;
+            const srcY = srcTileY * tileSize + py;
+            const dstX = dstTileX * tileSize + px;
+            const dstY = dstTileY * tileSize + py;
+            dstPixels[dstY * dstWidth + dstX] = data.pixels_argb[srcY * data.width + srcX] >>> 0;
+          }
+        }
+      }
+
+      return { width: dstWidth, height: dstHeight, pixels_argb: dstPixels, tileCount };
+    }
+
+    function renderTiles(data) {
+      state.tilesData = data;
+      const layout = document.getElementById('tileLayout').value;
+      state.tileLayout = layout;
+      const relaid = relayoutTiles(data, layout);
+      const canvas = document.getElementById('canvasTiles');
+      drawArgbToCanvas(canvas, relaid.width, relaid.height, relaid.pixels_argb);
+      const cssScale = 2;
+      canvas.style.width = `${relaid.width * cssScale}px`;
+      canvas.style.height = `${relaid.height * cssScale}px`;
+      const summary = summarizeImage(relaid);
+      const palette = Number(document.getElementById('tilePalette').value || 0);
+      const hoverText = state.tileHoverIndex == null ? 'hover=none' : `hoverTile=${state.tileHoverIndex}`;
+      document.getElementById('tilesInfo').textContent = `palette=${palette}\nlayout=${layout}\npixels=${summary.pixels}\n${hoverText}`;
+    }
+
+    function updateTileHover(event) {
+      if (!state.tilesData) {
+        return;
+      }
+      const canvas = document.getElementById('canvasTiles');
+      const rect = canvas.getBoundingClientRect();
+      const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+      const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+      const tileX = Math.floor(x / 8);
+      const tileY = Math.floor(y / 8);
+      const tileCols = VRAM_LAYOUTS[state.tileLayout] || 32;
+      const tileIndex = tileY * tileCols + tileX;
+      const maxTiles = Math.floor((canvas.width / 8) * (canvas.height / 8));
+      state.tileHoverIndex = tileIndex >= 0 && tileIndex < maxTiles ? tileIndex : null;
+      renderTiles(state.tilesData);
+    }
+
+    function clearTileHover() {
+      state.tileHoverIndex = null;
+      if (state.tilesData) {
+        renderTiles(state.tilesData);
+      }
+    }
+
     function renderCram(colors) {
       const grid = document.getElementById('cramGrid');
       grid.innerHTML = '';
       for (let i = 0; i < colors.length; i++) {
         const c = colors[i] >>> 0;
-        const r = (c >> 16) & 0xff;
-        const g = (c >> 8) & 0xff;
-        const b = c & 0xff;
         const cell = document.createElement('div');
         cell.className = 'cram-cell';
-        cell.style.backgroundColor = `rgb(${r},${g},${b})`;
+        cell.style.backgroundColor = toCssColor(c);
+        cell.addEventListener('mouseenter', () => {
+          document.getElementById('cramPicker').value = toCssColor(c);
+          document.getElementById('cramHoverInfo').textContent = `index=${i} palette=${(i >> 4) & 3} color=${i & 15} argb=0x${c.toString(16).padStart(8, '0')}`;
+        });
         grid.appendChild(cell);
       }
       document.getElementById('cramInfo').textContent = `colors=${colors.length}`;
@@ -251,8 +378,7 @@
       document.getElementById('planeBInfo').textContent = JSON.stringify(summarizeImage(snapshot.planes.B));
       document.getElementById('planeWInfo').textContent = JSON.stringify(summarizeImage(snapshot.planes.W));
 
-      drawArgbToCanvas(document.getElementById('canvasTiles'), snapshot.tiles.width, snapshot.tiles.height, snapshot.tiles.pixels_argb);
-      document.getElementById('tilesInfo').textContent = JSON.stringify(summarizeImage(snapshot.tiles));
+      renderTiles(snapshot.tiles);
 
       renderCram(snapshot.cram.colors_argb || []);
       renderSprites(snapshot.sprites.sprites || [], snapshot.tiles);
@@ -274,21 +400,34 @@
 
     document.getElementById('btnRefresh').addEventListener('click', refreshAll);
     document.getElementById('tilePalette').addEventListener('change', refreshAll);
-
-    let autoTimer = null;
-    document.getElementById('btnAutoRefresh').addEventListener('click', () => {
-      const button = document.getElementById('btnAutoRefresh');
-      if (autoTimer) {
-        clearInterval(autoTimer);
-        autoTimer = null;
-        button.textContent = 'Auto Refresh: OFF';
-      } else {
-        autoTimer = setInterval(refreshAll, 500);
-        button.textContent = 'Auto Refresh: ON';
+    document.getElementById('tileLayout').addEventListener('change', () => {
+      if (state.tilesData) {
+        renderTiles(state.tilesData);
       }
     });
 
-    refreshAll().catch((error) => setStatus('initial fetch failed: ' + String(error)));
+    document.getElementById('canvasTiles').addEventListener('mousemove', updateTileHover);
+    document.getElementById('canvasTiles').addEventListener('mouseleave', clearTileHover);
+
+    document.getElementById('btnAutoRefresh').addEventListener('click', () => {
+      setAutoRefreshEnabled(!state.autoTimer);
+    });
+
+    window.electronDebug.onTestPlaySettingsChanged((nextSettings) => {
+      state.settings = mergeSettings(nextSettings);
+      document.getElementById('tileLayout').value = state.settings.debug.vramTileLayout;
+      setAutoRefreshEnabled(!!state.settings.debug.autoRefresh);
+      if (state.tilesData) {
+        renderTiles(state.tilesData);
+      }
+    });
+
+    window.electronDebug.getTestPlaySettings().then((nextSettings) => {
+      state.settings = mergeSettings(nextSettings);
+      document.getElementById('tileLayout').value = state.settings.debug.vramTileLayout;
+      setAutoRefreshEnabled(!!state.settings.debug.autoRefresh);
+      return refreshAll();
+    }).catch((error) => setStatus('initial fetch failed: ' + String(error)));
   </script>
 </body>
 </html>

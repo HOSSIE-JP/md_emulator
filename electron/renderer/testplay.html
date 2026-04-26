@@ -49,6 +49,7 @@
     </label>
 
     <button id="btnDebug" title="デバッグウィンドウ">Debug</button>
+    <button id="btnSettings" title="テストプレイ設定">Settings</button>
   </div>
 
   <div class="screen-area">
@@ -60,6 +61,43 @@
     import MdEmulator from '../md-emulator.js';
 
     const WASM_JS_URL = new URL('../pkg/md_wasm.js', import.meta.url).href;
+    const ACTION_TO_BUTTON = {
+      UP: MdEmulator.Buttons.UP,
+      DOWN: MdEmulator.Buttons.DOWN,
+      LEFT: MdEmulator.Buttons.LEFT,
+      RIGHT: MdEmulator.Buttons.RIGHT,
+      A: MdEmulator.Buttons.A,
+      B: MdEmulator.Buttons.B,
+      C: MdEmulator.Buttons.C,
+      START: MdEmulator.Buttons.START,
+    };
+    const DEFAULT_SETTINGS = {
+      keyboard: {
+        UP: 'ArrowUp',
+        DOWN: 'ArrowDown',
+        LEFT: 'ArrowLeft',
+        RIGHT: 'ArrowRight',
+        A: 'KeyA',
+        B: 'KeyZ',
+        C: 'KeyX',
+        START: 'Enter',
+      },
+      gamepad: {
+        UP: 'button:12',
+        DOWN: 'button:13',
+        LEFT: 'button:14',
+        RIGHT: 'button:15',
+        A: 'button:2',
+        B: 'button:0',
+        C: 'button:1',
+        START: 'button:9',
+      },
+      gamepadDeadzone: 0.5,
+      debug: {
+        autoRefresh: true,
+        vramTileLayout: '256x512',
+      },
+    };
 
     const params = new URLSearchParams(window.location.search);
     const romPath = params.get('romPath') || '';
@@ -71,13 +109,103 @@
     let emu = null;
     let running = false;
     let muted = false;
+    let inputLoopId = 0;
+    let lastInputMask = -1;
+    let settings = structuredClone(DEFAULT_SETTINGS);
+    const pressedKeys = new Set();
 
     function setStatus(text) { statusBar.textContent = text; }
+
+    function mergeSettings(next) {
+      return {
+        keyboard: { ...DEFAULT_SETTINGS.keyboard, ...(next?.keyboard || {}) },
+        gamepad: { ...DEFAULT_SETTINGS.gamepad, ...(next?.gamepad || {}) },
+        gamepadDeadzone: typeof next?.gamepadDeadzone === 'number' ? next.gamepadDeadzone : DEFAULT_SETTINGS.gamepadDeadzone,
+        debug: { ...DEFAULT_SETTINGS.debug, ...(next?.debug || {}) },
+      };
+    }
 
     function applyScale(scale) {
       const s = Number(scale) || 2;
       canvas.style.width = `${320 * s}px`;
       canvas.style.height = `${224 * s}px`;
+    }
+
+    function isBindingActive(binding, gamepad, deadzone) {
+      if (!binding || !gamepad) {
+        return false;
+      }
+      const [kind, indexText, signText] = String(binding).split(':');
+      const index = Number(indexText);
+      if (kind === 'button') {
+        return Number.isInteger(index) && (gamepad.buttons[index]?.value || 0) > 0.5;
+      }
+      if (kind === 'axis') {
+        const direction = Number(signText) || 1;
+        const value = gamepad.axes[index] || 0;
+        return direction < 0 ? value <= -deadzone : value >= deadzone;
+      }
+      return false;
+    }
+
+    function computeInputMask() {
+      let mask = 0;
+      const deadzone = Math.max(0.05, Math.min(0.95, Number(settings.gamepadDeadzone) || DEFAULT_SETTINGS.gamepadDeadzone));
+
+      for (const [action, keyCode] of Object.entries(settings.keyboard)) {
+        if (pressedKeys.has(keyCode)) {
+          mask |= ACTION_TO_BUTTON[action] || 0;
+        }
+      }
+
+      if (navigator.getGamepads) {
+        const gamepads = Array.from(navigator.getGamepads()).filter(Boolean);
+        for (const gamepad of gamepads) {
+          for (const [action, binding] of Object.entries(settings.gamepad)) {
+            if (isBindingActive(binding, gamepad, deadzone)) {
+              mask |= ACTION_TO_BUTTON[action] || 0;
+            }
+          }
+        }
+      }
+
+      return mask;
+    }
+
+    function tickInput() {
+      if (emu) {
+        const mask = computeInputMask();
+        if (mask !== lastInputMask) {
+          emu.setInput(1, mask);
+          lastInputMask = mask;
+        }
+      }
+      inputLoopId = requestAnimationFrame(tickInput);
+    }
+
+    function startInputLoop() {
+      if (!inputLoopId) {
+        inputLoopId = requestAnimationFrame(tickInput);
+      }
+    }
+
+    function stopInputLoop() {
+      if (inputLoopId) {
+        cancelAnimationFrame(inputLoopId);
+        inputLoopId = 0;
+      }
+      pressedKeys.clear();
+      lastInputMask = -1;
+      if (emu) {
+        emu.setInput(1, 0);
+      }
+    }
+
+    function maybeConsumeKey(event) {
+      if (!settings?.keyboard) {
+        return false;
+      }
+      return Object.values(settings.keyboard).includes(event.code);
     }
 
     async function init() {
@@ -91,6 +219,7 @@
       document.title = `テストプレイ: ${baseName}`;
 
       try {
+        settings = mergeSettings(await window.electronTestPlay.getSettings());
         setStatus('WASM エミュレータ初期化中...');
         emu = new MdEmulator({ wasmJsUrl: WASM_JS_URL, audio: true, sram: true });
         emu.attachCanvas(canvas);
@@ -102,6 +231,7 @@
         await emu.loadRom(new Uint8Array(bytes), baseName);
         emu.play();
         running = true;
+        startInputLoop();
         updatePlayButton();
         setStatus(`実行中: ${baseName}`);
       } catch (err) {
@@ -148,6 +278,41 @@
 
     document.getElementById('btnDebug').addEventListener('click', () => {
       window.electronTestPlay.openDebugWindow({ mode: 'wasm' });
+    });
+
+    document.getElementById('btnSettings').addEventListener('click', () => {
+      window.electronTestPlay.openSettingsWindow();
+    });
+
+    window.addEventListener('keydown', (event) => {
+      if (maybeConsumeKey(event)) {
+        event.preventDefault();
+        pressedKeys.add(event.code);
+      }
+    });
+
+    window.addEventListener('keyup', (event) => {
+      if (maybeConsumeKey(event)) {
+        event.preventDefault();
+        pressedKeys.delete(event.code);
+      }
+    });
+
+    window.addEventListener('blur', () => {
+      pressedKeys.clear();
+      if (emu) {
+        emu.setInput(1, 0);
+        lastInputMask = 0;
+      }
+    });
+
+    window.addEventListener('beforeunload', () => {
+      stopInputLoop();
+    });
+
+    window.electronTestPlay.onSettingsChanged((nextSettings) => {
+      settings = mergeSettings(nextSettings);
+      setStatus('設定を更新しました');
     });
 
     applyScale(2);

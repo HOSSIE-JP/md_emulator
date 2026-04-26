@@ -1,19 +1,34 @@
-appId: com.mdemulator.desktop
-productName: MegaDriveEmulator
+appId: jp.co.geroneko.md.editor.desktop
+productName: MegaDriveGameEditor
 files:
-  - main.js
-  - preload.js
+  - "*.js"
   - renderer/**
+  - sample/**
   - pkg/**
   - md-emulator.js
   - md-emulator.d.ts
+  - build/icon.ico
+extraResources:
+  - from: bin
+    to: bin
+    filter:
+      - "**/*"
 extraMetadata:
   main: main.js
 mac:
   target:
     - dmg
 win:
+  icon: build/icon.ico
   target:
     - nsis
+    - zip   # ポータブル配布用: zip 展開後に exe と同階層に "portable" ファイルを置くと portable モードで起動
+  artifactName: "${productName}-${version}-${arch}.${ext}"
 directories:
   output: dist
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  # installerのアイコンも指定したい場合
+  installerIcon: ./build/icon.ico

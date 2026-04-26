@@ -96,7 +96,7 @@ function resolveMakeCommand(toolchainPath, isWin) {
 /**
  * SGDK プロジェクトのファイル構成を生成する
  * @param {string} sourceCode - main.c のソースコード
- * @param {object} config     - { romName, author, region }
+ * @param {object} config     - { title, author, serial, region }
  */
 function generateProject(sourceCode, config = {}) {
   const projectDir = getProjectDir();
@@ -115,9 +115,10 @@ function generateProject(sourceCode, config = {}) {
 
   // メタ情報を保存（必要な場合に使用）
   const meta = {
-    romName: config.romName || 'MY GAME',
+    title: config.title || config.romName || 'MY GAME',
     author: config.author || 'AUTHOR',
-    region: config.region || 'JP',
+    serial: config.serial || 'GM 00000000-00',
+    region: 'JUE',
     generatedAt: new Date().toISOString(),
   };
   fs.writeFileSync(path.join(projectDir, 'project.json'), JSON.stringify(meta, null, 2), 'utf-8');

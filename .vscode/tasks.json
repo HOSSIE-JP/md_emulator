@@ -298,6 +298,55 @@
         "reveal": "always",
         "panel": "shared"
       }
+    },
+    {
+      "label": "Electron: Prepare Dist Assets",
+      "type": "shell",
+      "command": "npm --prefix electron run prepare:dist",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "electron-package"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Electron: Package (Windows)",
+      "type": "shell",
+      "command": "npm --prefix electron run build:win",
+      "osx": {
+        "command": "echo 'Windows パッケージは Windows 上で実行してください' && exit 1"
+      },
+      "linux": {
+        "command": "echo 'Windows パッケージは Windows 上で実行してください' && exit 1"
+      },
+      "dependsOn": "Electron: Prepare Dist Assets",
+      "dependsOrder": "sequence",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "electron-package"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Electron: Package (macOS)",
+      "type": "shell",
+      "command": "npm --prefix electron run build:mac",
+      "windows": {
+        "command": "Write-Error 'macOS パッケージは macOS 上で実行してください'; exit 1"
+      },
+      "linux": {
+        "command": "echo 'macOS パッケージは macOS 上で実行してください' && exit 1"
+      },
+      "dependsOn": "Electron: Prepare Dist Assets",
+      "dependsOrder": "sequence",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "electron-package"
+      },
+      "problemMatcher": []
     }
   ]
 }

@@ -42,14 +42,6 @@
         <svg class="icon"><use href="#icon-play"></use></svg>
         Test Play
       </button>
-      <button class="action-btn" id="btnDebug">
-        <svg class="icon"><use href="#icon-bug"></use></svg>
-        Debug
-      </button>
-      <button class="action-btn setup-btn" id="btnSetup">
-        <svg class="icon"><use href="#icon-setup"></use></svg>
-        Setup
-      </button>
     </div>
   </header>
 
@@ -180,29 +172,34 @@
         </div>
         <div class="settings-form">
           <div class="form-group">
-            <label class="form-label">ROM 名</label>
-            <input type="text" class="form-input" id="settingRomName" value="MY GAME" maxlength="48" />
-            <p class="form-hint">Mega Drive ROM ヘッダに記録される名称（最大 48 文字）</p>
+            <label class="form-label">タイトル</label>
+            <input type="text" class="form-input" id="settingTitle" value="MY GAME" maxlength="48" />
+            <p class="form-hint">Mega Drive ROM ヘッダの Domestic/International Name（ASCII、最大 48 文字）</p>
+            <p class="form-error" id="settingTitleError"></p>
           </div>
           <div class="form-group">
             <label class="form-label">作者名</label>
             <input type="text" class="form-input" id="settingAuthor" value="AUTHOR" maxlength="16" />
+            <p class="form-error" id="settingAuthorError"></p>
           </div>
           <div class="form-group">
-            <label class="form-label">リージョン</label>
-            <select class="form-select" id="settingRegion">
-              <option value="JP" selected>JP (日本)</option>
-              <option value="US">US (北米)</option>
-              <option value="EU">EU (ヨーロッパ)</option>
-            </select>
+            <label class="form-label">シリアルナンバー</label>
+            <input type="text" class="form-input form-input-mono" id="settingSerial" value="GM 00000000-00" maxlength="14" />
+            <p class="form-hint">例: GM 00000000-00（ASCII、14 文字固定）</p>
+            <p class="form-error" id="settingSerialError"></p>
           </div>
           <div class="form-group">
             <label class="form-label">出力 ROM パス</label>
             <input type="text" class="form-input form-input-mono" id="settingOutputPath" readonly />
             <p class="form-hint">ビルド後に <code>out/rom.bin</code> へ出力されます</p>
+            <div class="form-actions-inline">
+              <button class="btn-sm" id="btnOpenOutputFolder" type="button">出力フォルダを開く</button>
+              <button class="btn-sm" id="btnDownloadRom" type="button" disabled>ROM を保存</button>
+            </div>
           </div>
           <div class="form-actions">
-            <button class="btn-primary" id="btnSaveSettings">設定を保存</button>
+            <button class="btn-primary" id="btnSaveSettings">プロジェクト設定を保存</button>
+            <button class="btn-sm" id="btnOpenSetup" type="button">初期設定</button>
           </div>
           <div class="form-saved" id="settingsSavedMsg"></div>
         </div>
@@ -212,6 +209,7 @@
   </div>
 
   <!-- BUILD LOG (bottom fixed) -->
+  <div class="build-log-resizer" id="buildLogResizer" title="ドラッグして高さを調整"></div>
   <div class="build-log-bar" id="buildLogBar">
     <div class="build-log-header" id="buildLogHeader">
       <div class="build-log-title-row">

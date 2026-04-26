@@ -4,6 +4,30 @@ const net = require('net');
 const { shell } = require('electron');
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const { spawn } = require('child_process');
+
+// ── Portable mode detection ────────────────────────────────────────────────
+// Must run before any app.getPath() call (including those inside require'd modules).
+// Packaged: place a file named "portable" next to the .exe / .app to activate.
+// Dev:      place a file named ".portable" in the electron/ source directory.
+(function applyPortableMode() {
+  let markerExists = false;
+  let dataDir;
+
+  if (app.isPackaged) {
+    const exeDir = path.dirname(app.getPath('exe'));
+    markerExists = fs.existsSync(path.join(exeDir, 'portable'));
+    dataDir = path.join(exeDir, 'data');
+  } else {
+    markerExists = fs.existsSync(path.join(__dirname, '.portable'));
+    dataDir = path.join(__dirname, 'data');
+  }
+
+  if (markerExists) {
+    app.setPath('userData', dataDir);
+    app.setPath('logs', path.join(dataDir, 'logs'));
+  }
+})();
+
 const setupManager = require('./setup-manager');
 const buildSystem = require('./build-system');
 
@@ -11,6 +35,7 @@ let mainWindow = null;
 let debugWindow = null;
 let setupWindow = null;
 let testPlayWindow = null;
+let testPlaySettingsWindow = null;
 let apiServerProcess = null;
 let apiServerPort = null;
 
@@ -142,28 +167,23 @@ function sendToSetupWindow(channel, payload) {
   setupWindow.webContents.send(channel, payload);
 }
 
+function broadcastTestPlaySettings(settings) {
+  [testPlayWindow, debugWindow, testPlaySettingsWindow].forEach((win) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('testplay:settings-changed', settings);
+    }
+  });
+}
+
 function createMenu() {
   const template = [
     {
       label: 'File',
       submenu: [
         {
-          label: 'Open ROM...',
-          accelerator: 'CmdOrCtrl+O',
-          click: async () => {
-            if (!mainWindow) {
-              return;
-            }
-            const result = await dialog.showOpenDialog(mainWindow, {
-              properties: ['openFile'],
-              filters: [
-                { name: 'Mega Drive ROM', extensions: ['bin', 'md', 'gen', 'smd', 'sms', 'zip'] },
-                { name: 'All Files', extensions: ['*'] },
-              ],
-            });
-            if (!result.canceled && result.filePaths.length > 0) {
-              sendToRenderer('rom-selected', { filePath: result.filePaths[0] });
-            }
+          label: 'Setup',
+          click: () => {
+            sendToRenderer('menu:openSetup');
           },
         },
         { type: 'separator' },
@@ -335,6 +355,51 @@ ipcMain.handle('fs:readRomFile', async (_event, filePath) => {
   return new Uint8Array(data);
 });
 
+ipcMain.handle('fs:openPathInExplorer', async (_event, targetPath, options = {}) => {
+  try {
+    if (!targetPath) {
+      return { ok: false, error: 'path is empty' };
+    }
+    const normalized = path.resolve(targetPath);
+    const finalTarget = options.parentOnly ? path.dirname(normalized) : normalized;
+    if (!fs.existsSync(finalTarget)) {
+      return { ok: false, error: `path not found: ${finalTarget}` };
+    }
+    const error = await shell.openPath(finalTarget);
+    if (error) {
+      return { ok: false, error };
+    }
+    return { ok: true, path: finalTarget };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('fs:saveRomAs', async (_event, sourcePath) => {
+  try {
+    if (!sourcePath || !fs.existsSync(sourcePath)) {
+      return { ok: false, error: 'source ROM not found' };
+    }
+    const owner = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : undefined;
+    const suggestedName = path.basename(sourcePath);
+    const result = await dialog.showSaveDialog(owner, {
+      title: 'ビルド済み ROM を保存',
+      defaultPath: suggestedName,
+      filters: [
+        { name: 'Mega Drive ROM', extensions: ['bin', 'md', 'gen', 'smd', 'sms'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || !result.filePath) {
+      return { ok: false, canceled: true };
+    }
+    fs.copyFileSync(sourcePath, result.filePath);
+    return { ok: true, path: result.filePath };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 ipcMain.handle('api:startServer', async (_event, options) => {
   return startApiServer(options?.port ?? 8080);
 });
@@ -377,6 +442,42 @@ ipcMain.handle('debug:getWasmSnapshot', async (_event, options) => {
   } catch (error) {
     return { ok: false, error: String(error?.message || error) };
   }
+});
+
+ipcMain.handle('testplay:getSettings', async () => {
+  return setupManager.getTestPlaySettings();
+});
+
+ipcMain.handle('testplay:getDefaultSettings', async () => {
+  return setupManager.getDefaultTestPlaySettings();
+});
+
+ipcMain.handle('testplay:saveSettings', async (_event, settings) => {
+  const saved = setupManager.saveTestPlaySettings(settings || {});
+  broadcastTestPlaySettings(saved);
+  return saved;
+});
+
+ipcMain.handle('window:openTestPlaySettings', async () => {
+  if (testPlaySettingsWindow && !testPlaySettingsWindow.isDestroyed()) {
+    testPlaySettingsWindow.focus();
+    return { opened: true, reused: true };
+  }
+  testPlaySettingsWindow = new BrowserWindow({
+    width: 840,
+    height: 760,
+    title: 'Test Play Settings - MD Game Editor',
+    backgroundColor: '#0f1117',
+    webPreferences: {
+      preload: path.join(__dirname, 'testplay-settings-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  testPlaySettingsWindow.loadFile(path.join(__dirname, 'renderer', 'testplay-settings.html'));
+  testPlaySettingsWindow.on('closed', () => { testPlaySettingsWindow = null; });
+  return { opened: true, reused: false };
 });
 
 // ---- Setup window ----
