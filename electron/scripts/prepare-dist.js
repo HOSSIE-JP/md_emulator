@@ -55,8 +55,15 @@ function prepareMdApiBinary() {
   console.log(`Prepared md-api binary: ${destBin}`);
 }
 
+function injectBuildMeta() {
+  runOrThrow(process.execPath, [path.join(electronRoot, 'scripts', 'inject-build-meta.js')], {
+    cwd: electronRoot,
+  });
+}
+
 function main() {
   console.log('=== Prepare Electron Distribution Assets ===');
+  injectBuildMeta();
   prepareFrontendAssets();
   prepareMdApiBinary();
   console.log('=== Prepare completed ===');

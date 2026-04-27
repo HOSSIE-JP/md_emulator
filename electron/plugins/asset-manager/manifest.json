@@ -1,0 +1,14 @@
+{
+  "id": "asset-manager",
+  "name": "Rescomp アセット管理",
+  "description": "Rescomp アセットの一覧/編集/登録を行う標準エディタプラグインです。",
+  "version": "1.0.0",
+  "types": ["editor", "asset"],
+  "dependencies": ["image-resize-converter", "image-quantize-converter"],
+  "tab": {
+    "label": "Assets",
+    "icon": "assets",
+    "page": "assets",
+    "order": 10
+  }
+}

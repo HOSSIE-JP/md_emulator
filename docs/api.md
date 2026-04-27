@@ -5,6 +5,60 @@
 
 ベースURL: `http://127.0.0.1:8080`
 
+## Electron Desktop IPC (Plugin Runtime v2, draft)
+
+この章は Electron デスクトップ版 (`electron/main.js` と `electron/preload.js`) の IPC API を示します。
+Renderer からは `window.electronAPI` 経由で呼び出します。
+
+### Build / Plugin 設定
+
+- `getBuilderPlugin()`
+  - 戻り値: `{ id: string | null }`
+- `setBuilderPlugin(id)`
+  - 単一選択のビルドプラグインを設定
+- `getEmulatorPlugin()`
+  - 戻り値: `{ id: string | null }`
+- `setEmulatorPlugin(id)`
+  - Test Play フック用エミュレータープラグインを設定
+- `getLoggerPlugins()`
+  - 戻り値: `{ ids: string[] }`
+- `setLoggerPlugins(ids)`
+  - 複数選択のロガープラグインを設定
+
+### Plugin 管理
+
+- `listPlugins()`
+  - 戻り値（要素）:
+    - `id`, `name`, `description`, `version`
+    - `pluginType` (先頭タイプ)
+    - `pluginTypes` (複数タイプ)
+    - `hooks` (サポート hook 名配列)
+    - `hasGenerator`, `enabled`
+- `setPluginEnabled(id, enabled)`
+- `runPluginGenerator(id)`
+  - `generateSource` / `generateSourceAsync` を呼び出し、`src/main.c` 更新に利用
+
+### Logger イベント
+
+- `onPluginLog(callback)`
+  - payload: `{ pluginId, source, level, text }`
+
+### Code Editor 用 src 限定 FS API
+
+以下は安全のためプロジェクトの `src/` 配下のみアクセス可能です。
+
+- `getCodeRoot()`
+  - 戻り値: `{ ok, root }`
+- `listCodeTree({ path })`
+  - 戻り値: `{ ok, root, path, entries }`
+  - `entries` は再帰ツリー (`type: directory|file`, `name`, `path`, `children?`)
+- `readCodeFile({ path })`
+  - 戻り値: `{ ok, content }`
+- `writeCodeFile({ path, content })`
+- `createCodeEntry({ path, type, content? })`
+  - `type`: `file` または `directory`
+- `deleteCodeEntry({ path })`
+
 ## REST エンドポイント
 
 ### GET /api/v1/health

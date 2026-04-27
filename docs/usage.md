@@ -235,6 +235,38 @@ cd electron
 npm install
 ```
 
+### Plugin Runtime v2 (開始段階)
+
+Electron 版には Plugin Runtime v2 の土台が入りました。
+
+- Build プラグイン: 単一選択 (`builderPlugin`)
+- Emulator プラグイン: Test Play フック (`emulatorPlugin`)
+- Logger プラグイン: 複数選択 (`loggerPlugins`)
+- Editor プラグイン: サイドタブ登録向けのタイプ定義
+
+`project.json` に保存される主要キー:
+
+- `builderPlugin`
+- `emulatorPlugin`
+- `loggerPlugins`
+
+### 標準 Code Editor プラグイン（準備）
+
+標準プラグイン `code-editor` を追加済みです。
+この段階では UI 統合前ですが、以下の安全 API で `src/` 配下編集が可能です。
+
+- `getCodeRoot`
+- `listCodeTree`
+- `readCodeFile`
+- `writeCodeFile`
+- `createCodeEntry`
+- `deleteCodeEntry`
+
+制約:
+
+- アクセス対象は常にプロジェクト `src/` 配下のみ
+- `src/` ルート自体の削除は不可
+
 ### 開発起動
 
 ```bash

@@ -1,13 +1,14 @@
 {
   "name": "md-game-editor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Electron shell for md_game_editor",
   "main": "main.js",
   "scripts": {
     "copy-pkg": "node scripts/copy-pkg.js",
+    "inject-build-meta": "node scripts/inject-build-meta.js",
     "prepare:dist": "node scripts/prepare-dist.js",
-    "start": "npm run copy-pkg && electron .",
+    "start": "npm run inject-build-meta && npm run copy-pkg && electron .",
     "dev": "npm run start",
     "build:mac": "npm run prepare:dist && electron-builder --mac",
     "build:win": "npm run prepare:dist && electron-builder --win zip",

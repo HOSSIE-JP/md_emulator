@@ -6,6 +6,20 @@ const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const { spawn } = require('child_process');
 const electronPackageJson = require('./package.json');
 
+// ── アプリビルドメタ読み込み ──────────────────────────────────────────────
+// npm start / prepare:dist 時に scripts/inject-build-meta.js が生成する。
+function readAppBuildMeta() {
+  const metaPath = path.join(__dirname, 'build-meta.json');
+  try {
+    if (fs.existsSync(metaPath)) {
+      return JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+    }
+  } catch (_) {}
+  return { buildNumber: 'dev', buildAt: null };
+}
+
+const appBuildMeta = readAppBuildMeta();
+
 // ── Portable mode detection ────────────────────────────────────────────────
 // Must run before any app.getPath() call (including those inside require'd modules).
 // Packaged: place a file named "portable" next to the .exe / .app to activate.
@@ -176,6 +190,93 @@ function broadcastTestPlaySettings(settings) {
     if (win && !win.isDestroyed()) {
       win.webContents.send('testplay:settings-changed', settings);
     }
+  });
+}
+
+function collectProjectAssets(projectDir) {
+  let allAssets = [];
+  try {
+    const defs = rescompManager.listResDefinitions(projectDir);
+    (defs.files || []).forEach((f) => {
+      (f.entries || []).forEach((e) => allAssets.push(e));
+    });
+  } catch (_) {}
+  return allAssets;
+}
+
+function createPluginLogger(pluginId) {
+  const emit = (level, message) => {
+    const payload = {
+      pluginId,
+      source: `plugin:${pluginId}`,
+      level: level || 'info',
+      text: String(message || ''),
+    };
+    sendToRenderer('plugin-log', payload);
+    sendToRenderer('build-log', {
+      text: `[${pluginId}] ${payload.text}`,
+      level: payload.level,
+    });
+  };
+
+  return {
+    info: (message) => emit('info', message),
+    warn: (message) => emit('warn', message),
+    error: (message) => emit('error', message),
+    debug: (message) => emit('debug', message),
+    log: (message) => emit('info', message),
+  };
+}
+
+async function invokePluginHookSafe(pluginId, hookName, payload, context = {}) {
+  if (!pluginId) return { ok: true, skipped: true };
+  const result = await pluginManager.invokeHook(pluginId, hookName, payload, context);
+  if (!result.ok) {
+    const msg = `[Plugin:${pluginId}] hook ${hookName} failed: ${result.error || 'unknown error'}`;
+    sendToRenderer('build-log', { text: msg, level: 'error' });
+  }
+  return result;
+}
+
+function getProjectSrcRoot() {
+  return path.join(buildSystem.getProjectDir(), 'src');
+}
+
+function resolveUnderSrc(relativePath = '') {
+  const srcRoot = path.resolve(getProjectSrcRoot());
+  const cleaned = String(relativePath || '').replace(/^[/\\]+/, '');
+  const absPath = path.resolve(srcRoot, cleaned);
+  if (absPath !== srcRoot && !absPath.startsWith(`${srcRoot}${path.sep}`)) {
+    throw new Error(`src 配下のみアクセス可能です: ${relativePath}`);
+  }
+  return { srcRoot, absPath };
+}
+
+function readSrcTree(absDir, srcRoot) {
+  const entries = fs.readdirSync(absDir, { withFileTypes: true })
+    .sort((a, b) => {
+      if (a.isDirectory() && !b.isDirectory()) return -1;
+      if (!a.isDirectory() && b.isDirectory()) return 1;
+      return a.name.localeCompare(b.name, 'ja');
+    });
+
+  return entries.map((entry) => {
+    const fullPath = path.join(absDir, entry.name);
+    const relPath = path.relative(srcRoot, fullPath).replace(/\\/g, '/');
+    if (entry.isDirectory()) {
+      return {
+        type: 'directory',
+        name: entry.name,
+        path: relPath,
+        children: readSrcTree(fullPath, srcRoot),
+      };
+    }
+    return {
+      type: 'file',
+      name: entry.name,
+      path: relPath,
+      size: fs.statSync(fullPath).size,
+    };
   });
 }
 
@@ -446,6 +547,99 @@ ipcMain.handle('fs:saveRomAs', async (_event, sourcePath) => {
   }
 });
 
+ipcMain.handle('codefs:getRoot', async () => {
+  try {
+    const srcRoot = getProjectSrcRoot();
+    fs.mkdirSync(srcRoot, { recursive: true });
+    return { ok: true, root: srcRoot };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('codefs:list', async (_event, payload) => {
+  try {
+    const { srcRoot, absPath } = resolveUnderSrc(payload?.path || '');
+    if (!fs.existsSync(absPath)) {
+      return { ok: false, error: `path not found: ${payload?.path || ''}` };
+    }
+    const stat = fs.statSync(absPath);
+    if (!stat.isDirectory()) {
+      return { ok: false, error: 'directory path is required' };
+    }
+    return {
+      ok: true,
+      root: srcRoot,
+      path: path.relative(srcRoot, absPath).replace(/\\/g, '/'),
+      entries: readSrcTree(absPath, srcRoot),
+    };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('codefs:read', async (_event, payload) => {
+  try {
+    const { absPath } = resolveUnderSrc(payload?.path || '');
+    if (!fs.existsSync(absPath)) {
+      return { ok: false, error: `file not found: ${payload?.path || ''}` };
+    }
+    if (!fs.statSync(absPath).isFile()) {
+      return { ok: false, error: 'file path is required' };
+    }
+    return { ok: true, content: fs.readFileSync(absPath, 'utf-8') };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('codefs:write', async (_event, payload) => {
+  try {
+    const { absPath } = resolveUnderSrc(payload?.path || '');
+    fs.mkdirSync(path.dirname(absPath), { recursive: true });
+    fs.writeFileSync(absPath, String(payload?.content ?? ''), 'utf-8');
+    return { ok: true, path: payload?.path || '' };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('codefs:create', async (_event, payload) => {
+  try {
+    const targetType = String(payload?.type || 'file');
+    const { absPath } = resolveUnderSrc(payload?.path || '');
+    if (fs.existsSync(absPath)) {
+      return { ok: false, error: `already exists: ${payload?.path || ''}` };
+    }
+
+    if (targetType === 'directory') {
+      fs.mkdirSync(absPath, { recursive: true });
+    } else {
+      fs.mkdirSync(path.dirname(absPath), { recursive: true });
+      fs.writeFileSync(absPath, String(payload?.content ?? ''), 'utf-8');
+    }
+    return { ok: true, path: payload?.path || '', type: targetType };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('codefs:delete', async (_event, payload) => {
+  try {
+    const { absPath, srcRoot } = resolveUnderSrc(payload?.path || '');
+    if (absPath === srcRoot) {
+      return { ok: false, error: 'src root は削除できません' };
+    }
+    if (!fs.existsSync(absPath)) {
+      return { ok: false, error: `not found: ${payload?.path || ''}` };
+    }
+    fs.rmSync(absPath, { recursive: true, force: true });
+    return { ok: true, path: payload?.path || '' };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 ipcMain.handle('res:listDefinitions', async () => {
   try {
     const projectDir = buildSystem.getProjectDir();
@@ -621,22 +815,31 @@ ipcMain.handle('plugins:list', () => {
 });
 
 ipcMain.handle('plugins:setEnabled', (_event, { id, enabled }) => {
-  pluginManager.setEnabled(id, Boolean(enabled));
-  return { ok: true };
+  const result = pluginManager.setEnabledWithDependencies(id, Boolean(enabled));
+  if (!result?.ok) {
+    return { ok: false, error: result?.error || 'plugin enable failed' };
+  }
+  return result;
+});
+
+ipcMain.handle('plugins:openFolder', async () => {
+  const pluginsDir = path.join(__dirname, 'plugins');
+  try {
+    if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir, { recursive: true });
+    const error = await shell.openPath(pluginsDir);
+    return error ? { ok: false, error } : { ok: true, path: pluginsDir };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
 });
 
 ipcMain.handle('plugins:runGenerator', async (_event, { id }) => {
   const projectDir = buildSystem.getProjectDir();
-  // 現在のプロジェクトの全アセットを収集
-  let allAssets = [];
-  try {
-    const defs = rescompManager.listResDefinitions(projectDir);
-    (defs.files || []).forEach((f) => {
-      (f.entries || []).forEach((e) => allAssets.push(e));
-    });
-  } catch (_) {}
-
-  const genResult = pluginManager.runGenerator(id, allAssets);
+  const allAssets = collectProjectAssets(projectDir);
+  const genResult = await pluginManager.runGenerator(id, allAssets, {
+    projectDir,
+    logger: createPluginLogger(id),
+  });
   if (!genResult.ok) return genResult;
 
   // src/main.c に書き込む
@@ -751,6 +954,54 @@ ipcMain.handle('setup:setMarsdevPath', async (_event, p) => {
 
 // ---- Test play window ----
 ipcMain.handle('window:openTestPlay', async (_event, romPath) => {
+  let emulatorPluginId = buildSystem.getEmulatorPlugin();
+  if (!emulatorPluginId) {
+    const fallback = pluginManager.listPlugins().find(
+      (p) => p.enabled && Array.isArray(p.pluginTypes) && p.pluginTypes.includes('emulator'),
+    );
+    if (fallback) {
+      emulatorPluginId = fallback.id;
+      try { buildSystem.setEmulatorPlugin(emulatorPluginId); } catch (_) {}
+    }
+  }
+  if (!emulatorPluginId) {
+    return { opened: false, error: '有効な Emulator プラグインが未設定です' };
+  }
+  if (!pluginManager.isPluginEnabled(emulatorPluginId)) {
+    return { opened: false, error: `Emulator プラグイン "${emulatorPluginId}" は無効です` };
+  }
+  const emulatorMeta = pluginManager.listPlugins().find((p) => p.id === emulatorPluginId);
+  const isEmulatorType = Boolean(
+    emulatorMeta
+    && Array.isArray(emulatorMeta.pluginTypes)
+    && emulatorMeta.pluginTypes.includes('emulator'),
+  );
+  if (!isEmulatorType) {
+    return { opened: false, error: `Emulator プラグイン "${emulatorPluginId}" は emulator タイプではありません` };
+  }
+
+  if (emulatorPluginId) {
+    const hookResult = await invokePluginHookSafe(
+      emulatorPluginId,
+      'onTestPlay',
+      {
+        romPath: romPath || null,
+        projectDir: buildSystem.getProjectDir(),
+      },
+      {
+        projectDir: buildSystem.getProjectDir(),
+        logger: createPluginLogger(emulatorPluginId),
+      }
+    );
+
+    if (hookResult.ok && hookResult.result && hookResult.result.handled) {
+      return { opened: true, reused: false, handledByPlugin: emulatorPluginId };
+    }
+    if (!hookResult.ok) {
+      return { opened: false, error: hookResult.error || 'Emulator フック実行に失敗しました' };
+    }
+  }
+
   if (testPlayWindow && !testPlayWindow.isDestroyed()) {
     testPlayWindow.focus();
     return { opened: true, reused: true };
@@ -798,12 +1049,83 @@ ipcMain.handle('build:run', async () => {
   try {
     const toolchainPath = setupManager.getToolchainDir();
     const javaPath = setupManager.getJavaExePath();
+    const projectDir = buildSystem.getProjectDir();
+    let builderPluginId = buildSystem.getBuilderPlugin();
     if (!toolchainPath) {
       return { success: false, error: 'ツールチェーンが設定されていません。Setup を実行してください。' };
     }
+    // project.json に未保存の場合、有効な build プラグインをフォールバック検索
+    if (!builderPluginId) {
+      const fallback = pluginManager.listPlugins().find(
+        (p) => p.enabled && Array.isArray(p.pluginTypes) && p.pluginTypes.includes('build'),
+      );
+      if (fallback) {
+        builderPluginId = fallback.id;
+        try { buildSystem.setBuilderPlugin(builderPluginId); } catch (_) {}
+      }
+    }
+    if (!builderPluginId) {
+      return { success: false, error: '有効な Build プラグインが未設定です。Plugins 画面で有効化してください。' };
+    }
+    if (!pluginManager.isPluginEnabled(builderPluginId)) {
+      return { success: false, error: `Build プラグイン "${builderPluginId}" は無効です` };
+    }
+    const builderMeta = pluginManager.listPlugins().find((p) => p.id === builderPluginId);
+    const builderIsBuild = Boolean(
+      builderMeta
+      && Array.isArray(builderMeta.pluginTypes)
+      && builderMeta.pluginTypes.includes('build'),
+    );
+    if (!builderIsBuild) {
+      return { success: false, error: `Build プラグイン "${builderPluginId}" は build タイプではありません` };
+    }
+
+    const pluginContext = {
+      projectDir,
+      assets: collectProjectAssets(projectDir),
+    };
+
+    if (builderPluginId) {
+      await invokePluginHookSafe(builderPluginId, 'onBuildStart', {
+        projectDir,
+        toolchainPath,
+      }, {
+        ...pluginContext,
+        logger: createPluginLogger(builderPluginId),
+      });
+    }
+
     const result = await buildSystem.buildProject(toolchainPath, javaPath, (line, level) => {
       sendToRenderer('build-log', { text: line, level: level || 'info' });
+
+      if (builderPluginId) {
+        void pluginManager.invokeHook(builderPluginId, 'onBuildLog', {
+          line,
+          level: level || 'info',
+        }, {
+          ...pluginContext,
+          logger: createPluginLogger(builderPluginId),
+        }).catch(() => {});
+      }
     });
+
+    if (builderPluginId) {
+      if (result.success) {
+        await invokePluginHookSafe(builderPluginId, 'onBuildEnd', result, {
+          ...pluginContext,
+          logger: createPluginLogger(builderPluginId),
+        });
+      } else {
+        await invokePluginHookSafe(builderPluginId, 'onBuildError', {
+          error: result.error || 'build failed',
+          result,
+        }, {
+          ...pluginContext,
+          logger: createPluginLogger(builderPluginId),
+        });
+      }
+    }
+
     sendToRenderer('build-end', result);
     return result;
   } catch (err) {
@@ -830,6 +1152,15 @@ ipcMain.handle('build:setBuilderPlugin', async (_event, { id }) => {
   return { ok: true };
 });
 
+ipcMain.handle('build:getEmulatorPlugin', async () => {
+  return { id: buildSystem.getEmulatorPlugin() };
+});
+
+ipcMain.handle('build:setEmulatorPlugin', async (_event, { id }) => {
+  buildSystem.setEmulatorPlugin(id || null);
+  return { ok: true };
+});
+
 ipcMain.handle('build:getCurrentSource', async () => {
   return buildSystem.loadCurrentSource();
 });
@@ -844,6 +1175,8 @@ ipcMain.handle('app:getInfo', async () => {
   return {
     appName: app.getName(),
     appVersion: app.getVersion(),
+    buildNumber: appBuildMeta.buildNumber,
+    buildAt: appBuildMeta.buildAt,
     appDescription: electronPackageJson.description || '',
     appPath: app.getAppPath(),
     platform: process.platform,

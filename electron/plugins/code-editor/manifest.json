@@ -1,0 +1,16 @@
+{
+  "id": "code-editor",
+  "name": "コードエディタ",
+  "description": "src 配下のファイルをツリー表示して編集・新規作成・削除できる標準エディタプラグインです。",
+  "version": "0.1.0",
+  "types": ["editor"],
+  "hooks": [
+    "getTab",
+    "onActivate",
+    "onDeactivate"
+  ],
+  "tab": {
+    "label": "コード",
+    "icon": "code"
+  }
+}

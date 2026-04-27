@@ -3,6 +3,7 @@ dist/
 data/
 out/
 *.log
+build-meta.json
 pkg/md_wasm.js
 pkg/md_wasm_bg.wasm
 pkg/md_wasm.d.ts

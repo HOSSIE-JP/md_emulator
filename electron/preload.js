@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   runBuild: () => ipcRenderer.invoke('build:run'),
   getBuilderPlugin: () => ipcRenderer.invoke('build:getBuilderPlugin'),
   setBuilderPlugin: (id) => ipcRenderer.invoke('build:setBuilderPlugin', { id }),
+  getEmulatorPlugin: () => ipcRenderer.invoke('build:getEmulatorPlugin'),
+  setEmulatorPlugin: (id) => ipcRenderer.invoke('build:setEmulatorPlugin', { id }),
   getRomPath: () => ipcRenderer.invoke('build:getRomPath'),
   getAppInfo: () => ipcRenderer.invoke('app:getInfo'),
   openPathInExplorer: (targetPath, options) => ipcRenderer.invoke('fs:openPathInExplorer', targetPath, options || {}),
@@ -37,6 +39,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onBuildEnd: (callback) => {
     ipcRenderer.on('build-end', (_event, payload) => callback(payload));
+  },
+  onPluginLog: (callback) => {
+    ipcRenderer.on('plugin-log', (_event, payload) => callback(payload));
   },
   onMenuOpenSetup: (callback) => {
     ipcRenderer.on('menu:openSetup', (_event) => callback());
@@ -58,8 +63,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listProjects: () => ipcRenderer.invoke('project:list'),
   openExistingProject: (payload) => ipcRenderer.invoke('project:openExisting', payload),
   createNewProject: (payload) => ipcRenderer.invoke('project:createNew', payload),
+  // --- コードエディタ向け (src 配下のみ) ---
+  getCodeRoot: () => ipcRenderer.invoke('codefs:getRoot'),
+  listCodeTree: (payload) => ipcRenderer.invoke('codefs:list', payload),
+  readCodeFile: (payload) => ipcRenderer.invoke('codefs:read', payload),
+  writeCodeFile: (payload) => ipcRenderer.invoke('codefs:write', payload),
+  createCodeEntry: (payload) => ipcRenderer.invoke('codefs:create', payload),
+  deleteCodeEntry: (payload) => ipcRenderer.invoke('codefs:delete', payload),
   // --- プラグイン ---
   listPlugins: () => ipcRenderer.invoke('plugins:list'),
   setPluginEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', { id, enabled }),
   runPluginGenerator: (id) => ipcRenderer.invoke('plugins:runGenerator', { id }),
+  openPluginsFolder: () => ipcRenderer.invoke('plugins:openFolder'),
 });

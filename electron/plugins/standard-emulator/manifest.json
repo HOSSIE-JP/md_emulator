@@ -1,0 +1,8 @@
+{
+  "id": "standard-emulator",
+  "name": "標準エミュレーター（WASM）",
+  "description": "WASM ベースの標準 Mega Drive エミュレーターです。Test Play ボタン実行時に使用されます。",
+  "version": "1.0.0",
+  "types": ["emulator"],
+  "hooks": ["onTestPlay"]
+}

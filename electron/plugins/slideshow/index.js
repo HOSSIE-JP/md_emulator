@@ -155,4 +155,33 @@ int main(void)
   return { ok: true, sourceCode };
 }
 
-module.exports = { manifest, generateSource };
+function onBuildStart(payload, context = {}) {
+  context?.logger?.info(`build start: project=${payload?.projectDir || '-'}`);
+  return { ok: true };
+}
+
+function onBuildLog(payload, context = {}) {
+  if (payload?.level === 'error') {
+    context?.logger?.error(payload?.line || '');
+  }
+  return { ok: true };
+}
+
+function onBuildEnd(payload, context = {}) {
+  context?.logger?.info(`build end: success=${Boolean(payload?.success)}`);
+  return { ok: true };
+}
+
+function onBuildError(payload, context = {}) {
+  context?.logger?.error(`build error: ${payload?.error || 'unknown'}`);
+  return { ok: true };
+}
+
+module.exports = {
+  manifest,
+  generateSource,
+  onBuildStart,
+  onBuildLog,
+  onBuildEnd,
+  onBuildError,
+};

@@ -42,6 +42,22 @@ const state = {
     pendingImageSource: null,
     pendingAssetPick: null,
   },
+  code: {
+    tree: [],
+    selectedPath: 'main.c',
+    selectedIsDirectory: false,
+    dirty: false,
+  },
+  logs: {
+    entries: [],
+    sourceVisibility: { build: true },
+    levelFilter: 'all',
+    searchText: '',
+  },
+  pluginFilters: {
+    searchText: '',
+    type: 'all',
+  },
 };
 
 const TYPE_OPTIONS = ['PALETTE', 'IMAGE', 'BITMAP', 'SPRITE', 'XGM', 'XGM2', 'WAV', 'MAP', 'TILEMAP', 'TILESET'];
@@ -168,7 +184,16 @@ const quantizeState = {
   originalCanvas: null,
   originalCtx: null,
   originalData: null,
+  sourcePath: '',
   convertedDataUrl: '',
+  referencePalette: null,
+  referencePalettePath: '',
+  referenceDataUrl: '',
+  referenceImageWidth: 0,
+  referenceImageHeight: 0,
+  referencePaletteError: '',
+  lastReferenceLogToken: '',
+  referencePaletteLabel: '',
   onApply: null,
 };
 
@@ -190,14 +215,33 @@ const el = {
   btnCopyLog: $('btnCopyLog'),
   btnToggleLog: $('btnToggleLog'),
   btnClearLog: $('btnClearLog'),
+  logLevelFilter: $('logLevelFilter'),
+  logSearchInput: $('logSearchInput'),
+  logSourceFilters: $('logSourceFilters'),
   buildLogHeader: $('buildLogHeader'),
   buildLogResizer: $('buildLogResizer'),
+  sidebar: document.querySelector('.sidebar'),
+  sidebarPluginTabs: $('sidebarPluginTabs'),
   mainLayout: document.querySelector('.main-layout'),
+  pageAssets: $('page-assets'),
+  pageCode: $('page-code'),
   codeEditor: $('codeEditor'),
+  codeFileName: $('codeFileName'),
+  codeTree: $('codeTree'),
   codeStatus: $('codeStatus'),
-  btnGenSample: $('btnGenSample'),
+  codeLineNumbers: $('codeLineNumbers'),
+  codeHighlight: $('codeHighlight'),
+  codeScroller: $('codeScroller'),
+  codeNewEntryRow: $('codeNewEntryRow'),
+  codeNewEntryInput: $('codeNewEntryInput'),
+  btnCodeNewEntryConfirm: $('btnCodeNewEntryConfirm'),
+  btnCodeNewEntryCancel: $('btnCodeNewEntryCancel'),
+  btnCodeNewFile: $('btnCodeNewFile'),
+  btnCodeNewFolder: $('btnCodeNewFolder'),
+  btnCodeDelete: $('btnCodeDelete'),
   btnSaveCode: $('btnSaveCode'),
   btnCopyCode: $('btnCopyCode'),
+  btnOpenSrcFolder: $('btnOpenSrcFolder'),
   settingTitle: $('settingTitle'),
   settingAuthor: $('settingAuthor'),
   settingSerial: $('settingSerial'),
@@ -214,6 +258,13 @@ const el = {
   settingsSavedMsg: $('settingsSavedMsg'),
   pluginList: $('pluginList'),
   btnReloadPlugins: $('btnReloadPlugins'),
+  btnOpenPluginsFolder: $('btnOpenPluginsFolder'),
+  pluginBuilderSelect: $('pluginBuilderSelect'),
+  pluginEmulatorSelect: $('pluginEmulatorSelect'),
+  pluginSearchInput: $('pluginSearchInput'),
+  pluginTypeFilter: $('pluginTypeFilter'),
+  pluginRoleStatus: $('pluginRoleStatus'),
+
   aboutModal: $('aboutModal'),
   aboutBackdrop: $('aboutBackdrop'),
   btnAboutClose: $('btnAboutClose'),
@@ -290,6 +341,8 @@ const el = {
   audioTime: $('audioTime'),
   inlineNoPreview: $('inlineNoPreview'),
   assetCommentInput: $('assetCommentInput'),
+  assetResizeTargetWidth: $('assetResizeTargetWidth'),
+  assetResizeTargetHeight: $('assetResizeTargetHeight'),
   resizeModal: $('resizeModal'),
   btnResizeModalClose: $('btnResizeModalClose'),
   resizeMode: $('resizeMode'),
@@ -318,6 +371,12 @@ const el = {
   quantizeDitheringWeight: $('quantizeDitheringWeight'),
   quantizeWeightLabel: $('quantizeWeightLabel'),
   quantizePattern: $('quantizePattern'),
+  quantizePaletteAsset: $('quantizePaletteAsset'),
+  quantizePaletteHint: $('quantizePaletteHint'),
+  quantizeReferencePreview: $('quantizeReferencePreview'),
+  quantizeReferenceThumb: $('quantizeReferenceThumb'),
+  quantizeReferenceSize: $('quantizeReferenceSize'),
+  quantizeReferencePalette: $('quantizeReferencePalette'),
   quantizeBeforeCanvas: $('quantizeBeforeCanvas'),
   quantizeAfterCanvas: $('quantizeAfterCanvas'),
   quantizeStats: $('quantizeStats'),
@@ -331,21 +390,124 @@ const SERIAL_RE = /^[A-Z]{2}\s[0-9A-Z]{8}-[0-9A-Z]{2}$/;
 
 // ============================================================ BUILD LOG ===
 
-function appendBuildLog(text, level = 'info') {
-  const pre = el.buildLog;
-  if (!pre) return;
-  if (level === 'error') {
-    pre.textContent += text + '\n';
-  } else {
-    pre.textContent += text + '\n';
+function logLevelRank(level) {
+  switch (level) {
+    case 'debug': return 10;
+    case 'info': return 20;
+    case 'warn': return 30;
+    case 'error': return 40;
+    default: return 20;
   }
-  pre.scrollTop = pre.scrollHeight;
+}
+
+function ensureLogSourceVisible(source) {
+  if (!Object.prototype.hasOwnProperty.call(state.logs.sourceVisibility, source)) {
+    state.logs.sourceVisibility[source] = true;
+  }
+}
+
+function isEntryVisible(entry) {
+  if (!entry) return false;
+  if (!state.logs.sourceVisibility[entry.source]) return false;
+  const minLevel = state.logs.levelFilter || 'all';
+  const levelLimit = minLevel === 'all' ? -Infinity : logLevelRank(minLevel);
+  if (levelLimit !== -Infinity && logLevelRank(entry.level) < levelLimit) return false;
+  const search = (state.logs.searchText || '').trim().toLowerCase();
+  if (search) {
+    const hay = `${entry.source} ${entry.level} ${entry.text}`.toLowerCase();
+    if (!hay.includes(search)) return false;
+  }
+  return true;
+}
+
+function createLogLineElement(entry) {
+  const line = document.createElement('div');
+  line.className = `log-line log-level-${entry.level}`;
+
+  const t = new Date(entry.timestamp);
+  const hh = String(t.getHours()).padStart(2, '0');
+  const mm = String(t.getMinutes()).padStart(2, '0');
+  const ss = String(t.getSeconds()).padStart(2, '0');
+
+  const safeSource = String(entry.source || 'app');
+  const srcClass = safeSource.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+  line.innerHTML = `
+    <span class="log-time">${hh}:${mm}:${ss}</span>
+    <span class="log-src log-src-${srcClass}">${escHtml(safeSource)}</span>
+    <span class="log-text">${escHtml(entry.text)}</span>
+  `;
+  return line;
+}
+
+function appendLog(source, text, level = 'info') {
+  const safeSource = String(source || 'app');
+  const isNewSource = !Object.prototype.hasOwnProperty.call(state.logs.sourceVisibility, safeSource);
+  ensureLogSourceVisible(safeSource);
+  const entry = {
+    source: safeSource,
+    text: String(text || ''),
+    level: String(level || 'info'),
+    timestamp: Date.now(),
+  };
+  state.logs.entries.push(entry);
+
+  if (state.logs.entries.length > 4000) {
+    state.logs.entries.splice(0, state.logs.entries.length - 4000);
+    renderLogPanel();
+    return;
+  }
+
+  if (isNewSource) {
+    renderLogSourceFilters();
+  }
+
+  const container = el.buildLog;
+  if (!container || !isEntryVisible(entry)) return;
+  container.appendChild(createLogLineElement(entry));
+  container.scrollTop = container.scrollHeight;
+}
+
+function appendBuildLog(text, level = 'info') {
+  appendLog('build', text, level);
+}
+
+function getVisibleLogEntries() {
+  return state.logs.entries.filter((entry) => isEntryVisible(entry));
+}
+
+function renderLogSourceFilters() {
+  if (!el.logSourceFilters) return;
+  const sources = Object.keys(state.logs.sourceVisibility).sort((a, b) => a.localeCompare(b, 'ja'));
+  el.logSourceFilters.innerHTML = '';
+  sources.forEach((source) => {
+    const chip = document.createElement('label');
+    chip.className = 'log-source-chip';
+    chip.innerHTML = `
+      <input type="checkbox" ${state.logs.sourceVisibility[source] ? 'checked' : ''} />
+      <span>${escHtml(source)}</span>
+    `;
+    chip.querySelector('input')?.addEventListener('change', (event) => {
+      state.logs.sourceVisibility[source] = Boolean(event.target.checked);
+      renderLogPanel();
+    });
+    el.logSourceFilters.appendChild(chip);
+  });
+}
+
+function renderLogPanel() {
+  const container = el.buildLog;
+  if (!container) return;
+  renderLogSourceFilters();
+  container.innerHTML = '';
+  getVisibleLogEntries().forEach((entry) => {
+    container.appendChild(createLogLineElement(entry));
+  });
+  container.scrollTop = container.scrollHeight;
 }
 
 function clearBuildLog() {
-  if (el.buildLog) {
-    el.buildLog.textContent = '';
-  }
+  state.logs.entries = [];
+  renderLogPanel();
 }
 
 function updateRomOutputActions() {
@@ -357,7 +519,15 @@ function updateRomOutputActions() {
 }
 
 async function copyBuildLog() {
-  const text = el.buildLog?.textContent || '';
+  const text = getVisibleLogEntries()
+    .map((entry) => {
+      const t = new Date(entry.timestamp);
+      const hh = String(t.getHours()).padStart(2, '0');
+      const mm = String(t.getMinutes()).padStart(2, '0');
+      const ss = String(t.getSeconds()).padStart(2, '0');
+      return `${hh}:${mm}:${ss} [${entry.source}] ${entry.text}`;
+    })
+    .join('\n');
   if (!text.trim()) {
     return;
   }
@@ -413,7 +583,158 @@ const pluginState = {
   generating: {},
   /** 現在ビルダーとして使用中のプラグイン ID (null = コードエディタ使用) */
   activeBuilderPlugin: null,
+  /** 現在 Test Play 用に使用中のエミュレータープラグイン ID */
+  activeEmulatorPlugin: null,
 };
+
+const PLUGIN_NAV_PAGE_MAP = {
+  'asset-manager': 'assets',
+  'code-editor': 'code',
+};
+
+const PLUGIN_PAGE_BINDINGS = [
+  { pluginId: 'asset-manager', pageId: 'assets' },
+  { pluginId: 'code-editor', pageId: 'code' },
+];
+
+function pluginSupportsType(plugin, type) {
+  const kinds = Array.isArray(plugin?.pluginTypes) ? plugin.pluginTypes : [];
+  if (kinds.includes(type)) return true;
+  if (plugin?.pluginType === type) return true;
+  return false;
+}
+
+function getPluginsByType(type) {
+  return pluginState.plugins.filter((p) => pluginSupportsType(p, type));
+}
+
+function getEnabledPluginsByType(type) {
+  return pluginState.plugins.filter((p) => p.enabled && pluginSupportsType(p, type));
+}
+
+function getPluginById(id) {
+  return pluginState.plugins.find((p) => p.id === id) || null;
+}
+
+function isPluginFeatureEnabled(id) {
+  const plugin = getPluginById(id);
+  return plugin ? Boolean(plugin.enabled) : true;
+}
+
+function getFirstVisiblePageId() {
+  const candidates = ['assets', 'code', 'plugins', 'settings'];
+  return candidates.find((pageId) => {
+    const sec = document.getElementById(`page-${pageId}`);
+    return sec && !sec.hidden;
+  }) || 'plugins';
+}
+
+function resolvePluginPageId(plugin) {
+  const mapped = PLUGIN_NAV_PAGE_MAP[plugin?.id];
+  if (mapped && document.getElementById(`page-${mapped}`)) {
+    return mapped;
+  }
+  const fromTab = String(plugin?.tab?.page || '').trim();
+  if (fromTab && document.getElementById(`page-${fromTab}`)) {
+    return fromTab;
+  }
+  return null;
+}
+
+function resolvePluginIconId(iconName) {
+  const suffix = String(iconName || '').trim().toLowerCase();
+  const candidate = suffix ? `icon-${suffix}` : '';
+  if (candidate && document.getElementById(candidate)) {
+    return candidate;
+  }
+  return 'icon-puzzle';
+}
+
+function renderPluginSidebarTabs() {
+  if (!el.sidebarPluginTabs) return;
+  const tabs = pluginState.plugins
+    .filter((plugin) => plugin.enabled && plugin.tab)
+    .sort((a, b) => {
+      const orderA = Number(a?.tab?.order ?? 1000);
+      const orderB = Number(b?.tab?.order ?? 1000);
+      if (orderA !== orderB) return orderA - orderB;
+      return String(a?.name || a?.id || '').localeCompare(String(b?.name || b?.id || ''), 'ja');
+    })
+    .map((plugin) => {
+      const pageId = resolvePluginPageId(plugin);
+      if (!pageId) return null;
+      const label = String(plugin.tab?.label || plugin.name || plugin.id);
+      const iconId = resolvePluginIconId(plugin.tab?.icon);
+      return `
+        <button class="nav-btn nav-btn-plugin" data-page="${escHtml(pageId)}" data-plugin-id="${escHtml(plugin.id)}">
+          <svg class="icon"><use href="#${escHtml(iconId)}"></use></svg>
+          <span class="nav-label">${escHtml(label)}</span>
+        </button>
+      `;
+    })
+    .filter(Boolean);
+
+  el.sidebarPluginTabs.innerHTML = tabs.join('');
+}
+
+function applyPluginPageAvailability() {
+  PLUGIN_PAGE_BINDINGS.forEach(({ pluginId, pageId }) => {
+    const section = document.getElementById(`page-${pageId}`);
+    if (!section) return;
+    section.hidden = !isPluginFeatureEnabled(pluginId);
+  });
+
+  if (el.pageCode?.hidden) {
+    hideCodeNewEntryRow();
+  }
+
+  const currentSection = document.getElementById(`page-${state.currentPage}`);
+  if (!currentSection || currentSection.hidden) {
+    switchPage(getFirstVisiblePageId());
+  }
+}
+
+function applyBuildAvailability() {
+  const builderPlugin = pluginState.activeBuilderPlugin
+    ? getPluginById(pluginState.activeBuilderPlugin)
+    : null;
+  const enabled = Boolean(
+    builderPlugin
+    && builderPlugin.enabled
+    && pluginSupportsType(builderPlugin, 'build'),
+  );
+
+  if (el.btnBuild) {
+    el.btnBuild.disabled = !enabled;
+    el.btnBuild.title = enabled
+      ? ''
+      : '有効な Build プラグインが未設定です。Plugins 画面で有効化してください。';
+  }
+}
+
+function applyTestPlayAvailability() {
+  const emulatorPlugin = pluginState.activeEmulatorPlugin
+    ? getPluginById(pluginState.activeEmulatorPlugin)
+    : null;
+  const enabled = Boolean(
+    emulatorPlugin
+    && emulatorPlugin.enabled
+    && pluginSupportsType(emulatorPlugin, 'emulator'),
+  );
+
+  if (el.btnTestPlay) {
+    el.btnTestPlay.disabled = !enabled;
+    el.btnTestPlay.title = enabled
+      ? ''
+      : '有効な Emulator プラグインが未設定です。Plugins 画面で有効化してください。';
+  }
+}
+
+function setPluginRoleStatus(message, kind = '') {
+  if (!el.pluginRoleStatus) return;
+  el.pluginRoleStatus.textContent = message || '';
+  el.pluginRoleStatus.className = `plugin-role-status ${kind}`.trim();
+}
 
 async function setActiveBuilderPlugin(id) {
   pluginState.activeBuilderPlugin = id || null;
@@ -421,6 +742,21 @@ async function setActiveBuilderPlugin(id) {
     await window.electronAPI.setBuilderPlugin(id || null);
   } catch (_) {}
   updateBuildButtonLabel();
+  applyBuildAvailability();
+  renderPluginRoleSettings();
+  renderPluginList();
+}
+
+async function setActiveEmulatorPlugin(id) {
+  pluginState.activeEmulatorPlugin = id || null;
+  try {
+    await window.electronAPI.setEmulatorPlugin(id || null);
+    setPluginRoleStatus('✓ Emulator プラグイン設定を保存しました', 'ok');
+  } catch (err) {
+    setPluginRoleStatus(`✕ Emulator プラグイン保存失敗: ${err?.message || err}`, 'err');
+  }
+  applyTestPlayAvailability();
+  renderPluginRoleSettings();
   renderPluginList();
 }
 
@@ -440,6 +776,7 @@ function updateBuildButtonLabel() {
 async function loadPlugins() {
   if (!el.pluginList) return;
   el.pluginList.innerHTML = '<p class="hint-text">読み込み中...</p>';
+  setPluginRoleStatus('');
   try {
     pluginState.plugins = await window.electronAPI.listPlugins();
   } catch (_) {
@@ -454,45 +791,130 @@ async function loadPlugins() {
     pluginState.activeBuilderPlugin = null;
   }
 
+  try {
+    const saved = await window.electronAPI.getEmulatorPlugin();
+    pluginState.activeEmulatorPlugin = saved.id || null;
+  } catch (_) {
+    pluginState.activeEmulatorPlugin = null;
+  }
+
   // 未設定 & スライドショープラグインが有効なら自動でデフォルトに設定
   if (!pluginState.activeBuilderPlugin) {
-    const slideshow = pluginState.plugins.find(
-      (p) => p.id === 'slideshow' && p.enabled && p.hasGenerator,
+    const defaultBuild = pluginState.plugins.find(
+      (p) => p.enabled && pluginSupportsType(p, 'build'),
     );
-    if (slideshow) {
-      pluginState.activeBuilderPlugin = slideshow.id;
+    if (defaultBuild) {
+      pluginState.activeBuilderPlugin = defaultBuild.id;
       try {
-        await window.electronAPI.setBuilderPlugin(slideshow.id);
+        await window.electronAPI.setBuilderPlugin(defaultBuild.id);
       } catch (_) {}
     }
   }
 
+  // emulator 未設定時は標準エミュレーター（WASM）を既定にする
+  if (!pluginState.activeEmulatorPlugin) {
+    const defaultEmulator = pluginState.plugins.find(
+      (p) => p.enabled && pluginSupportsType(p, 'emulator'),
+    );
+    if (defaultEmulator) {
+      pluginState.activeEmulatorPlugin = defaultEmulator.id;
+      try {
+        await window.electronAPI.setEmulatorPlugin(defaultEmulator.id);
+      } catch (_) {}
+    }
+  }
+
+  // 非対応プラグインが設定されていた場合は解除
+  const buildIds = new Set(getEnabledPluginsByType('build').map((p) => p.id));
+  const emulatorIds = new Set(getEnabledPluginsByType('emulator').map((p) => p.id));
+
+  if (pluginState.activeBuilderPlugin && !buildIds.has(pluginState.activeBuilderPlugin)) {
+    pluginState.activeBuilderPlugin = null;
+    try { await window.electronAPI.setBuilderPlugin(null); } catch (_) {}
+  }
+  if (pluginState.activeEmulatorPlugin && !emulatorIds.has(pluginState.activeEmulatorPlugin)) {
+    pluginState.activeEmulatorPlugin = null;
+    try { await window.electronAPI.setEmulatorPlugin(null); } catch (_) {}
+  }
+
   updateBuildButtonLabel();
+  renderPluginSidebarTabs();
+  applyPluginPageAvailability();
+  switchPage(state.currentPage);
+  renderPluginRoleSettings();
   renderPluginList();
+  appendLog('app', `プラグインをスキャン: ${pluginState.plugins.length} 件`);
+  applyBuildAvailability();
+  applyTestPlayAvailability();
+}
+
+function renderPluginRoleSettings() {
+  const buildPlugins = getEnabledPluginsByType('build');
+  const emulatorPlugins = Array.from(new Map(
+    getEnabledPluginsByType('emulator').map((p) => [p.id, p]),
+  ).values());
+
+  if (el.pluginBuilderSelect) {
+    const options = ['<option value="">ビルドプラグインなし</option>'];
+    buildPlugins.forEach((p) => {
+      options.push(`<option value="${escHtml(p.id)}">${escHtml(p.name)}</option>`);
+    });
+    el.pluginBuilderSelect.innerHTML = options.join('');
+    el.pluginBuilderSelect.value = pluginState.activeBuilderPlugin || '';
+    el.pluginBuilderSelect.onchange = async () => {
+      const nextId = el.pluginBuilderSelect.value || null;
+      await setActiveBuilderPlugin(nextId);
+      setPluginRoleStatus('✓ Build プラグイン設定を保存しました', 'ok');
+    };
+  }
+
+  if (el.pluginEmulatorSelect) {
+    const options = ['<option value="">選択してください</option>'];
+    emulatorPlugins.forEach((p) => {
+      options.push(`<option value="${escHtml(p.id)}">${escHtml(p.name)}</option>`);
+    });
+    el.pluginEmulatorSelect.innerHTML = options.join('');
+    el.pluginEmulatorSelect.value = pluginState.activeEmulatorPlugin || '';
+    el.pluginEmulatorSelect.onchange = async () => {
+      const nextId = el.pluginEmulatorSelect.value || null;
+      await setActiveEmulatorPlugin(nextId);
+    };
+  }
 }
 
 function renderPluginList() {
   if (!el.pluginList) return;
+  const visiblePlugins = getFilteredPlugins();
   if (pluginState.plugins.length === 0) {
     el.pluginList.innerHTML = '<p class="hint-text">electron/plugins/ フォルダにプラグインが見つかりません。</p>';
     return;
   }
+  if (visiblePlugins.length === 0) {
+    el.pluginList.innerHTML = '<p class="hint-text">現在の検索条件に一致するプラグインがありません。</p>';
+    return;
+  }
 
   el.pluginList.innerHTML = '';
-  pluginState.plugins.forEach((plugin) => {
+  visiblePlugins.forEach((plugin) => {
     const isActiveBuilder = pluginState.activeBuilderPlugin === plugin.id;
+    const isActiveEmulator = pluginState.activeEmulatorPlugin === plugin.id;
     const card = document.createElement('div');
     card.className = `plugin-card${plugin.enabled ? '' : ' plugin-card-disabled'}${isActiveBuilder ? ' plugin-card-active-builder' : ''}`;
     card.dataset.id = plugin.id;
 
-    const isBusy = Boolean(pluginState.generating[plugin.id]);
+    const dependencies = Array.isArray(plugin.dependencies) ? plugin.dependencies : [];
+    const depText = dependencies.length > 0
+      ? `依存: ${dependencies.join(', ')}`
+      : '依存: なし';
 
     card.innerHTML = `
       <div class="plugin-card-header">
         <div class="plugin-card-meta">
           <span class="plugin-card-name">${escHtml(plugin.name)}</span>
           <span class="plugin-card-version">v${escHtml(plugin.version)}</span>
+          <span class="plugin-card-types">${escHtml((plugin.pluginTypes || []).join(', ') || 'unknown')}</span>
           ${isActiveBuilder ? '<span class="plugin-builder-badge">🔨 ビルダー</span>' : ''}
+          ${isActiveEmulator ? '<span class="plugin-builder-badge">🕹 Emulator</span>' : ''}
         </div>
         <label class="plugin-toggle" title="${plugin.enabled ? '無効にする' : '有効にする'}">
           <input type="checkbox" class="plugin-toggle-input" data-plugin-id="${escHtml(plugin.id)}"
@@ -501,16 +923,8 @@ function renderPluginList() {
         </label>
       </div>
       <p class="plugin-card-desc">${escHtml(plugin.description)}</p>
+      <p class="plugin-card-deps">${escHtml(depText)}</p>
       <div class="plugin-card-actions">
-        ${plugin.hasGenerator ? `
-          <button class="btn-primary plugin-generate-btn" data-plugin-id="${escHtml(plugin.id)}"
-            ${!plugin.enabled || isBusy ? 'disabled' : ''}>${isBusy ? '生成中...' : '🎮 生成 & ビルド'}</button>
-          ${isActiveBuilder
-            ? `<button class="btn-sm plugin-builder-clear-btn" title="ビルダーを解除してコードエディタに戻す">✕ ビルダー解除</button>`
-            : `<button class="btn-sm plugin-set-builder-btn" ${!plugin.enabled ? 'disabled' : ''}
-                title="この Generate をメインの Build ボタンと連動させる">🔨 ビルダーに設定</button>`
-          }
-        ` : ''}
         <span class="plugin-generate-result" id="plugin-result-${escHtml(plugin.id)}"></span>
       </div>
     `;
@@ -518,10 +932,30 @@ function renderPluginList() {
     // トグル
     const toggle = card.querySelector('.plugin-toggle-input');
     toggle?.addEventListener('change', async () => {
-      await window.electronAPI.setPluginEnabled(plugin.id, toggle.checked);
+      const desired = Boolean(toggle.checked);
+      const syncResult = await window.electronAPI.setPluginEnabled(plugin.id, desired);
+      if (!syncResult?.ok) {
+        toggle.checked = !desired;
+        appendLog('app', `プラグイン "${plugin.name}" の更新に失敗: ${syncResult?.error || 'unknown'}`, 'error');
+        return;
+      }
+
+      appendLog('app', `プラグイン "${plugin.name}" を${desired ? '有効化' : '無効化'}しました`);
+      const changedIds = Array.isArray(syncResult.changedIds) ? syncResult.changedIds : [];
+      if (changedIds.length > 1) {
+        appendLog('app', `依存関係を同期: ${changedIds.join(', ')}`);
+      }
+      const missingDeps = Array.isArray(syncResult.missingDependencies) ? syncResult.missingDependencies : [];
+      if (missingDeps.length > 0) {
+        appendLog('app', `不足している依存プラグイン: ${missingDeps.join(', ')}`, 'warn');
+      }
+
       // アクティブビルダーが無効になった場合は解除
-      if (!toggle.checked && pluginState.activeBuilderPlugin === plugin.id) {
+      if (!desired && pluginState.activeBuilderPlugin === plugin.id) {
         await setActiveBuilderPlugin(null);
+      }
+      if (!desired && pluginState.activeEmulatorPlugin === plugin.id) {
+        await setActiveEmulatorPlugin(null);
       }
       await loadPlugins();
     });
@@ -577,12 +1011,345 @@ async function runPluginGenerateAndBuild(id) {
 // ============================================================= PAGE NAV ===
 
 function switchPage(page) {
-  state.currentPage = page;
+  const requested = String(page || getFirstVisiblePageId());
+  const targetId = `page-${requested}`;
+  const target = document.getElementById(targetId);
+  const next = target && !target.hidden ? requested : getFirstVisiblePageId();
+
+  state.currentPage = next;
   document.querySelectorAll('.nav-btn').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.page === page);
+    btn.classList.toggle('active', btn.dataset.page === next);
   });
   document.querySelectorAll('.editor-page').forEach((sec) => {
-    sec.classList.toggle('active', sec.id === `page-${page}`);
+    sec.classList.toggle('active', sec.id === `page-${next}`);
+  });
+}
+
+// ============================================================= CODE FS ===
+
+function updateCodeStatus(message) {
+  if (el.codeStatus) {
+    el.codeStatus.textContent = message || '';
+  }
+}
+
+function setCodeDirty(dirty) {
+  state.code.dirty = Boolean(dirty);
+  const fileName = state.code.selectedPath || 'main.c';
+  if (el.codeFileName) {
+    el.codeFileName.textContent = `${state.code.selectedIsDirectory ? '📁' : '📄'} src/${fileName}${state.code.dirty && !state.code.selectedIsDirectory ? ' *' : ''}`;
+  }
+}
+
+// ------------------------------------------------ C syntax highlight ----
+
+const C_KEYWORDS = new Set([
+  'auto','break','case','char','const','continue','default','do','double','else','enum',
+  'extern','float','for','goto','if','inline','int','long','register','restrict','return',
+  'short','signed','sizeof','static','struct','switch','typedef','union','unsigned',
+  'void','volatile','while','_Bool','_Complex','_Imaginary',
+]);
+const C_TYPES = new Set([
+  'u8','u16','u32','u64','s8','s16','s32','s64','fix16','fix32','bool','BOOL',
+  'TRUE','FALSE','NULL','size_t','uint8_t','uint16_t','uint32_t','uint64_t',
+  'int8_t','int16_t','int32_t','int64_t','VDPSprite','Sprite','Map','Palette',
+  'SpriteDefinition','Animation','AnimationFrame','MAPDefinition',
+]);
+
+function _escHtmlCode(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function _highlightCSegment(text) {
+  let result = '';
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    // String literal "..."
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') { if (text[j] === '\\') j++; j++; }
+      result += `<span class="hl-string">${_escHtmlCode(text.slice(i, j + 1))}</span>`;
+      i = j + 1; continue;
+    }
+    // Char literal '.'
+    if (ch === "'") {
+      let j = i + 1;
+      while (j < text.length && text[j] !== "'") { if (text[j] === '\\') j++; j++; }
+      result += `<span class="hl-string">${_escHtmlCode(text.slice(i, j + 1))}</span>`;
+      i = j + 1; continue;
+    }
+    // Number
+    if (ch >= '0' && ch <= '9') {
+      let j = i;
+      while (j < text.length && /[0-9a-fA-FxXuUlL._]/.test(text[j])) j++;
+      result += `<span class="hl-number">${_escHtmlCode(text.slice(i, j))}</span>`;
+      i = j; continue;
+    }
+    // Identifier / keyword / type / function call
+    if (/[a-zA-Z_]/.test(ch)) {
+      let j = i;
+      while (j < text.length && /[a-zA-Z0-9_]/.test(text[j])) j++;
+      const word = text.slice(i, j);
+      if (C_KEYWORDS.has(word)) {
+        result += `<span class="hl-keyword">${_escHtmlCode(word)}</span>`;
+      } else if (C_TYPES.has(word)) {
+        result += `<span class="hl-type">${_escHtmlCode(word)}</span>`;
+      } else if (text[j] === '(') {
+        result += `<span class="hl-func">${_escHtmlCode(word)}</span>`;
+      } else {
+        result += _escHtmlCode(word);
+      }
+      i = j; continue;
+    }
+    result += _escHtmlCode(ch);
+    i++;
+  }
+  return result;
+}
+
+function _highlightCLine(line) {
+  // Line comment //
+  const lcIdx = line.indexOf('//');
+  if (lcIdx >= 0) {
+    // Make sure not inside a string before //
+    const beforeComment = line.slice(0, lcIdx);
+    const singleQuotes = (beforeComment.match(/(?<!\\)"/g) || []).length;
+    if (singleQuotes % 2 === 0) {
+      return _highlightCSegment(beforeComment) + `<span class="hl-comment">${_escHtmlCode(line.slice(lcIdx))}</span>`;
+    }
+  }
+  return _highlightCSegment(line);
+}
+
+function highlightC(text) {
+  const lines = text.split('\n');
+  let inBlock = false;
+  const highlighted = lines.map((line) => {
+    if (inBlock) {
+      const end = line.indexOf('*/');
+      if (end < 0) return `<span class="hl-comment">${_escHtmlCode(line)}</span>`;
+      inBlock = false;
+      return `<span class="hl-comment">${_escHtmlCode(line.slice(0, end + 2))}</span>` + _highlightCLine(line.slice(end + 2));
+    }
+    // Preprocessor directive
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith('#')) {
+      // Inline block comment check
+      return `<span class="hl-preproc">${_escHtmlCode(line)}</span>`;
+    }
+    // Block comment start
+    const bcStart = line.indexOf('/*');
+    if (bcStart >= 0) {
+      const bcEnd = line.indexOf('*/', bcStart + 2);
+      if (bcEnd < 0) {
+        inBlock = true;
+        return _highlightCLine(line.slice(0, bcStart)) + `<span class="hl-comment">${_escHtmlCode(line.slice(bcStart))}</span>`;
+      }
+      return _highlightCLine(line.slice(0, bcStart)) +
+        `<span class="hl-comment">${_escHtmlCode(line.slice(bcStart, bcEnd + 2))}</span>` +
+        _highlightCLine(line.slice(bcEnd + 2));
+    }
+    return _highlightCLine(line);
+  });
+  return highlighted.join('\n');
+}
+
+function updateCodeEditor(content) {
+  const lnEl = el.codeLineNumbers;
+  const hlEl = el.codeHighlight;
+  if (lnEl) {
+    const count = (content.match(/\n/g) || []).length + 1;
+    lnEl.textContent = Array.from({ length: count }, (_, i) => i + 1).join('\n');
+  }
+  if (hlEl) {
+    // trailing newline prevents height collapse on last empty line
+    hlEl.innerHTML = highlightC(content) + '\n';
+  }
+}
+
+// sync line numbers scroll with the code scroller
+function bindCodeScrollSync() {
+  el.codeScroller?.addEventListener('scroll', () => {
+    if (el.codeLineNumbers) {
+      el.codeLineNumbers.scrollTop = el.codeScroller.scrollTop;
+    }
+  });
+}
+
+function renderCodeTreeNodes(nodes) {
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    return '<div class="code-tree-empty">src 配下にファイルがありません。</div>';
+  }
+  return `<ul class="code-tree-list">${nodes.map((node) => {
+    const isActive = !node.children && node.path === state.code.selectedPath;
+    if (node.type === 'directory') {
+      return `<li class="code-tree-item"><div class="code-tree-node" data-path="${escHtml(node.path)}" data-kind="directory">📁 ${escHtml(node.name)}</div><div class="code-tree-children">${renderCodeTreeNodes(node.children || [])}</div></li>`;
+    }
+    return `<li class="code-tree-item"><div class="code-tree-node${isActive ? ' active' : ''}" data-path="${escHtml(node.path)}" data-kind="file">📄 ${escHtml(node.name)}</div></li>`;
+  }).join('')}</ul>`;
+}
+
+function bindCodeTreeEvents() {
+  el.codeTree?.querySelectorAll('.code-tree-node').forEach((node) => {
+    node.addEventListener('click', async () => {
+      const nextPath = node.getAttribute('data-path') || '';
+      const kind = node.getAttribute('data-kind') || 'file';
+      if (kind === 'directory') {
+        state.code.selectedPath = nextPath;
+        state.code.selectedIsDirectory = true;
+        setCodeDirty(false);
+        updateCodeStatus(`フォルダを選択中: src/${nextPath}`);
+        renderCodeTree();
+        return;
+      }
+      await openCodeFile(nextPath);
+    });
+  });
+}
+
+function renderCodeTree() {
+  if (!el.codeTree) return;
+  el.codeTree.innerHTML = renderCodeTreeNodes(state.code.tree);
+  bindCodeTreeEvents();
+  setCodeDirty(state.code.dirty);
+}
+
+async function openCodeFile(pathValue) {
+  if (state.code.dirty && !state.code.selectedIsDirectory && state.code.selectedPath !== pathValue) {
+    const ok = window.confirm(`src/${state.code.selectedPath} の未保存変更を破棄して切り替えますか？`);
+    if (!ok) return;
+  }
+  const result = await window.electronAPI.readCodeFile({ path: pathValue });
+  if (!result?.ok) {
+    updateCodeStatus(`読み込み失敗: ${result?.error || 'unknown'}`);
+    return;
+  }
+  state.code.selectedPath = pathValue;
+  state.code.selectedIsDirectory = false;
+  if (el.codeEditor) {
+    el.codeEditor.value = result.content || '';
+    updateCodeEditor(result.content || '');
+  }
+  setCodeDirty(false);
+  renderCodeTree();
+  updateCodeStatus(`src/${pathValue} を読み込みました`);
+}
+
+async function loadCodeTree(openPath) {
+  const result = await window.electronAPI.listCodeTree({ path: '' });
+  if (!result?.ok) {
+    updateCodeStatus(`src ツリー取得失敗: ${result?.error || 'unknown'}`);
+    return;
+  }
+  state.code.tree = Array.isArray(result.entries) ? result.entries : [];
+  renderCodeTree();
+  if (openPath) {
+    await openCodeFile(openPath);
+    return;
+  }
+  if (!state.code.selectedIsDirectory && state.code.selectedPath) {
+    const fileStillExists = JSON.stringify(state.code.tree).includes(`"path":"${state.code.selectedPath}"`);
+    if (fileStillExists) {
+      await openCodeFile(state.code.selectedPath);
+      return;
+    }
+  }
+  const mainExists = JSON.stringify(state.code.tree).includes('"path":"main.c"');
+  if (mainExists) {
+    await openCodeFile('main.c');
+  }
+}
+
+async function saveCurrentCodeFile() {
+  if (state.code.selectedIsDirectory) {
+    updateCodeStatus('フォルダは保存できません。ファイルを選択してください。');
+    return false;
+  }
+  const targetPath = state.code.selectedPath || 'main.c';
+  const result = await window.electronAPI.writeCodeFile({
+    path: targetPath,
+    content: el.codeEditor?.value || '',
+  });
+  if (!result?.ok) {
+    updateCodeStatus(`保存失敗: ${result?.error || 'unknown'}`);
+    return false;
+  }
+  setCodeDirty(false);
+  updateCodeStatus(`✓ src/${targetPath} を保存しました`);
+  await loadCodeTree(targetPath);
+  return true;
+}
+
+// インラインで新規エントリ名を入力させる
+let _codeNewEntryKind = 'file';
+function showCodeNewEntryRow(kind) {
+  _codeNewEntryKind = kind;
+  if (!el.codeNewEntryRow || !el.codeNewEntryInput) return;
+  el.codeNewEntryInput.value = '';
+  el.codeNewEntryInput.disabled = false;
+  el.codeNewEntryInput.readOnly = false;
+  el.codeNewEntryInput.placeholder = kind === 'directory' ? 'フォルダ名...' : 'ファイル名（例: enemy.c）';
+  el.codeNewEntryRow.hidden = false;
+  requestAnimationFrame(() => {
+    el.codeNewEntryInput?.focus();
+  });
+}
+
+function hideCodeNewEntryRow() {
+  if (el.codeNewEntryRow) el.codeNewEntryRow.hidden = true;
+  if (el.codeNewEntryInput) el.codeNewEntryInput.value = '';
+}
+
+async function confirmCodeNewEntry() {
+  const name = (el.codeNewEntryInput?.value || '').trim();
+  hideCodeNewEntryRow();
+  if (!name) return;
+  await createCodeEntry(_codeNewEntryKind, name);
+}
+
+async function createCodeEntry(kind, name) {
+  const result = await window.electronAPI.createCodeEntry({
+    path: name,
+    type: kind,
+    content: kind === 'file' ? '' : undefined,
+  });
+  if (!result?.ok) {
+    updateCodeStatus(`作成失敗: ${result?.error || 'unknown'}`);
+    return;
+  }
+  updateCodeStatus(`✓ src/${name} を作成しました`);
+  await loadCodeTree(kind === 'file' ? name : state.code.selectedPath);
+}
+
+async function deleteSelectedCodeEntry() {
+  if (!state.code.selectedPath) {
+    updateCodeStatus('削除対象が選択されていません。');
+    return;
+  }
+  const ok = window.confirm(`src/${state.code.selectedPath} を削除します。元に戻せません。`);
+  if (!ok) return;
+  const result = await window.electronAPI.deleteCodeEntry({ path: state.code.selectedPath });
+  if (!result?.ok) {
+    updateCodeStatus(`削除失敗: ${result?.error || 'unknown'}`);
+    return;
+  }
+  state.code.selectedPath = 'main.c';
+  state.code.selectedIsDirectory = false;
+  if (el.codeEditor) el.codeEditor.value = '';
+  setCodeDirty(false);
+  updateCodeStatus(`✓ src/${result.path || ''} を削除しました`);
+  await loadCodeTree();
+}
+
+function getFilteredPlugins() {
+  const search = (state.pluginFilters.searchText || '').trim().toLowerCase();
+  const type = state.pluginFilters.type || 'all';
+  return pluginState.plugins.filter((plugin) => {
+    if (type !== 'all' && !pluginSupportsType(plugin, type)) return false;
+    if (!search) return true;
+    const hay = `${plugin.id} ${plugin.name} ${plugin.description} ${(plugin.pluginTypes || []).join(' ')}`.toLowerCase();
+    return hay.includes(search);
   });
 }
 
@@ -617,7 +1384,11 @@ int main(void)
 function loadSampleCode() {
   if (!el.codeEditor || !el.codeStatus) return;
   el.codeEditor.value = HELLO_WORLD_C;
-  el.codeStatus.textContent = 'Hello World サンプルを読み込みました。Build ボタンでビルドできます。';
+  state.code.selectedPath = 'main.c';
+  state.code.selectedIsDirectory = false;
+  updateCodeEditor(HELLO_WORLD_C);
+  setCodeDirty(true);
+  updateCodeStatus('Hello World サンプルを読み込みました。保存後に Build できます。');
 }
 
 // ============================================================== SETTINGS ===
@@ -766,6 +1537,7 @@ function renderProjectPicker() {
         if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `プロジェクトを開けませんでした: ${result?.error || 'unknown'}`;
         return;
       }
+      appendLog('app', `プロジェクトを開きました: ${result.projectDir || project.projectDir || project.projectName}`);
       closeModal(el.projectPickerModal);
       await loadProjectConfig();
       await loadResDefinitions({ keepSelection: false });
@@ -827,10 +1599,7 @@ async function loadProjectConfig() {
       collectAndValidateSettings({ showError: true });
     }
 
-    const currentSource = await window.electronAPI.getCurrentSource();
-    if (currentSource != null && el.codeEditor) {
-      el.codeEditor.value = currentSource;
-    }
+    await loadCodeTree();
 
     const romPath = await window.electronAPI.getRomPath();
     if (romPath) {
@@ -869,6 +1638,12 @@ async function saveSettings() {
  */
 async function runBuild(opts = {}) {
   if (state.building) return;
+  if (el.btnBuild?.disabled) {
+    setLogOpen(true);
+    appendBuildLog('[WARN] 有効な Build プラグインがありません。Plugins 画面で有効化してください。', 'warn');
+    setBuildStatus('error', 'Build プラグイン未設定');
+    return;
+  }
 
   // ---- アクティブビルダープラグインが設定されており、かつ呼び出し元がプラグイン生成後でない場合 ----
   const builderPluginId = pluginState.activeBuilderPlugin;
@@ -887,16 +1662,23 @@ async function runBuild(opts = {}) {
     return;
   }
 
-  // ---- プラグイン生成済みでない通常ビルド: コードエディタのソースを検証 ----
-  const sourceCode = opts._generatedByPlugin ? null : el.codeEditor?.value.trim();
-  if (!opts._generatedByPlugin && !sourceCode) {
-    switchPage('code');
-    if (el.codeStatus) {
-      el.codeStatus.textContent = '⚠ ソースコードが空です。サンプル生成ボタンでサンプルを読み込んでください。';
+  // ---- プラグイン生成済みでない通常ビルド: 現在のコードファイルを保存 ----
+  if (!opts._generatedByPlugin) {
+    if (state.code.selectedIsDirectory) {
+      switchPage('code');
+      updateCodeStatus('⚠ フォルダではなくファイルを選択してください。');
+      setLogOpen(true);
+      setBuildStatus('error', 'コードファイル未選択');
+      return;
     }
-    setLogOpen(true);
-    setBuildStatus('error', 'ソースコードが空です');
-    return;
+    if (state.code.dirty) {
+      const saved = await saveCurrentCodeFile();
+      if (!saved) {
+        setLogOpen(true);
+        setBuildStatus('error', '保存失敗');
+        return;
+      }
+    }
   }
 
   state.building = true;
@@ -920,13 +1702,8 @@ async function runBuild(opts = {}) {
     state.projectConfig = settingsResult.config;
     updateProjectNameDisplay();
 
-    // プラグイン生成済みの場合はソースを上書きしない (構造整備のみ)
-    let genResult;
-    if (opts._generatedByPlugin) {
-      genResult = await window.electronAPI.generateStructureOnly(state.projectConfig);
-    } else {
-      genResult = await window.electronAPI.generateProject(sourceCode, state.projectConfig);
-    }
+    // 既存の src ツリーを尊重し、Build 前は構造整備のみを行う
+    const genResult = await window.electronAPI.generateStructureOnly(state.projectConfig);
     if (!genResult.ok) {
       appendBuildLog(`[ERROR] プロジェクト生成失敗: ${genResult.error}`, 'error');
       setBuildStatus('error', 'プロジェクト生成失敗');
@@ -957,24 +1734,34 @@ async function runBuild(opts = {}) {
   } finally {
     state.building = false;
     el.btnBuild?.classList.remove('building');
-    if (el.btnBuild) el.btnBuild.disabled = false;
+    applyBuildAvailability();
   }
 }
 
 // ========================================================= TEST PLAY ===
 
 async function openTestPlay() {
+  if (el.btnTestPlay?.disabled) {
+    appendLog('emulator', '有効な Emulator プラグインがありません。Plugins 画面で有効化してください。', 'warn');
+    return;
+  }
+  appendLog('emulator', 'テストプレイ起動を開始します');
   const romPath = state.lastRomPath || (await window.electronAPI.getRomPath());
   if (!romPath) {
     setLogOpen(true);
-    appendBuildLog('[WARN] ROM が見つかりません。先に Build を実行してください。');
+    appendLog('emulator', 'ROM が見つかりません。先に Build を実行してください。', 'warn');
     setBuildStatus('error', 'ROM なし');
     return;
   }
   try {
-    await window.electronAPI.openTestPlayWindow(romPath);
+    const result = await window.electronAPI.openTestPlayWindow(romPath);
+    if (!result?.opened) {
+      appendLog('emulator', `テストプレイを開始できません: ${result?.error || 'unknown'}`, 'warn');
+      return;
+    }
+    appendLog('emulator', `テストプレイを開始しました: ${romPath}`);
   } catch (err) {
-    appendBuildLog(`[ERROR] テストプレイ起動失敗: ${err.message}`, 'error');
+    appendLog('emulator', `テストプレイ起動失敗: ${err.message}`, 'error');
   }
 }
 
@@ -1007,6 +1794,58 @@ function getFilteredEntries() {
     const hay = `${e.name} ${e.type} ${e.sourcePath}`.toLowerCase();
     return hay.includes(q);
   });
+}
+
+function getAllAssetEntries() {
+  return (state.rescomp.files || []).flatMap((file) => file.entries || []);
+}
+
+function getPaletteReferenceCandidates(excludeSourcePath = '') {
+  const exclude = String(excludeSourcePath || '').replace(/\\/g, '/');
+  const seen = new Set();
+  return getAllAssetEntries()
+    .filter((entry) => {
+      const type = String(entry?.type || '').toUpperCase();
+      if (!['IMAGE', 'BITMAP', 'SPRITE', 'TILESET', 'TILEMAP', 'MAP'].includes(type)) return false;
+      const sourcePath = String(entry?.sourcePath || '').replace(/\\/g, '/');
+      const sourceAbsolutePath = String(entry?.sourceAbsolutePath || sourcePath).replace(/\\/g, '/');
+      if (!sourcePath && !sourceAbsolutePath) return false;
+      if (exclude && (sourcePath === exclude || sourceAbsolutePath === exclude)) return false;
+      const extBase = sourceAbsolutePath || sourcePath;
+      const ext = extBase.slice(extBase.lastIndexOf('.')).toLowerCase();
+      if (!['.png', '.bmp'].includes(ext)) return false;
+      const dedupeKey = sourceAbsolutePath || sourcePath;
+      if (seen.has(dedupeKey)) return false;
+      seen.add(dedupeKey);
+      return true;
+    })
+    .map((entry) => ({
+      sourcePath: String(entry.sourceAbsolutePath || entry.sourcePath || ''),
+      label: `${entry.name} (${entry.sourcePath})`,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'ja'));
+}
+
+function extractPaletteFromImageData(imageData, maxColors = 16) {
+  const palette = [];
+  const seen = new Set();
+  const data = imageData?.data;
+  if (!data) return [];
+
+  for (let i = 0; i < data.length; i += 4) {
+    const a = data[i + 3];
+    if (a < 128) continue;
+    const snapped = snapColorToMegaDrive({ r: data[i], g: data[i + 1], b: data[i + 2] });
+    const key = `${snapped.r},${snapped.g},${snapped.b}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    palette.push(snapped);
+    if (palette.length > maxColors) {
+      return null;
+    }
+  }
+
+  return palette;
 }
 
 function getCurrentSelectedEntry() {
@@ -1872,6 +2711,11 @@ function hexToRgb(hex) {
   };
 }
 
+function rgbToHex(color) {
+  const toHex2 = (v) => Math.max(0, Math.min(255, Number(v) || 0)).toString(16).padStart(2, '0');
+  return `#${toHex2(color?.r)}${toHex2(color?.g)}${toHex2(color?.b)}`;
+}
+
 function buildPalette(imageData, maxColors, transparencyMode, customTransparent, reserveCustomColor) {
   const data = imageData.data;
   let transparentColor = { r: 0, g: 0, b: 0 };
@@ -2005,19 +2849,34 @@ function quantizeToIndexed16(imageData, options) {
   const ditherPattern = options.ditherPattern || 'diagonal4';
   const customTransparent = hexToRgb(options.transparencyColor || '#ff00ff');
   const reserveCustomColor = Boolean(options.reserveCustomColor);
+  const hasReferencePalette = Array.isArray(options.referencePalette) && options.referencePalette.length > 0;
 
-  const effectivePaletteSize = (transparencyMode === 'none' && !reserveCustomColor) ? 16 : 15;
-  const { palette, transparentColor, hasTransparent } = buildPalette(
-    imageData,
-    effectivePaletteSize,
-    transparencyMode,
-    customTransparent,
-    reserveCustomColor
-  );
+  let fullPalette = [];
+  let transparentColor = { r: 0, g: 0, b: 0 };
+  let hasTransparent = false;
 
-  const fullPalette = reserveCustomColor
-    ? [{ ...snapColorToMegaDrive(customTransparent) }, ...palette]
-    : (hasTransparent ? [{ ...transparentColor }, ...palette] : palette);
+  if (hasReferencePalette) {
+    fullPalette = options.referencePalette
+      .slice(0, 16)
+      .map((c) => snapColorToMegaDrive(c));
+    while (fullPalette.length < 16) {
+      fullPalette.push({ ...fullPalette[fullPalette.length - 1] || { r: 0, g: 0, b: 0 } });
+    }
+  } else {
+    const effectivePaletteSize = (transparencyMode === 'none' && !reserveCustomColor) ? 16 : 15;
+    const built = buildPalette(
+      imageData,
+      effectivePaletteSize,
+      transparencyMode,
+      customTransparent,
+      reserveCustomColor
+    );
+    transparentColor = built.transparentColor;
+    hasTransparent = built.hasTransparent;
+    fullPalette = reserveCustomColor
+      ? [{ ...snapColorToMegaDrive(customTransparent) }, ...built.palette]
+      : (hasTransparent ? [{ ...transparentColor }, ...built.palette] : built.palette);
+  }
 
   for (let y = 0; y < imageData.height; y += 1) {
     for (let x = 0; x < imageData.width; x += 1) {
@@ -2033,7 +2892,7 @@ function quantizeToIndexed16(imageData, options) {
         && colorDistanceSq({ r, g, b }, customTransparent) <= (16 * 16 * 3);
       const transparent = (transparencyMode === 'source' && isSourceTransparent) || isCustomTransparent;
 
-      if (transparent && hasTransparent) {
+      if (!hasReferencePalette && transparent && hasTransparent) {
         dst[i] = transparentColor.r;
         dst[i + 1] = transparentColor.g;
         dst[i + 2] = transparentColor.b;
@@ -2064,7 +2923,12 @@ function quantizeToIndexed16(imageData, options) {
     }
   }
 
-  return { imageData: out, palette: fullPalette, indices, transparentPaletteIndex: hasTransparent ? 0 : -1 };
+  return {
+    imageData: out,
+    palette: fullPalette,
+    indices,
+    transparentPaletteIndex: (!hasReferencePalette && hasTransparent) ? 0 : -1,
+  };
 }
 
 function drawImageDataToCanvas(canvas, imageData) {
@@ -2257,6 +3121,15 @@ async function imageDataToIndexedPng(imageData) {
 function closeQuantizeModal() {
   quantizeState.active = false;
   quantizeState.onApply = null;
+  quantizeState.sourcePath = '';
+  quantizeState.referencePalette = null;
+  quantizeState.referencePalettePath = '';
+  quantizeState.referenceDataUrl = '';
+  quantizeState.referenceImageWidth = 0;
+  quantizeState.referenceImageHeight = 0;
+  quantizeState.referencePaletteError = '';
+  quantizeState.lastReferenceLogToken = '';
+  quantizeState.referencePaletteLabel = '';
   if (el.quantizeModal) {
     el.quantizeModal.classList.remove('open');
     el.quantizeModal.setAttribute('aria-hidden', 'true');
@@ -2299,11 +3172,162 @@ function syncQuantizeDitheringUI() {
   }
 }
 
-function rerenderQuantizePreview() {
+function syncQuantizePaletteUI() {
+  const hasRef = Array.isArray(quantizeState.referencePalette) && quantizeState.referencePalette.length > 0;
+  const hasPreview = hasRef && Boolean(quantizeState.referenceDataUrl);
+
+  if (el.quantizeReferencePreview) {
+    el.quantizeReferencePreview.hidden = !hasPreview;
+  }
+  if (hasPreview) {
+    if (el.quantizeReferenceThumb) {
+      el.quantizeReferenceThumb.src = quantizeState.referenceDataUrl;
+    }
+    if (el.quantizeReferenceSize) {
+      el.quantizeReferenceSize.textContent = `${quantizeState.referenceImageWidth} x ${quantizeState.referenceImageHeight}`;
+    }
+    if (el.quantizeReferencePalette) {
+      el.quantizeReferencePalette.innerHTML = quantizeState.referencePalette
+        .map((color, index) => {
+          const hex = rgbToHex(color);
+          return `<span class="palette-swatch" title="${index}: ${hex}" style="background:${hex}"></span>`;
+        })
+        .join('');
+    }
+  } else {
+    if (el.quantizeReferenceSize) el.quantizeReferenceSize.textContent = '';
+    if (el.quantizeReferenceThumb) el.quantizeReferenceThumb.removeAttribute('src');
+    if (el.quantizeReferencePalette) el.quantizeReferencePalette.innerHTML = '';
+  }
+
+  if (el.quantizePaletteHint) {
+    if (hasRef) {
+      el.quantizePaletteHint.textContent = `参照中: ${quantizeState.referencePaletteLabel} (${quantizeState.referencePalette.length}色)`;
+      el.quantizePaletteHint.classList.remove('form-error');
+    } else {
+      el.quantizePaletteHint.textContent = '指定した画像アセットの16色パレットに揃えます。';
+      el.quantizePaletteHint.classList.remove('form-error');
+    }
+  }
+}
+
+async function loadQuantizeReferencePalette(sourcePath) {
+  const refPath = String(sourcePath || '').trim();
+  if (!refPath) {
+    quantizeState.referencePalette = null;
+    quantizeState.referencePalettePath = '';
+    quantizeState.referenceDataUrl = '';
+    quantizeState.referenceImageWidth = 0;
+    quantizeState.referenceImageHeight = 0;
+    quantizeState.referencePaletteError = '';
+    quantizeState.referencePaletteLabel = '';
+    syncQuantizePaletteUI();
+    return;
+  }
+
+  if (quantizeState.referencePalettePath === refPath) {
+    if (quantizeState.referencePalette) {
+      syncQuantizePaletteUI();
+      return;
+    }
+    if (quantizeState.referencePaletteError) {
+      if (el.quantizePaletteHint) {
+        el.quantizePaletteHint.textContent = quantizeState.referencePaletteError;
+        el.quantizePaletteHint.classList.add('form-error');
+      }
+      return;
+    }
+  }
+
+  const pushReferenceLog = (level, text, token) => {
+    const nextToken = `${level}:${token || text}`;
+    if (quantizeState.lastReferenceLogToken === nextToken) return;
+    quantizeState.lastReferenceLogToken = nextToken;
+    appendLog('converter', text, level);
+  };
+
+  const read = await window.electronAPI.readFileAsDataUrl(refPath);
+  if (!read?.ok || !read?.dataUrl) {
+    quantizeState.referencePalette = null;
+    quantizeState.referencePalettePath = refPath;
+    quantizeState.referenceDataUrl = '';
+    quantizeState.referenceImageWidth = 0;
+    quantizeState.referenceImageHeight = 0;
+    quantizeState.referencePaletteError = `参照パレット読み込み失敗: ${read?.error || 'unknown'}`;
+    quantizeState.referencePaletteLabel = '';
+    if (el.quantizePaletteHint) {
+      el.quantizePaletteHint.textContent = quantizeState.referencePaletteError;
+      el.quantizePaletteHint.classList.add('form-error');
+    }
+    pushReferenceLog('warn', `参照パレット読み込み失敗: ${refPath} (${read?.error || 'unknown'})`, `read-fail:${refPath}:${read?.error || 'unknown'}`);
+    return;
+  }
+
+  try {
+    const img = new Image();
+    img.src = read.dataUrl;
+    await img.decode();
+
+    const cv = document.createElement('canvas');
+    cv.width = img.width;
+    cv.height = img.height;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    cx.drawImage(img, 0, 0);
+    const refData = cx.getImageData(0, 0, img.width, img.height);
+    const palette = extractPaletteFromImageData(refData, 16);
+
+    if (!palette || palette.length === 0 || palette.length > 16) {
+      const detail = palette === null
+        ? '参照画像の色数が16色を超えています。'
+        : '参照画像に有効色がありません。';
+      quantizeState.referencePalette = null;
+      quantizeState.referencePalettePath = refPath;
+      quantizeState.referenceDataUrl = read.dataUrl;
+      quantizeState.referenceImageWidth = img.width;
+      quantizeState.referenceImageHeight = img.height;
+      quantizeState.referencePaletteError = `参照パレット不正: ${detail}`;
+      quantizeState.referencePaletteLabel = '';
+      if (el.quantizePaletteHint) {
+        el.quantizePaletteHint.textContent = quantizeState.referencePaletteError;
+        el.quantizePaletteHint.classList.add('form-error');
+      }
+      pushReferenceLog('warn', `参照パレット不正: ${refPath} (${detail})`, `invalid:${refPath}:${detail}`);
+      return;
+    }
+
+    quantizeState.referencePalette = palette;
+    quantizeState.referencePalettePath = refPath;
+    quantizeState.referenceDataUrl = read.dataUrl;
+    quantizeState.referenceImageWidth = img.width;
+    quantizeState.referenceImageHeight = img.height;
+    quantizeState.referencePaletteError = '';
+    quantizeState.referencePaletteLabel = refPath;
+    syncQuantizePaletteUI();
+    pushReferenceLog('info', `参照パレットを適用: ${refPath} (${palette.length}色)`, `ok:${refPath}:${palette.length}`);
+  } catch (err) {
+    quantizeState.referencePalette = null;
+    quantizeState.referencePalettePath = refPath;
+    quantizeState.referenceDataUrl = '';
+    quantizeState.referenceImageWidth = 0;
+    quantizeState.referenceImageHeight = 0;
+    quantizeState.referencePaletteError = `参照パレット解析失敗: ${err?.message || err}`;
+    quantizeState.referencePaletteLabel = '';
+    if (el.quantizePaletteHint) {
+      el.quantizePaletteHint.textContent = quantizeState.referencePaletteError;
+      el.quantizePaletteHint.classList.add('form-error');
+    }
+    pushReferenceLog('warn', `参照パレット解析失敗: ${refPath} (${err?.message || err})`, `parse-fail:${refPath}:${err?.message || err}`);
+  }
+}
+
+async function rerenderQuantizePreview() {
   if (!quantizeState.originalData || !el.quantizeAfterCanvas || !el.quantizeStats) return;
 
   syncQuantizeColorUI();
   syncQuantizeDitheringUI();
+
+  const selectedRef = el.quantizePaletteAsset?.value || '';
+  await loadQuantizeReferencePalette(selectedRef);
 
   const options = {
     transparencyMode: el.quantizeTransparencyMode?.value || 'none',
@@ -2312,6 +3336,7 @@ function rerenderQuantizePreview() {
     ditherEnabled: Boolean(el.quantizeDitheringEnabled?.checked),
     ditherWeight: Number(el.quantizeDitheringWeight?.value || 0),
     ditherPattern: el.quantizePattern?.value || 'diagonal4',
+    referencePalette: quantizeState.referencePalette,
   };
 
   if (el.quantizeWeightLabel) {
@@ -2333,10 +3358,21 @@ function rerenderQuantizePreview() {
 
   const srcColors = countUniqueColors(quantizeState.originalData);
   const dstColors = countUniqueColors(converted.imageData);
-  el.quantizeStats.textContent = `colors: ${srcColors} -> ${dstColors} / palette: ${converted.palette.length}`;
+  const refNote = options.referencePalette ? ' / mode: ref-palette' : '';
+  el.quantizeStats.textContent = `colors: ${srcColors} -> ${dstColors} / palette: ${converted.palette.length}${refNote}`;
 }
 
-async function openQuantizeModal(sourceDataUrl) {
+function populateQuantizePaletteAssetOptions(excludeSourcePath = '') {
+  if (!el.quantizePaletteAsset) return;
+  const candidates = getPaletteReferenceCandidates(excludeSourcePath);
+  const options = ['<option value="">指定なし（自動パレット）</option>'];
+  candidates.forEach((entry) => {
+    options.push(`<option value="${escHtml(entry.sourcePath)}">${escHtml(entry.label)}</option>`);
+  });
+  el.quantizePaletteAsset.innerHTML = options.join('');
+}
+
+async function openQuantizeModal(sourceDataUrl, options = {}) {
   const img = new Image();
   img.src = sourceDataUrl;
   await img.decode();
@@ -2351,6 +3387,21 @@ async function openQuantizeModal(sourceDataUrl) {
   quantizeState.originalCanvas = tmpCanvas;
   quantizeState.originalCtx = tmpCtx;
   quantizeState.originalData = imageData;
+  quantizeState.sourcePath = String(options.sourcePath || '');
+  quantizeState.referencePalette = null;
+  quantizeState.referencePalettePath = '';
+  quantizeState.referenceDataUrl = '';
+  quantizeState.referenceImageWidth = 0;
+  quantizeState.referenceImageHeight = 0;
+  quantizeState.referencePaletteError = '';
+  quantizeState.lastReferenceLogToken = '';
+  quantizeState.referencePaletteLabel = '';
+
+  populateQuantizePaletteAssetOptions(quantizeState.sourcePath);
+  if (el.quantizePaletteAsset) {
+    el.quantizePaletteAsset.value = '';
+  }
+  syncQuantizePaletteUI();
 
   if (el.quantizeBeforeCanvas) {
     drawImageDataToCanvas(el.quantizeBeforeCanvas, imageData);
@@ -2365,7 +3416,7 @@ async function openQuantizeModal(sourceDataUrl) {
     el.quantizeDitheringEnabled.checked = true;
   }
 
-  rerenderQuantizePreview();
+  await rerenderQuantizePreview();
 
   return new Promise((resolve) => {
     quantizeState.onApply = async (ok) => {
@@ -2396,23 +3447,23 @@ const resizeState = {
   originalImg: null,
   sourceDataUrl: '',
   canSkip: false,
+  requestedTargetSize: null,
   cropRect: null,
   renderMap: null,
   drag: null,
 };
 
-function snapTo8(v) {
-  return Math.max(8, Math.round(v / 8) * 8);
-}
-
-function isMultipleOf8(v) {
-  return Number.isFinite(v) && v >= 8 && v % 8 === 0;
+function normalizePositiveInt(v, fallback = 1) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.max(1, Math.round(n));
 }
 
 function closeResizeModal() {
   resizeState.onApply = null;
   resizeState.originalImg = null;
   resizeState.sourceDataUrl = '';
+  resizeState.requestedTargetSize = null;
   resizeState.cropRect = null;
   resizeState.renderMap = null;
   resizeState.drag = null;
@@ -2420,16 +3471,22 @@ function closeResizeModal() {
 }
 
 function getResizeTargetSize() {
-  const w = Number(el.resizeWidth?.value || 0);
-  const h = Number(el.resizeHeight?.value || 0);
+  const fallbackW = resizeState.originalImg?.naturalWidth || 1;
+  const fallbackH = resizeState.originalImg?.naturalHeight || 1;
+  const w = normalizePositiveInt(el.resizeWidth?.value, fallbackW);
+  const h = normalizePositiveInt(el.resizeHeight?.value, fallbackH);
   return { w, h };
 }
 
 function updateResizeValidation() {
   const { w, h } = getResizeTargetSize();
   let message = '';
-  if (!isMultipleOf8(w) || !isMultipleOf8(h)) {
-    message = '幅/高さは 8 の倍数で指定してください。';
+  if (w <= 0 || h <= 0) {
+    message = '幅/高さは 1 以上で指定してください。';
+  }
+  const req = resizeState.requestedTargetSize;
+  if (req && Number.isFinite(req.width) && Number.isFinite(req.height) && (w !== req.width || h !== req.height)) {
+    message = `このコンバーターは ${req.width} x ${req.height} を要求しています。`;
   }
   if (el.resizeValidationMessage) {
     el.resizeValidationMessage.textContent = message;
@@ -2444,7 +3501,7 @@ function ensureCropRect() {
   const img = resizeState.originalImg;
   if (!img) return;
   const { w, h } = getResizeTargetSize();
-  if (!isMultipleOf8(w) || !isMultipleOf8(h)) {
+  if (w <= 0 || h <= 0) {
     resizeState.cropRect = null;
     return;
   }
@@ -2739,7 +3796,7 @@ function applyResizeTransform() {
   const img = resizeState.originalImg;
   if (!img) return '';
   const { w, h } = getResizeTargetSize();
-  if (!isMultipleOf8(w) || !isMultipleOf8(h)) return '';
+  if (w <= 0 || h <= 0) return '';
 
   const out = document.createElement('canvas');
   out.width = w;
@@ -2757,14 +3814,27 @@ function applyResizeTransform() {
   return out.toDataURL('image/png');
 }
 
-async function openResizeModal(dataUrl, imgWidth, imgHeight) {
+async function openResizeModal(dataUrl, imgWidth, imgHeight, options = {}) {
   const img = new Image();
   img.src = dataUrl;
   await img.decode();
 
+  const requestedTargetSize = options?.targetSize || null;
+  const requestedWidth = Number(requestedTargetSize?.width);
+  const requestedHeight = Number(requestedTargetSize?.height);
+
   resizeState.originalImg = img;
   resizeState.sourceDataUrl = dataUrl;
-  resizeState.canSkip = (imgWidth % 8 === 0) && (imgHeight % 8 === 0);
+  resizeState.requestedTargetSize = (
+    Number.isFinite(requestedWidth)
+    && Number.isFinite(requestedHeight)
+    && requestedWidth > 0
+    && requestedHeight > 0
+  ) ? {
+    width: normalizePositiveInt(requestedWidth),
+    height: normalizePositiveInt(requestedHeight),
+  } : null;
+  resizeState.canSkip = true;
   resizeState.cropRect = null;
   resizeState.drag = null;
 
@@ -2772,12 +3842,14 @@ async function openResizeModal(dataUrl, imgWidth, imgHeight) {
     el.resizeOriginalSize.textContent = `${imgWidth} × ${imgHeight} px`;
   }
 
-  if (el.resizeWidth) el.resizeWidth.value = snapTo8(imgWidth);
-  if (el.resizeHeight) el.resizeHeight.value = snapTo8(imgHeight);
+  const initialW = resizeState.requestedTargetSize?.width || normalizePositiveInt(imgWidth);
+  const initialH = resizeState.requestedTargetSize?.height || normalizePositiveInt(imgHeight);
+  if (el.resizeWidth) el.resizeWidth.value = initialW;
+  if (el.resizeHeight) el.resizeHeight.value = initialH;
   if (el.resizeMode) el.resizeMode.value = 'resize';
   if (el.btnResizeSkip) {
     el.btnResizeSkip.disabled = !resizeState.canSkip;
-    el.btnResizeSkip.title = resizeState.canSkip ? '' : '元画像サイズが 8 の倍数のときのみスキップできます';
+    el.btnResizeSkip.title = '';
   }
 
   updateResizeValidation();
@@ -2801,7 +3873,17 @@ async function openResizeModal(dataUrl, imgWidth, imgHeight) {
   });
 }
 
-async function maybeConvertImageToIndexed16(sourcePath) {
+async function maybeConvertImageToIndexed16(sourcePath, options = {}) {
+  const resizeConverter = getPluginById('image-resize-converter');
+  if (!resizeConverter || !resizeConverter.enabled) {
+    return {
+      canceled: true,
+      convertedDataUrl: '',
+      originalDataUrl: '',
+      warning: '画像リサイズコンバータープラグインが無効または未インストールです',
+    };
+  }
+
   const read = await window.electronAPI.readFileAsDataUrl(sourcePath);
   if (!read?.ok || !read.dataUrl) {
     return { canceled: true, convertedDataUrl: '', originalDataUrl: '', warning: read?.error || '' };
@@ -2813,7 +3895,9 @@ async function maybeConvertImageToIndexed16(sourcePath) {
 
   let warning = '';
   let workingDataUrl = read.dataUrl;
-  const resizeResult = await openResizeModal(read.dataUrl, img.naturalWidth, img.naturalHeight);
+  const resizeResult = await openResizeModal(read.dataUrl, img.naturalWidth, img.naturalHeight, {
+    targetSize: options.targetSize || null,
+  });
   if (!resizeResult.ok) {
     return { canceled: true, convertedDataUrl: '', originalDataUrl: read.dataUrl, warning: 'リサイズ/クリッピングをキャンセルしました' };
   }
@@ -2854,7 +3938,19 @@ async function maybeConvertImageToIndexed16(sourcePath) {
     };
   }
 
-  const quantized = await openQuantizeModal(workingDataUrl);
+  const quantizeConverter = getPluginById('image-quantize-converter');
+  if (!quantizeConverter || !quantizeConverter.enabled) {
+    return {
+      canceled: true,
+      convertedDataUrl: '',
+      originalDataUrl: read.dataUrl,
+      warning: '画像減色コンバータープラグインが無効または未インストールです',
+    };
+  }
+
+  const quantized = await openQuantizeModal(workingDataUrl, {
+    sourcePath,
+  });
   if (!quantized.ok) {
     return {
       canceled: true,
@@ -2899,6 +3995,8 @@ async function openAssetModal() {
   if (el.assetCommentInput) {
     el.assetCommentInput.value = '';
   }
+  if (el.assetResizeTargetWidth) el.assetResizeTargetWidth.value = '';
+  if (el.assetResizeTargetHeight) el.assetResizeTargetHeight.value = '';
   populateAssetTypeOptions(initialType);
   populateAssetResFileOptions();
   syncAssetModalForType();
@@ -2924,9 +4022,25 @@ async function submitAssetModal() {
 
   let convertedDataUrl = '';
   let warning = '';
+  const rawTargetW = String(el.assetResizeTargetWidth?.value || '').trim();
+  const rawTargetH = String(el.assetResizeTargetHeight?.value || '').trim();
+  if ((rawTargetW && !rawTargetH) || (!rawTargetW && rawTargetH)) {
+    if (el.assetTableHint) {
+      el.assetTableHint.textContent = '画像サイズ指定は幅と高さを両方入力してください。';
+    }
+    return;
+  }
+  const targetWidth = Number(el.assetResizeTargetWidth?.value || 0);
+  const targetHeight = Number(el.assetResizeTargetHeight?.value || 0);
+  const hasTargetSize = Number.isFinite(targetWidth)
+    && Number.isFinite(targetHeight)
+    && targetWidth > 0
+    && targetHeight > 0;
   const isImageAsset = IMAGE_EXTS.includes((picked.ext || '').toLowerCase());
   if (isImageAsset && ['PALETTE', 'IMAGE', 'BITMAP', 'SPRITE', 'MAP', 'TILEMAP', 'TILESET'].includes(normalizedType)) {
-    const converted = await maybeConvertImageToIndexed16(picked.sourcePath);
+    const converted = await maybeConvertImageToIndexed16(picked.sourcePath, {
+      targetSize: hasTargetSize ? { width: Math.round(targetWidth), height: Math.round(targetHeight) } : null,
+    });
     if (converted.canceled) {
       closeModal(el.assetModal);
       if (el.assetTableHint) {
@@ -3063,14 +4177,38 @@ async function openAboutDialog() {
 // ====================================================== EVENT BINDING ===
 
 function bindEvents() {
-  document.querySelectorAll('.nav-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      switchPage(btn.dataset.page);
-      if (btn.dataset.page === 'plugins') loadPlugins();
-    });
+  el.sidebar?.addEventListener('click', (event) => {
+    const btn = event.target.closest('.nav-btn');
+    if (!btn) return;
+    if (btn.disabled) return;
+    const page = btn.dataset.page || '';
+    if (!page) return;
+    switchPage(page);
+    if (page === 'plugins') loadPlugins();
   });
 
-  el.btnReloadPlugins?.addEventListener('click', () => loadPlugins());
+  el.btnOpenPluginsFolder?.addEventListener('click', async () => {
+    const result = await window.electronAPI.openPluginsFolder();
+    if (result?.ok) {
+      appendLog('app', `プラグインフォルダを開きました: ${result.path || ''}`);
+    } else {
+      appendLog('app', `プラグインフォルダを開けませんでした: ${result?.error || 'unknown'}`, 'warn');
+    }
+  });
+
+  el.btnReloadPlugins?.addEventListener('click', () => {
+    appendLog('app', 'プラグインを再スキャンしています...');
+    loadPlugins();
+  });
+
+  el.pluginSearchInput?.addEventListener('input', () => {
+    state.pluginFilters.searchText = el.pluginSearchInput.value || '';
+    renderPluginList();
+  });
+  el.pluginTypeFilter?.addEventListener('change', () => {
+    state.pluginFilters.type = el.pluginTypeFilter.value || 'all';
+    renderPluginList();
+  });
 
   el.btnBuild?.addEventListener('click', runBuild);
   el.btnTestPlay?.addEventListener('click', openTestPlay);
@@ -3080,27 +4218,50 @@ function bindEvents() {
     window.electronAPI.openSetupWindow();
   });
 
-  el.btnGenSample?.addEventListener('click', () => {
-    loadSampleCode();
-    switchPage('code');
+  el.btnCodeNewFile?.addEventListener('click', () => {
+    showCodeNewEntryRow('file');
+  });
+  el.btnCodeNewFolder?.addEventListener('click', () => {
+    showCodeNewEntryRow('directory');
+  });
+  el.btnCodeDelete?.addEventListener('click', async () => {
+    await deleteSelectedCodeEntry();
+  });
+  el.btnCodeNewEntryConfirm?.addEventListener('click', async () => {
+    await confirmCodeNewEntry();
+  });
+  el.btnCodeNewEntryCancel?.addEventListener('click', () => {
+    hideCodeNewEntryRow();
+  });
+  el.codeNewEntryInput?.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); await confirmCodeNewEntry(); }
+    if (e.key === 'Escape') { hideCodeNewEntryRow(); }
+  });
+  el.codeNewEntryInput?.addEventListener('click', (e) => {
+    e.stopPropagation();
+  });
+  el.btnOpenSrcFolder?.addEventListener('click', async () => {
+    const rootResult = await window.electronAPI.getCodeRoot();
+    if (rootResult?.ok && rootResult.root) {
+      await window.electronAPI.openPathInExplorer(rootResult.root);
+    }
   });
   el.btnSaveCode?.addEventListener('click', async () => {
-    const code = el.codeEditor.value;
-    try {
-      await window.electronAPI.generateProject(code, state.projectConfig);
-      el.codeStatus.textContent = '✓ コードを保存しました';
-      setTimeout(() => { el.codeStatus.textContent = ''; }, 2000);
-    } catch (err) {
-      el.codeStatus.textContent = `保存エラー: ${err.message}`;
-    }
+    await saveCurrentCodeFile();
   });
   el.btnCopyCode?.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(el.codeEditor.value);
-      el.codeStatus.textContent = '✓ クリップボードにコピーしました';
-      setTimeout(() => { el.codeStatus.textContent = ''; }, 2000);
+      updateCodeStatus('✓ クリップボードにコピーしました');
+      setTimeout(() => { updateCodeStatus(''); }, 2000);
     } catch (_err) {
-      el.codeStatus.textContent = 'コピーに失敗しました';
+      updateCodeStatus('コピーに失敗しました');
+    }
+  });
+  el.codeEditor?.addEventListener('input', () => {
+    if (!state.code.selectedIsDirectory) {
+      setCodeDirty(true);
+      updateCodeEditor(el.codeEditor.value);
     }
   });
 
@@ -3330,9 +4491,10 @@ function bindEvents() {
     el.quantizeDitheringEnabled,
     el.quantizeDitheringWeight,
     el.quantizePattern,
+    el.quantizePaletteAsset,
   ].forEach((control) => {
-    control?.addEventListener('input', rerenderQuantizePreview);
-    control?.addEventListener('change', rerenderQuantizePreview);
+    control?.addEventListener('input', () => { void rerenderQuantizePreview(); });
+    control?.addEventListener('change', () => { void rerenderQuantizePreview(); });
   });
 
   if (el.btnAboutClose) el.btnAboutClose.addEventListener('click', closeAboutDialog);
@@ -3345,6 +4507,14 @@ function bindEvents() {
   });
   el.btnClearLog?.addEventListener('click', (e) => { e.stopPropagation(); clearBuildLog(); });
   el.btnToggleLog?.addEventListener('click', (e) => { e.stopPropagation(); setLogOpen(!state.logOpen); });
+  el.logLevelFilter?.addEventListener('change', () => {
+    state.logs.levelFilter = el.logLevelFilter.value || 'all';
+    renderLogPanel();
+  });
+  el.logSearchInput?.addEventListener('input', () => {
+    state.logs.searchText = el.logSearchInput.value || '';
+    renderLogPanel();
+  });
 
   if (el.buildLogResizer) {
     let dragStartY = 0;
@@ -3371,8 +4541,12 @@ function bindEvents() {
   }
 
   window.electronAPI.onBuildLog((payload) => {
-    appendBuildLog(payload.text || '', payload.level);
+    appendLog('build', payload.text || '', payload.level);
     setLogOpen(true);
+  });
+
+  window.electronAPI.onPluginLog?.((payload) => {
+    appendLog(payload?.source || payload?.pluginId || 'plugin', payload?.text || '', payload?.level || 'info');
   });
 
   window.electronAPI.onBuildEnd((payload) => {
@@ -3398,7 +4572,15 @@ function bindEvents() {
   });
 
   window.addEventListener('keydown', (e) => {
+    const activeTag = (document.activeElement?.tagName || '').toUpperCase();
+    const typingInInput = activeTag === 'INPUT' || activeTag === 'TEXTAREA';
+
     if (e.key === 'Escape') {
+      if (document.activeElement === el.codeNewEntryInput) {
+        e.preventDefault();
+        hideCodeNewEntryRow();
+        return;
+      }
       if (el.aboutModal?.classList.contains('open')) {
         e.preventDefault();
         closeAboutDialog();
@@ -3431,9 +4613,14 @@ function bindEvents() {
       }
     }
 
-    if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'b' && !typingInInput) {
       e.preventDefault();
       runBuild();
+    }
+
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && state.currentPage === 'code') {
+      e.preventDefault();
+      void saveCurrentCodeFile();
     }
   });
 }
@@ -3443,7 +4630,9 @@ function bindEvents() {
 async function bootstrap() {
   setLogOpenHeight(state.logOpenHeight);
   setLogOpen(false);
+  if (el.logLevelFilter) el.logLevelFilter.value = state.logs.levelFilter;
   bindEvents();
+  bindCodeScrollSync();
   switchPage('assets'); // nav-btn の active 状態を確定
   setPreviewPanelOpen(true);
   setAccordionOpen('params', true);
@@ -3452,6 +4641,7 @@ async function bootstrap() {
   await refreshProjectList();
   await loadResDefinitions({ keepSelection: false });
   await loadPlugins();
+  renderLogPanel();
 
   if (!el.codeEditor?.value) {
     loadSampleCode();

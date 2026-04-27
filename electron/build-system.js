@@ -192,7 +192,16 @@ function ensureProjectStructure(projectDir, config = {}, options = {}) {
   };
   const cfgPath = path.join(projectDir, 'project.json');
   if (options.overwriteConfig || !fs.existsSync(cfgPath)) {
-    fs.writeFileSync(cfgPath, JSON.stringify(meta, null, 2), 'utf-8');
+    let existing = {};
+    if (fs.existsSync(cfgPath)) {
+      try {
+        existing = JSON.parse(fs.readFileSync(cfgPath, 'utf-8')) || {};
+      } catch (_) {
+        existing = {};
+      }
+    }
+    const merged = Object.assign({}, existing, meta);
+    fs.writeFileSync(cfgPath, JSON.stringify(merged, null, 2), 'utf-8');
   }
 
   return { projectDir, srcPath, resPath, romHeadPath, configPath: cfgPath };
@@ -601,6 +610,7 @@ function loadProjectConfig() {
 
 function saveProjectConfig(patch) {
   const projectDir = getProjectDir();
+  ensureDirSync(projectDir);
   const cfgPath = path.join(projectDir, 'project.json');
   const current = loadProjectConfig();
   const merged = Object.assign({}, current, patch);
@@ -617,6 +627,17 @@ function getBuilderPlugin() {
 /** プロジェクト毎のビルダープラグイン ID を保存 */
 function setBuilderPlugin(id) {
   saveProjectConfig({ builderPlugin: id || null });
+}
+
+/** プロジェクト毎のエミュレータープラグイン ID を取得 (未設定なら null) */
+function getEmulatorPlugin() {
+  const cfg = loadProjectConfig();
+  return cfg.emulatorPlugin || null;
+}
+
+/** プロジェクト毎のエミュレータープラグイン ID を保存 */
+function setEmulatorPlugin(id) {
+  saveProjectConfig({ emulatorPlugin: id || null });
 }
 
 module.exports = {
@@ -639,5 +660,7 @@ module.exports = {
   saveProjectConfig,
   getBuilderPlugin,
   setBuilderPlugin,
+  getEmulatorPlugin,
+  setEmulatorPlugin,
   getSampleSourceCode,
 };
