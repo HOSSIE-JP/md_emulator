@@ -530,7 +530,14 @@ function buildProject(sgdkPath, javaPath, onLog) {
 
       proc.stderr.on('data', (data) => {
         data.toString().split('\n').forEach((line) => {
-          if (line.trim()) log(line, 'error');
+          if (!line.trim()) return;
+          // SGDK / make が内部的に無視する行はエラー表示しない
+          // 例: make[1]: [<tmp>.o] Error 127 (ignored)
+          if (/Error\s+\d+\s+\(ignored\)/i.test(line)) {
+            log(line, 'info');
+            return;
+          }
+          log(line, 'error');
         });
       });
 

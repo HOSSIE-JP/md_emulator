@@ -58,6 +58,9 @@ const state = {
     searchText: '',
     type: 'all',
   },
+  pluginUi: {
+    roleAccordionOpen: true,
+  },
 };
 
 const TYPE_OPTIONS = ['PALETTE', 'IMAGE', 'BITMAP', 'SPRITE', 'XGM', 'XGM2', 'WAV', 'MAP', 'TILEMAP', 'TILESET'];
@@ -239,6 +242,7 @@ const el = {
   btnCodeNewFile: $('btnCodeNewFile'),
   btnCodeNewFolder: $('btnCodeNewFolder'),
   btnCodeDelete: $('btnCodeDelete'),
+  btnCodeReload: $('btnCodeReload'),
   btnSaveCode: $('btnSaveCode'),
   btnCopyCode: $('btnCopyCode'),
   btnOpenSrcFolder: $('btnOpenSrcFolder'),
@@ -264,6 +268,8 @@ const el = {
   pluginSearchInput: $('pluginSearchInput'),
   pluginTypeFilter: $('pluginTypeFilter'),
   pluginRoleStatus: $('pluginRoleStatus'),
+  btnPluginRoleAccordion: $('btnPluginRoleAccordion'),
+  pluginRoleBody: $('pluginRoleBody'),
 
   aboutModal: $('aboutModal'),
   aboutBackdrop: $('aboutBackdrop'),
@@ -585,7 +591,12 @@ const pluginState = {
   activeBuilderPlugin: null,
   /** 現在 Test Play 用に使用中のエミュレータープラグイン ID */
   activeEmulatorPlugin: null,
+  /** サイドバー内プラグインアイコン順 (plugin.id の配列) */
+  sidebarOrder: [],
+  draggingSidebarPluginId: null,
 };
+
+const SIDEBAR_PLUGIN_ORDER_KEY_PREFIX = 'md-editor.sidebarPluginOrder.v1';
 
 const PLUGIN_NAV_PAGE_MAP = {
   'asset-manager': 'assets',
@@ -650,11 +661,141 @@ function resolvePluginIconId(iconName) {
   return 'icon-puzzle';
 }
 
+function getSidebarPluginOrderStorageKey() {
+  const scope = String(state.project?.dir || 'default').trim().toLowerCase();
+  return `${SIDEBAR_PLUGIN_ORDER_KEY_PREFIX}:${scope}`;
+}
+
+function loadSidebarPluginOrder() {
+  try {
+    const raw = localStorage.getItem(getSidebarPluginOrderStorageKey());
+    const parsed = raw ? JSON.parse(raw) : [];
+    pluginState.sidebarOrder = Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string') : [];
+  } catch (_) {
+    pluginState.sidebarOrder = [];
+  }
+}
+
+function saveSidebarPluginOrder() {
+  try {
+    localStorage.setItem(getSidebarPluginOrderStorageKey(), JSON.stringify(pluginState.sidebarOrder));
+  } catch (_) {}
+}
+
+function getSidebarEnabledTabPlugins() {
+  return pluginState.plugins.filter((plugin) => plugin.enabled && plugin.tab && resolvePluginPageId(plugin));
+}
+
+function normalizeSidebarPluginOrder() {
+  const orderedIds = [];
+  const seen = new Set();
+  const validIds = new Set(getSidebarEnabledTabPlugins().map((p) => p.id));
+
+  pluginState.sidebarOrder.forEach((id) => {
+    if (validIds.has(id) && !seen.has(id)) {
+      seen.add(id);
+      orderedIds.push(id);
+    }
+  });
+
+  const missing = getSidebarEnabledTabPlugins()
+    .sort((a, b) => {
+      const orderA = Number(a?.tab?.order ?? 1000);
+      const orderB = Number(b?.tab?.order ?? 1000);
+      if (orderA !== orderB) return orderA - orderB;
+      return String(a?.name || a?.id || '').localeCompare(String(b?.name || b?.id || ''), 'ja');
+    })
+    .map((p) => p.id)
+    .filter((id) => !seen.has(id));
+
+  pluginState.sidebarOrder = [...orderedIds, ...missing];
+  saveSidebarPluginOrder();
+}
+
+function clearSidebarDnDClasses() {
+  el.sidebarPluginTabs?.querySelectorAll('.nav-btn-plugin').forEach((btn) => {
+    btn.classList.remove('dragging', 'drop-before', 'drop-after');
+  });
+}
+
+function reorderSidebarPluginByDrop(sourceId, targetId, placeAfter) {
+  if (!sourceId || !targetId || sourceId === targetId) return;
+  const next = [...pluginState.sidebarOrder];
+  const sourceIndex = next.indexOf(sourceId);
+  const targetIndex = next.indexOf(targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return;
+
+  const [moved] = next.splice(sourceIndex, 1);
+  const adjustedTargetIndex = next.indexOf(targetId);
+  const insertIndex = placeAfter ? adjustedTargetIndex + 1 : adjustedTargetIndex;
+  next.splice(Math.max(0, insertIndex), 0, moved);
+
+  pluginState.sidebarOrder = next;
+  saveSidebarPluginOrder();
+  renderPluginSidebarTabs();
+}
+
+function bindPluginSidebarTabDnD() {
+  if (!el.sidebarPluginTabs) return;
+  const buttons = Array.from(el.sidebarPluginTabs.querySelectorAll('.nav-btn-plugin[data-plugin-id]'));
+  buttons.forEach((btn) => {
+    btn.addEventListener('dragstart', (event) => {
+      const pluginId = btn.dataset.pluginId || '';
+      if (!pluginId) return;
+      pluginState.draggingSidebarPluginId = pluginId;
+      btn.classList.add('dragging');
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', pluginId);
+      }
+    });
+
+    btn.addEventListener('dragover', (event) => {
+      const sourceId = pluginState.draggingSidebarPluginId;
+      const targetId = btn.dataset.pluginId || '';
+      if (!sourceId || !targetId || sourceId === targetId) return;
+
+      event.preventDefault();
+      const rect = btn.getBoundingClientRect();
+      const placeAfter = (event.clientY - rect.top) >= rect.height / 2;
+      btn.classList.toggle('drop-before', !placeAfter);
+      btn.classList.toggle('drop-after', placeAfter);
+    });
+
+    btn.addEventListener('dragleave', () => {
+      btn.classList.remove('drop-before', 'drop-after');
+    });
+
+    btn.addEventListener('drop', (event) => {
+      event.preventDefault();
+      const sourceId = pluginState.draggingSidebarPluginId;
+      const targetId = btn.dataset.pluginId || '';
+      const rect = btn.getBoundingClientRect();
+      const placeAfter = (event.clientY - rect.top) >= rect.height / 2;
+      reorderSidebarPluginByDrop(sourceId, targetId, placeAfter);
+      clearSidebarDnDClasses();
+    });
+
+    btn.addEventListener('dragend', () => {
+      pluginState.draggingSidebarPluginId = null;
+      clearSidebarDnDClasses();
+    });
+  });
+}
+
 function renderPluginSidebarTabs() {
   if (!el.sidebarPluginTabs) return;
+
+  normalizeSidebarPluginOrder();
+  const sidebarOrderIndex = new Map(pluginState.sidebarOrder.map((id, index) => [id, index]));
+
   const tabs = pluginState.plugins
     .filter((plugin) => plugin.enabled && plugin.tab)
     .sort((a, b) => {
+      const sidebarOrderA = sidebarOrderIndex.has(a.id) ? sidebarOrderIndex.get(a.id) : Number.POSITIVE_INFINITY;
+      const sidebarOrderB = sidebarOrderIndex.has(b.id) ? sidebarOrderIndex.get(b.id) : Number.POSITIVE_INFINITY;
+      if (sidebarOrderA !== sidebarOrderB) return sidebarOrderA - sidebarOrderB;
+
       const orderA = Number(a?.tab?.order ?? 1000);
       const orderB = Number(b?.tab?.order ?? 1000);
       if (orderA !== orderB) return orderA - orderB;
@@ -666,7 +807,7 @@ function renderPluginSidebarTabs() {
       const label = String(plugin.tab?.label || plugin.name || plugin.id);
       const iconId = resolvePluginIconId(plugin.tab?.icon);
       return `
-        <button class="nav-btn nav-btn-plugin" data-page="${escHtml(pageId)}" data-plugin-id="${escHtml(plugin.id)}">
+        <button class="nav-btn nav-btn-plugin" data-page="${escHtml(pageId)}" data-plugin-id="${escHtml(plugin.id)}" draggable="true" title="ドラッグで並び替え">
           <svg class="icon"><use href="#${escHtml(iconId)}"></use></svg>
           <span class="nav-label">${escHtml(label)}</span>
         </button>
@@ -675,6 +816,7 @@ function renderPluginSidebarTabs() {
     .filter(Boolean);
 
   el.sidebarPluginTabs.innerHTML = tabs.join('');
+  bindPluginSidebarTabDnD();
 }
 
 function applyPluginPageAvailability() {
@@ -736,6 +878,17 @@ function setPluginRoleStatus(message, kind = '') {
   el.pluginRoleStatus.className = `plugin-role-status ${kind}`.trim();
 }
 
+function setPluginRoleAccordionOpen(open) {
+  const button = el.btnPluginRoleAccordion;
+  const body = el.pluginRoleBody;
+  const next = Boolean(open);
+
+  state.pluginUi.roleAccordionOpen = next;
+
+  if (button) button.setAttribute('aria-expanded', String(next));
+  if (body) body.classList.toggle('is-collapsed', !next);
+}
+
 async function setActiveBuilderPlugin(id) {
   pluginState.activeBuilderPlugin = id || null;
   try {
@@ -782,6 +935,8 @@ async function loadPlugins() {
   } catch (_) {
     pluginState.plugins = [];
   }
+
+  loadSidebarPluginOrder();
 
   // プロジェクトに保存されているビルダーを読み込む
   try {
@@ -849,6 +1004,8 @@ async function loadPlugins() {
 }
 
 function renderPluginRoleSettings() {
+  setPluginRoleAccordionOpen(state.pluginUi.roleAccordionOpen);
+
   const buildPlugins = getEnabledPluginsByType('build');
   const emulatorPlugins = Array.from(new Map(
     getEnabledPluginsByType('emulator').map((p) => [p.id, p]),
@@ -4178,6 +4335,7 @@ async function openAboutDialog() {
 
 function bindEvents() {
   el.sidebar?.addEventListener('click', (event) => {
+    if (pluginState.draggingSidebarPluginId) return;
     const btn = event.target.closest('.nav-btn');
     if (!btn) return;
     if (btn.disabled) return;
@@ -4227,6 +4385,11 @@ function bindEvents() {
   el.btnCodeDelete?.addEventListener('click', async () => {
     await deleteSelectedCodeEntry();
   });
+  el.btnCodeReload?.addEventListener('click', async () => {
+    const keepPath = state.code.selectedIsDirectory ? undefined : state.code.selectedPath;
+    await loadCodeTree(keepPath);
+    updateCodeStatus('src ツリーを再読み込みしました');
+  });
   el.btnCodeNewEntryConfirm?.addEventListener('click', async () => {
     await confirmCodeNewEntry();
   });
@@ -4245,6 +4408,10 @@ function bindEvents() {
     if (rootResult?.ok && rootResult.root) {
       await window.electronAPI.openPathInExplorer(rootResult.root);
     }
+  });
+
+  el.btnPluginRoleAccordion?.addEventListener('click', () => {
+    setPluginRoleAccordionOpen(!state.pluginUi.roleAccordionOpen);
   });
   el.btnSaveCode?.addEventListener('click', async () => {
     await saveCurrentCodeFile();
@@ -4565,6 +4732,10 @@ function bindEvents() {
   window.electronAPI.onMenuOpenSetup?.(() => {
     switchPage('settings');
     window.electronAPI.openSetupWindow();
+  });
+
+  window.electronAPI.onMenuOpenProjects?.(() => {
+    openProjectPicker();
   });
 
   window.electronAPI.onMenuOpenAbout?.(() => {

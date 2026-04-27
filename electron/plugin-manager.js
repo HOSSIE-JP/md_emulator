@@ -31,6 +31,11 @@ function getPluginsDir() {
   return path.join(__dirname, 'plugins');
 }
 
+// ユーザーが独自に追加できるプラグインディレクトリ (常に書き込み可能)
+function getUserPluginsDir() {
+  return path.join(app.getPath('userData'), 'plugins');
+}
+
 // ── ステート永続化 ─────────────────────────────────────────────────────────
 
 function getStateFile() {
@@ -84,22 +89,38 @@ function isPluginEnabled(id) {
 // ── プラグイン一覧 ──────────────────────────────────────────────────────────
 
 function listPlugins() {
-  const pluginsDir = getPluginsDir();
-  if (!fs.existsSync(pluginsDir)) return [];
+  const builtinDir = getPluginsDir();
+  const userDir = getUserPluginsDir();
   const state = readState();
 
-  return fs.readdirSync(pluginsDir, { withFileTypes: true })
-    .filter((d) => d.isDirectory())
-    .map((d) => {
-      const id = d.name;
+  // ユーザープラグインを優先し、同一 ID は上書き
+  const pluginEntries = []; // { id, baseDir }
+  const seen = new Set();
+
+  function collectFrom(dir, isUser) {
+    if (!fs.existsSync(dir)) return;
+    fs.readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .forEach((d) => {
+        if (!seen.has(d.name)) {
+          seen.add(d.name);
+          pluginEntries.push({ id: d.name, baseDir: dir, isUser });
+        }
+      });
+  }
+
+  collectFrom(userDir, true);    // ユーザープラグイン優先
+  collectFrom(builtinDir, false); // 組み込みプラグイン
+
+  return pluginEntries
+    .map(({ id, baseDir, isUser }) => {
       let manifest = { id, name: id, description: '', version: '0.0.0' };
-      const manifestPath = path.join(pluginsDir, id, 'manifest.json');
+      const manifestPath = path.join(baseDir, id, 'manifest.json');
       try {
         manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
       } catch (_) {}
 
-      // index.js の有無を確認してジェネレータがあるかを伝える
-      const hasGenerator = fs.existsSync(path.join(pluginsDir, id, 'index.js'));
+      const hasGenerator = fs.existsSync(path.join(baseDir, id, 'index.js'));
       const pluginTypes = normalizePluginTypes(manifest);
 
       return {
@@ -113,8 +134,8 @@ function listPlugins() {
         dependencies: normalizeDependencies(manifest),
         hooks: normalizeHooks(manifest),
         hasGenerator,
-        // デフォルトは有効 (state に記録がなければ true)
         enabled: Boolean(state[id]?.enabled ?? true),
+        isUserPlugin: isUser,  // ユーザー追加プラグインか否か
       };
     })
     .sort((a, b) => a.id.localeCompare(b.id, 'ja'));
@@ -206,8 +227,13 @@ function setEnabledWithDependencies(id, enabled) {
 // ── ジェネレータ実行 ────────────────────────────────────────────────────────
 
 function getPlugin(id) {
-  const indexPath = path.join(getPluginsDir(), id, 'index.js');
-  if (!fs.existsSync(indexPath)) return null;
+  // ユーザープラグインを優先して探す
+  const userIndexPath = path.join(getUserPluginsDir(), id, 'index.js');
+  const builtinIndexPath = path.join(getPluginsDir(), id, 'index.js');
+  const indexPath = fs.existsSync(userIndexPath) ? userIndexPath
+    : fs.existsSync(builtinIndexPath) ? builtinIndexPath
+    : null;
+  if (!indexPath) return null;
   // require キャッシュを強制クリアしてリロードに対応
   const resolved = require.resolve(indexPath);
   delete require.cache[resolved];
@@ -274,4 +300,5 @@ module.exports = {
   runGenerator,
   invokeHook,
   isPluginEnabled,
+  getUserPluginsDir,
 };

@@ -422,6 +422,22 @@ async function initializeWasm() {
 
     setStatus("wasm ready");
     updateMeta();
+
+    // ── エクスポートされたスタンドアロン HTML 向けオートスタート ──
+    // HTML 生成時に window.__AUTOSTART_ROM_B64 = { data: "<base64>", label: "<name>" }
+    // をセットしておくと、WASM 初期化後に自動的に ROM を読み込んで起動する。
+    if (window.__AUTOSTART_ROM_B64 && window.__AUTOSTART_ROM_B64.data) {
+      try {
+        const b64 = window.__AUTOSTART_ROM_B64.data;
+        const romLabel = window.__AUTOSTART_ROM_B64.label || "ROM";
+        const bstr = atob(b64);
+        const romBytes = new Uint8Array(bstr.length);
+        for (let i = 0; i < bstr.length; i++) romBytes[i] = bstr.charCodeAt(i);
+        await loadRomBytes(romBytes, romLabel);
+      } catch (autostartErr) {
+        setStatus(`autostart failed: ${autostartErr}`);
+      }
+    }
   } catch (error) {
     setStatus(`wasm init failed: ${error}`);
     setMeta("build frontend/pkg first: wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg");

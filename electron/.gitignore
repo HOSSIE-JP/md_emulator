@@ -10,3 +10,4 @@ pkg/md_wasm.d.ts
 pkg/md_wasm_bg.wasm.d.ts
 md-emulator.js
 md-emulator.d.ts
+wasm-player.js

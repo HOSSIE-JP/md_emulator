@@ -43,10 +43,6 @@
       <span class="project-path-chip" id="projectDirLabel">sample</span>
     </div>
     <div class="topbar-actions">
-      <button class="action-btn" id="btnOpenProject">
-        <svg class="icon"><use href="#icon-folder"></use></svg>
-        Projects
-      </button>
       <button class="action-btn build-btn" id="btnBuild">
         <svg class="icon"><use href="#icon-build"></use></svg>
         Build
@@ -218,6 +214,9 @@
                 <button class="icon-btn icon-btn-xs" id="btnOpenSrcFolder" title="src フォルダを開く">
                   <svg class="icon"><use href="#icon-folder-open"></use></svg>
                 </button>
+                <button class="icon-btn icon-btn-xs" id="btnCodeReload" title="src ツリーを再読み込み">
+                  ↻
+                </button>
               </div>
             </div>
             <div id="codeNewEntryRow" class="code-new-entry-row" hidden>
@@ -273,19 +272,28 @@
           </label>
         </section>
         <section class="plugin-role-settings" id="pluginRoleSettings">
-          <div class="plugin-role-card">
-            <h3>Build プラグイン（単一選択）</h3>
-            <div class="plugin-role-row">
-              <select id="pluginBuilderSelect" class="form-input"></select>
+          <div class="plugin-role-card plugin-role-card-accordion plugin-role-card-group">
+            <button class="accordion-header" id="btnPluginRoleAccordion" type="button" aria-expanded="true">
+              <span class="accordion-title">Build / Emulator プラグイン（単一選択）</span>
+              <svg class="icon accordion-chevron"><use href="#icon-chevron-up"></use></svg>
+            </button>
+            <div class="accordion-body" id="pluginRoleBody">
+              <div class="plugin-role-card">
+                <h3>Build プラグイン（単一選択）</h3>
+                <div class="plugin-role-row">
+                  <select id="pluginBuilderSelect" class="form-input"></select>
+                </div>
+                <p class="form-hint">Build ボタン実行時のコード生成とビルドフックに使用します。</p>
+              </div>
+
+              <div class="plugin-role-card">
+                <h3>Emulator プラグイン（単一選択）</h3>
+                <div class="plugin-role-row">
+                  <select id="pluginEmulatorSelect" class="form-input"></select>
+                </div>
+                <p class="form-hint">Test Play ボタン実行時の起動フックに使用します。</p>
+              </div>
             </div>
-            <p class="form-hint">Build ボタン実行時のコード生成とビルドフックに使用します。</p>
-          </div>
-          <div class="plugin-role-card">
-            <h3>Emulator プラグイン（単一選択）</h3>
-            <div class="plugin-role-row">
-              <select id="pluginEmulatorSelect" class="form-input"></select>
-            </div>
-            <p class="form-hint">Test Play ボタン実行時の起動フックに使用します。</p>
           </div>
         </section>
         <p id="pluginRoleStatus" class="plugin-role-status" aria-live="polite"></p>
@@ -350,7 +358,7 @@
   <div class="build-log-bar" id="buildLogBar">
     <div class="build-log-header" id="buildLogHeader">
       <div class="build-log-title-row">
-        <span class="build-log-title">ログパネル</span>
+        <span class="build-log-title">Log</span>
         <span class="build-status-badge" id="buildStatusBadge"></span>
       </div>
       <div class="build-log-controls">

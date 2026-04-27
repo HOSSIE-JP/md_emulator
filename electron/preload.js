@@ -46,6 +46,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMenuOpenSetup: (callback) => {
     ipcRenderer.on('menu:openSetup', (_event) => callback());
   },
+  onMenuOpenProjects: (callback) => {
+    ipcRenderer.on('menu:openProjects', (_event) => callback());
+  },
   onMenuOpenAbout: (callback) => {
     ipcRenderer.on('menu:openAbout', (_event) => callback());
   },
@@ -75,4 +78,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setPluginEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', { id, enabled }),
   runPluginGenerator: (id) => ipcRenderer.invoke('plugins:runGenerator', { id }),
   openPluginsFolder: () => ipcRenderer.invoke('plugins:openFolder'),
+  // --- エクスポート ---
+  exportRom: () => ipcRenderer.invoke('export:rom'),
+  exportHtml: () => ipcRenderer.invoke('export:html'),
 });

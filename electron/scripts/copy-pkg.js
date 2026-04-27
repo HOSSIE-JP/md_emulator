@@ -10,6 +10,8 @@ const fromWrapper = path.join(repoRoot, 'frontend', 'md-emulator.js');
 const fromTypes = path.join(repoRoot, 'frontend', 'md-emulator.d.ts');
 const toWrapper = path.join(electronRoot, 'md-emulator.js');
 const toTypes = path.join(electronRoot, 'md-emulator.d.ts');
+const fromPlayer = path.join(repoRoot, 'frontend', 'wasm-player.js');
+const toPlayer = path.join(electronRoot, 'wasm-player.js');
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -43,6 +45,10 @@ function main() {
 
   if (fs.existsSync(fromTypes)) {
     copyRecursive(fromTypes, toTypes);
+  }
+
+  if (fs.existsSync(fromPlayer)) {
+    copyRecursive(fromPlayer, toPlayer);
   }
 
   console.log('Copied frontend WASM assets into electron directory.');

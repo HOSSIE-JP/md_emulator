@@ -286,9 +286,42 @@ function createMenu() {
       label: 'File',
       submenu: [
         {
+          label: 'Open Projects',
+          accelerator: process.platform === 'darwin' ? 'Cmd+O' : 'Ctrl+O',
+          click: () => {
+            sendToRenderer('menu:openProjects');
+          },
+        },
+        { type: 'separator' },
+        {
           label: 'Setup',
           click: () => {
             sendToRenderer('menu:openSetup');
+          },
+        },
+        { type: 'separator' },
+        {
+          label: 'Export ROM',
+          accelerator: process.platform === 'darwin' ? 'Cmd+Shift+E' : 'Ctrl+Shift+E',
+          click: async () => {
+            const result = await handleExportRom();
+            if (result.ok) {
+              sendToRenderer('build-log', { text: `ROM をエクスポートしました: ${result.path}`, level: 'info' });
+            } else if (!result.canceled) {
+              sendToRenderer('build-log', { text: `Export ROM 失敗: ${result.error}`, level: 'error' });
+            }
+          },
+        },
+        {
+          label: 'Export HTML',
+          click: async () => {
+            const result = await handleExportHtml();
+            if (result.ok) {
+              sendToRenderer('build-log', { text: `HTML をエクスポートしました: ${result.path}`, level: 'info' });
+              shell.openPath(path.dirname(result.path)).catch(() => {});
+            } else if (!result.canceled) {
+              sendToRenderer('build-log', { text: `Export HTML 失敗: ${result.error}`, level: 'error' });
+            }
           },
         },
         { type: 'separator' },
@@ -823,11 +856,13 @@ ipcMain.handle('plugins:setEnabled', (_event, { id, enabled }) => {
 });
 
 ipcMain.handle('plugins:openFolder', async () => {
-  const pluginsDir = path.join(__dirname, 'plugins');
+  // パッケージ版では組み込み plugins/ は読み取り専用のため、
+  // 書き込み可能なユーザーデータフォルダを開く
+  const userDir = pluginManager.getUserPluginsDir();
   try {
-    if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir, { recursive: true });
-    const error = await shell.openPath(pluginsDir);
-    return error ? { ok: false, error } : { ok: true, path: pluginsDir };
+    if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
+    const error = await shell.openPath(userDir);
+    return error ? { ok: false, error } : { ok: true, path: userDir };
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
   }
@@ -1045,7 +1080,9 @@ ipcMain.handle('build:generateStructureOnly', async (_event, config) => {
   }
 });
 
-ipcMain.handle('build:run', async () => {
+// ── ビルド共通ロジック ──────────────────────────────────────────────────────
+
+async function runBuildFull() {
   try {
     const toolchainPath = setupManager.getToolchainDir();
     const javaPath = setupManager.getJavaExePath();
@@ -1054,7 +1091,6 @@ ipcMain.handle('build:run', async () => {
     if (!toolchainPath) {
       return { success: false, error: 'ツールチェーンが設定されていません。Setup を実行してください。' };
     }
-    // project.json に未保存の場合、有効な build プラグインをフォールバック検索
     if (!builderPluginId) {
       const fallback = pluginManager.listPlugins().find(
         (p) => p.enabled && Array.isArray(p.pluginTypes) && p.pluginTypes.includes('build'),
@@ -1097,7 +1133,6 @@ ipcMain.handle('build:run', async () => {
 
     const result = await buildSystem.buildProject(toolchainPath, javaPath, (line, level) => {
       sendToRenderer('build-log', { text: line, level: level || 'info' });
-
       if (builderPluginId) {
         void pluginManager.invokeHook(builderPluginId, 'onBuildLog', {
           line,
@@ -1133,6 +1168,524 @@ ipcMain.handle('build:run', async () => {
     sendToRenderer('build-end', r);
     return r;
   }
+}
+
+// ── Export HTML ジェネレータ ────────────────────────────────────────────────
+
+function parseRomHeaderInfo(romBytes, romLabel) {
+  const safeAscii = (start, len) => {
+    if (romBytes.length <= start) return '';
+    const end = Math.min(romBytes.length, start + len);
+    return romBytes
+      .subarray(start, end)
+      .toString('ascii')
+      .replace(/\0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  const readU16BE = (offset) => {
+    if (offset + 1 >= romBytes.length) return null;
+    return romBytes.readUInt16BE(offset);
+  };
+
+  const readU32BE = (offset) => {
+    if (offset + 3 >= romBytes.length) return null;
+    return romBytes.readUInt32BE(offset);
+  };
+
+  const checksum = readU16BE(0x18E);
+  const romStart = readU32BE(0x1A0);
+  const romEnd = readU32BE(0x1A4);
+
+  return {
+    fileName: romLabel,
+    fileSize: romBytes.length,
+    consoleName: safeAscii(0x100, 16),
+    domesticTitle: safeAscii(0x120, 48),
+    overseasTitle: safeAscii(0x150, 48),
+    serial: safeAscii(0x180, 14),
+    ioSupport: safeAscii(0x190, 16),
+    region: safeAscii(0x1F0, 3),
+    checksum: checksum == null ? 'N/A' : `0x${checksum.toString(16).padStart(4, '0').toUpperCase()}`,
+    romRange: (romStart == null || romEnd == null)
+      ? 'N/A'
+      : `0x${romStart.toString(16).padStart(8, '0').toUpperCase()} - 0x${romEnd.toString(16).padStart(8, '0').toUpperCase()}`,
+  };
+}
+
+function generateExportHtml({
+  romBase64,
+  romLabel,
+  wasmJsText,
+  wasmBase64,
+  playerJsText,
+  romInfo,
+  appVersion,
+  appBuildNumber,
+  appBuildAt,
+}) {
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  function escJs(s) {
+    return String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  // ── md_wasm.js パッチ: ES module exports 除去 + 内部変数名衝突を解消 ──
+  let wasmJs = wasmJsText;
+  wasmJs = wasmJs.replace('export class EmulatorHandle {', 'class EmulatorHandle {');
+  wasmJs = wasmJs.replace('let wasmModule, wasm;', 'let __wbgInternalModule, wasm;');
+  wasmJs = wasmJs.replace('    wasmModule = module;', '    __wbgInternalModule = module;');
+  wasmJs = wasmJs.replace('export { initSync, __wbg_init as default };', '// [exports removed for standalone build]');
+
+  // ── wasm-player.js パッチ: dynamic import を廃止し WASM を ArrayBuffer で直接初期化 ──
+  let playerJs = playerJsText;
+  playerJs = playerJs.replace(
+    '    wasmModule = await import(`./pkg/md_wasm.js?v=${cacheBust}`);',
+    '    wasmModule = { EmulatorHandle, default: __wbg_init };',
+  );
+  playerJs = playerJs.replace(
+    '    await wasmModule.default(`./pkg/md_wasm_bg.wasm?v=${cacheBust}`);',
+    '    { const _wb = atob(window.__WASM_B64), _wa = new Uint8Array(_wb.length);' +
+    ' for (let _wi = 0; _wi < _wb.length; _wi++) _wa[_wi] = _wb.charCodeAt(_wi);' +
+    ' await __wbg_init(_wa.buffer); }',
+  );
+
+  const romInfoLiteral = JSON.stringify(romInfo || {}).replace(/<\/script>/gi, '<\\/script>');
+  const appVersionLiteral = escJs(appVersion || 'unknown');
+  const appBuildNumberLiteral = escJs(appBuildNumber || 'dev');
+  const appBuildAtLiteral = escJs(appBuildAt || 'N/A');
+
+  const standaloneUiPatch = `
+(() => {
+  const setText = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+
+  const fmtBytes = (n) => {
+    const num = Number(n || 0);
+    if (!Number.isFinite(num)) return '0 bytes';
+    if (num >= 1024 * 1024) return (num / (1024 * 1024)).toFixed(2) + ' MB (' + num + ' bytes)';
+    if (num >= 1024) return (num / 1024).toFixed(2) + ' KB (' + num + ' bytes)';
+    return num + ' bytes';
+  };
+
+  window.__ROM_INFO = ${romInfoLiteral};
+  const romInfo = window.__ROM_INFO || {};
+
+  setText('romFileName', romInfo.fileName || 'unknown');
+  setText('romFileSize', fmtBytes(romInfo.fileSize));
+  setText('romConsoleName', romInfo.consoleName || 'N/A');
+  setText('romDomesticTitle', romInfo.domesticTitle || 'N/A');
+  setText('romOverseasTitle', romInfo.overseasTitle || 'N/A');
+  setText('romSerial', romInfo.serial || 'N/A');
+  setText('romRegion', romInfo.region || 'N/A');
+  setText('romChecksum', romInfo.checksum || 'N/A');
+  setText('romRange', romInfo.romRange || 'N/A');
+  setText('romIoSupport', romInfo.ioSupport || 'N/A');
+
+  const appVersion = "${appVersionLiteral}";
+  const appBuildNumber = "${appBuildNumberLiteral}";
+  const appBuildAt = "${appBuildAtLiteral}";
+  setText('helpVersionApp', 'MD Emulator v' + appVersion + ' / build ' + appBuildNumber);
+  setText('helpVersionBuildAt', appBuildAt);
+
+  const updateWasmVersion = () => {
+    let wasmVersion = 'unknown';
+    try {
+      if (typeof EmulatorHandle !== 'undefined' && EmulatorHandle && EmulatorHandle.build_version) {
+        wasmVersion = EmulatorHandle.build_version();
+      }
+    } catch (_) {}
+    setText('helpVersionWasm', wasmVersion);
+  };
+
+  let versionRetry = 0;
+  const versionTimer = setInterval(() => {
+    versionRetry += 1;
+    updateWasmVersion();
+    if (versionRetry > 30) clearInterval(versionTimer);
+  }, 200);
+  updateWasmVersion();
+
+  const runBtn = document.getElementById('toggleRun');
+  let autoPlayRetries = 0;
+  const autoPlayTimer = setInterval(() => {
+    autoPlayRetries += 1;
+    if (runBtn && !runBtn.disabled && String(runBtn.textContent || '').includes('▶')) {
+      runBtn.click();
+    }
+    if (runBtn && String(runBtn.textContent || '').includes('⏸')) {
+      clearInterval(autoPlayTimer);
+    } else if (autoPlayRetries > 40) {
+      clearInterval(autoPlayTimer);
+    }
+  }, 120);
+
+  const dlRom = document.getElementById('downloadRom');
+  if (dlRom) {
+    dlRom.addEventListener('click', () => {
+      try {
+        const b64 = (window.__AUTOSTART_ROM_B64 && window.__AUTOSTART_ROM_B64.data) || '';
+        const label = (window.__AUTOSTART_ROM_B64 && window.__AUTOSTART_ROM_B64.label) || (romInfo.fileName || 'game.bin');
+        const bstr = atob(b64);
+        const bytes = new Uint8Array(bstr.length);
+        for (let i = 0; i < bstr.length; i++) bytes[i] = bstr.charCodeAt(i);
+        const blob = new Blob([bytes], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = label;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        const st = document.getElementById('status');
+        if (st) st.textContent = 'ROM download failed: ' + err;
+      }
+    });
+  }
+
+  const helpModal = document.getElementById('helpModal');
+  const helpBtn = document.getElementById('helpBtn');
+  const helpClose = document.getElementById('helpClose');
+  const helpBackdrop = document.getElementById('helpBackdrop');
+
+  const closeHelp = () => {
+    if (!helpModal) return;
+    helpModal.classList.add('hidden');
+    document.body.classList.remove('modal-open');
+  };
+
+  if (helpBtn) {
+    helpBtn.addEventListener('click', () => {
+      if (!helpModal) return;
+      helpModal.classList.remove('hidden');
+      document.body.classList.add('modal-open');
+    });
+  }
+  if (helpClose) helpClose.addEventListener('click', closeHelp);
+  if (helpBackdrop) helpBackdrop.addEventListener('click', closeHelp);
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeHelp();
+  });
+})();`;
+
+  // </script> が HTML を壊さないようエスケープ
+  const scriptEscape = (s) => s.replace(/<\/script>/gi, '<\\/script>');
+  const combinedScript = scriptEscape(wasmJs + '\n\n' + playerJs + '\n\n' + standaloneUiPatch);
+
+  return `<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MD Emulator</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #050a17; color: #ebf3ff;
+      font-family: system-ui, "Segoe UI", sans-serif; }
+    body { display: flex; flex-direction: column; align-items: center; }
+    body.modal-open { overflow: hidden; }
+    header { width: 100%; max-width: 640px; padding: 10px 14px;
+      display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid #1a2a42; }
+    h1 { font-size: 15px; font-weight: 600; flex: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    main { width: 100%; max-width: 640px; padding: 8px; flex: 1;
+      display: flex; flex-direction: column; gap: 8px; }
+    .screen-stage { width: 100%; aspect-ratio: 320 / 224; background: #000;
+      border-radius: 8px; overflow: hidden; border: 1px solid #1a2a42; }
+    .screen-stage:fullscreen { width: 100vw; height: 100vh; border-radius: 0;
+      display: flex; align-items: center; justify-content: center; }
+    canvas#screen { width: 100%; height: 100%; object-fit: contain;
+      image-rendering: pixelated; display: block; }
+    .controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    button { background: #163154; border: 1px solid #2a3f5e; color: #ebf3ff;
+      border-radius: 8px; padding: 7px 12px; cursor: pointer; font-size: 13px; }
+    button:hover { background: #1d3e68; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .spacer { flex: 1; }
+    #status { font-size: 12px; color: #4bc8ff; min-height: 18px; }
+    #buildVersion, #gamepadStatus, #devPanel, #installPwa { display: none; }
+    input[type="file"] { display: none; }
+    #dropZone { display: contents; }
+    .rom-panel {
+      margin-top: 8px;
+      border: 1px solid #1a2a42;
+      background: #0b1528;
+      border-radius: 8px;
+      padding: 10px;
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+    }
+    .rom-panel h2 { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+    .info-grid {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 4px 10px;
+      align-items: baseline;
+    }
+    .info-grid dt { color: #8cb4de; }
+    .info-grid dd { word-break: break-all; }
+    .footer-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 4px;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal.hidden { display: none; }
+    .modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.62);
+    }
+    .modal-card {
+      position: relative;
+      width: min(640px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px);
+      overflow: auto;
+      background: #0b1528;
+      border: 1px solid #2a3f5e;
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .modal-card h3 { font-size: 16px; margin-bottom: 8px; }
+    .modal-card h4 { font-size: 13px; margin: 10px 0 6px; color: #8cb4de; }
+    .help-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .help-table th, .help-table td {
+      border: 1px solid #1f3250;
+      padding: 6px;
+      text-align: left;
+    }
+    .help-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+    @media (max-width: 480px) {
+      .info-grid { grid-template-columns: 1fr; }
+      .footer-actions { justify-content: stretch; }
+      .footer-actions button { flex: 1; }
+    }
+  </style>
+  <script>
+    window.__AUTOSTART_ROM_B64 = { data: "${romBase64}", label: "${escJs(romLabel)}" };
+    window.__WASM_B64 = "${wasmBase64}";
+  </script>
+</head>
+<body>
+  <header>
+    <h1>MD Emulator</h1>
+    <span id="buildVersion"></span>
+  </header>
+  <main>
+    <div id="dropZone">
+      <div class="screen-stage">
+        <canvas id="screen" width="320" height="224"></canvas>
+      </div>
+    </div>
+    <div id="status">読み込み中...</div>
+    <div id="gamepadStatus"></div>
+    <div class="controls">
+      <button id="toggleRun" title="再生 / 一時停止" disabled>&#9654;</button>
+      <button id="reset" title="リセット" disabled>&#8634;</button>
+      <button id="toggleAudio" title="ミュート切替" disabled>&#128266;</button>
+      <span class="spacer"></span>
+      <button id="fullscreen" title="フルスクリーン">&#x26F6;</button>
+    </div>
+    <input type="file" id="romFile" accept=".bin,.md,.gen,.smd">
+    <button id="loadRom" style="display:none">Load ROM</button>
+    <select id="bundledRom" style="display:none"></select>
+    <button id="loadBundled" style="display:none">Load Bundled</button>
+    <div id="meta" style="display:none"></div>
+    <section class="rom-panel">
+      <h2>ROM Information</h2>
+      <dl class="info-grid">
+        <dt>File Name</dt><dd id="romFileName">-</dd>
+        <dt>File Size</dt><dd id="romFileSize">-</dd>
+        <dt>Console</dt><dd id="romConsoleName">-</dd>
+        <dt>Domestic Title</dt><dd id="romDomesticTitle">-</dd>
+        <dt>Overseas Title</dt><dd id="romOverseasTitle">-</dd>
+        <dt>Serial</dt><dd id="romSerial">-</dd>
+        <dt>Region</dt><dd id="romRegion">-</dd>
+        <dt>Checksum</dt><dd id="romChecksum">-</dd>
+        <dt>ROM Range</dt><dd id="romRange">-</dd>
+        <dt>I/O Support</dt><dd id="romIoSupport">-</dd>
+      </dl>
+      <div class="footer-actions">
+        <button id="downloadRom" title="ROM をダウンロード">Download ROM</button>
+        <button id="helpBtn" title="ヘルプを表示">Help</button>
+      </div>
+    </section>
+    <div id="installPwa"></div>
+    <div id="fsOverlay"></div>
+    <div id="devPanel"></div>
+  </main>
+
+  <div id="helpModal" class="modal hidden" aria-hidden="true">
+    <div id="helpBackdrop" class="modal-backdrop"></div>
+    <section class="modal-card" role="dialog" aria-modal="true" aria-label="Help">
+      <h3>MD Emulator Help</h3>
+
+      <h4>Keyboard Controller Mapping</h4>
+      <table class="help-table">
+        <thead>
+          <tr><th>Controller</th><th>Keyboard</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Up / Down / Left / Right</td><td>Arrow Keys or W / S / A / D</td></tr>
+          <tr><td>Button A</td><td>U</td></tr>
+          <tr><td>Button B</td><td>J</td></tr>
+          <tr><td>Button C</td><td>K</td></tr>
+          <tr><td>Start</td><td>Enter</td></tr>
+        </tbody>
+      </table>
+
+      <h4>Version Information</h4>
+      <table class="help-table">
+        <tbody>
+          <tr><th>App</th><td id="helpVersionApp">-</td></tr>
+          <tr><th>Build At</th><td id="helpVersionBuildAt">-</td></tr>
+          <tr><th>WASM</th><td id="helpVersionWasm">-</td></tr>
+        </tbody>
+      </table>
+
+      <div class="help-actions">
+        <button id="helpClose">Close</button>
+      </div>
+    </section>
+  </div>
+
+  <script type="module">
+${combinedScript}
+  </script>
+</body>
+</html>`;
+}
+
+// ── Export ハンドラ ─────────────────────────────────────────────────────────
+
+async function handleExportRom() {
+  const buildResult = await runBuildFull();
+  if (!buildResult.success) {
+    return { ok: false, error: buildResult.error || 'ビルドに失敗しました' };
+  }
+
+  const romPath = buildSystem.getLastRomPath();
+  if (!romPath || !fs.existsSync(romPath)) {
+    return { ok: false, error: 'ビルド成功しましたが ROM ファイルが見つかりません' };
+  }
+
+  const owner = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : undefined;
+  let suggested = path.basename(romPath);
+  try {
+    const cfg = buildSystem.loadProjectConfig();
+    if (cfg?.name) suggested = `${cfg.name.replace(/[^a-zA-Z0-9._-]/g, '_')}.bin`;
+  } catch (_) {}
+
+  const result = await dialog.showSaveDialog(owner, {
+    title: 'ROM をエクスポート',
+    defaultPath: suggested,
+    filters: [
+      { name: 'Mega Drive ROM', extensions: ['bin', 'md', 'gen'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+  fs.copyFileSync(romPath, result.filePath);
+  return { ok: true, path: result.filePath };
+}
+
+async function handleExportHtml() {
+  const buildResult = await runBuildFull();
+  if (!buildResult.success) {
+    return { ok: false, error: buildResult.error || 'ビルドに失敗しました' };
+  }
+
+  const romPath = buildSystem.getLastRomPath();
+  if (!romPath || !fs.existsSync(romPath)) {
+    return { ok: false, error: 'ビルド成功しましたが ROM ファイルが見つかりません' };
+  }
+
+  // ソースファイルパスを確認
+  const pkgDir = path.join(__dirname, 'pkg');
+  const wasmJsPath = path.join(pkgDir, 'md_wasm.js');
+  const wasmBinPath = path.join(pkgDir, 'md_wasm_bg.wasm');
+  const playerJsPath = path.join(__dirname, 'wasm-player.js');
+
+  for (const [label, p] of [['md_wasm.js', wasmJsPath], ['md_wasm_bg.wasm', wasmBinPath], ['wasm-player.js', playerJsPath]]) {
+    if (!fs.existsSync(p)) {
+      return { ok: false, error: `${label} が見つかりません。npm run copy-pkg を実行してください。` };
+    }
+  }
+
+  const wasmJsText = fs.readFileSync(wasmJsPath, 'utf-8');
+  const wasmBase64 = fs.readFileSync(wasmBinPath).toString('base64');
+  const playerJsText = fs.readFileSync(playerJsPath, 'utf-8');
+  const romBytes = fs.readFileSync(romPath);
+  const romBase64 = romBytes.toString('base64');
+  const romLabel = path.basename(romPath);
+  const romInfo = parseRomHeaderInfo(romBytes, romLabel);
+
+  // 保存先 HTML ファイルを選択（シングルファイル・サーバー不要）
+  const owner = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : undefined;
+  let suggested = romLabel.replace(/\.(bin|md|gen|smd)$/i, '') + '.html';
+  try {
+    const cfg = buildSystem.loadProjectConfig();
+    if (cfg?.name) suggested = `${cfg.name.replace(/[^a-zA-Z0-9._-]/g, '_')}.html`;
+  } catch (_) {}
+
+  const saveResult = await dialog.showSaveDialog(owner, {
+    title: 'HTML をエクスポート（スタンドアロン・サーバー不要）',
+    defaultPath: suggested,
+    filters: [{ name: 'HTML ファイル', extensions: ['html'] }],
+  });
+  if (saveResult.canceled || !saveResult.filePath) return { ok: false, canceled: true };
+
+  const html = generateExportHtml({
+    romBase64,
+    romLabel,
+    wasmJsText,
+    wasmBase64,
+    playerJsText,
+    romInfo,
+    appVersion: electronPackageJson.version,
+    appBuildNumber: appBuildMeta.buildNumber,
+    appBuildAt: appBuildMeta.buildAt,
+  });
+  fs.writeFileSync(saveResult.filePath, html, 'utf-8');
+
+  return { ok: true, path: saveResult.filePath };
+}
+
+ipcMain.handle('build:run', async () => {
+  return runBuildFull();
+});
+
+ipcMain.handle('export:rom', async () => {
+  return handleExportRom();
+});
+
+ipcMain.handle('export:html', async () => {
+  return handleExportHtml();
 });
 
 ipcMain.handle('build:getRomPath', async () => {
