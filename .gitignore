@@ -94,5 +94,6 @@ tags
 # /roms/
 /target*
 /roms
+/out
 /.reports
 output.htmlchat.json

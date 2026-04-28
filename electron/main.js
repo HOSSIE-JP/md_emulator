@@ -988,13 +988,13 @@ ipcMain.handle('plugins:setEnabled', (_event, { id, enabled }) => {
 });
 
 ipcMain.handle('plugins:openFolder', async () => {
-  // パッケージ版では組み込み plugins/ は読み取り専用のため、
-  // 書き込み可能なユーザーデータフォルダを開く
-  const userDir = pluginManager.getUserPluginsDir();
+  const pluginsDir = pluginManager.getPluginsDir();
   try {
-    if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
-    const error = await shell.openPath(userDir);
-    return error ? { ok: false, error } : { ok: true, path: userDir };
+    if (!fs.existsSync(pluginsDir)) {
+      return { ok: false, error: `plugins フォルダが見つかりません: ${pluginsDir}` };
+    }
+    const error = await shell.openPath(pluginsDir);
+    return error ? { ok: false, error } : { ok: true, path: pluginsDir };
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
   }

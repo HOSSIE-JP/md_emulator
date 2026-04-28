@@ -394,5 +394,6 @@ module.exports = {
   runGenerator,
   invokeHook,
   isPluginEnabled,
+  getPluginsDir,
   getUserPluginsDir,
 };

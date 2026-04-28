@@ -10,7 +10,7 @@ import {
   defaultSubDirForType,
   inferTypeFromExtension,
   normalizeSymbolName,
-} from '../plugins/asset-manager/asset-utils.mjs';
+} from './asset-utils.mjs';
 
 // ------------------------------------------------------------------ state --
 const state = {
