@@ -1,63 +1,74 @@
-# Codex Instructions
+# Codex 向け指示
 
-This repository also contains GitHub Copilot guidance under `.github/`.
-Codex can use that material only when it is explicitly referenced or when this
-file points to it. Treat this file as the Codex entry point for repository
-guidance.
+このリポジトリには、GitHub Copilot 向けのガイダンスが `.github/`
+配下にもあります。Codex は、このファイルで明示的に参照されている
+場合に限り、その内容を利用できます。このファイルを Codex 向けの
+入口として扱ってください。
 
-## Always Read First
+## 最初に必ず読むもの
 
-- Read `.github/copilot-instructions.md` before changing emulator core,
-  API, WASM, frontend integration, or documentation.
-- Follow its public API documentation rule: when public APIs change, update
-  the relevant files under `docs/` in the same pass.
-- Follow its license safety rule: do not copy code from external repositories.
-  Use external sources only to understand behavior and then implement original
-  code.
+- エミュレータコア、API、WASM、フロントエンド連携、ドキュメントを
+  変更する前に、`.github/copilot-instructions.md` を読んでください。
+- 公開 API を変更する場合は、同じ作業内で `docs/` 配下の関連ファイルも
+  更新してください。
+- ライセンス安全性のルールに従い、外部リポジトリからコードをコピーしては
+  いけません。外部情報は挙動を理解するためだけに使い、実装は独自に行って
+  ください。
 
-## Task-Specific Guidance
+## タスク別の参照先
 
-- For MD Game Editor plugin work, read:
+- MD Game Editor プラグイン関連の作業では、次を読んでください。
   - `.github/skills/md-game-editor-plugin/SKILL.md`
   - `.github/skills/md-game-editor-plugin/instructions.md`
   - `electron/PLUGIN.md`
-- For emulator debugging or diagnosis work, read:
+- エミュレータのデバッグや診断作業では、次を読んでください。
   - `.github/skills/md-emulator-debug/SKILL.md`
-- For Mega Drive emulator architecture or core implementation work, read:
+- Mega Drive エミュレータのアーキテクチャやコア実装では、次を読んで
+  ください。
   - `.github/skills/mega-drive-emulator-develop/SKILL.md`
 
-## Codex Skill Notes
+## Codex スキルに関する補足
 
-- The `.github/skills/**/SKILL.md` files are repository-local references.
-  They are not automatically discovered as Codex skills unless copied or
-  installed into a Codex skill directory such as `~/.codex/skills`.
-- The repository-local `SKILL.md` files should still keep Codex-compatible YAML
-  frontmatter (`name` and `description`) so they can be installed later without
-  rewriting.
+- `.github/skills/**/SKILL.md` は、このリポジトリ内の参照資料です。
+  `~/.codex/skills` などの Codex スキルディレクトリへコピーまたは
+  インストールされない限り、Codex スキルとして自動検出されるわけでは
+  ありません。
+- 将来インストールできるように、リポジトリ内の `SKILL.md` には
+  Codex 互換の YAML フロントマター (`name` と `description`) を
+  維持してください。
 
-## Current Project Practices
+## 現在のプロジェクト運用
 
-- Prefer existing project patterns over new abstractions.
-- Keep Electron renderer, preload, and main-process responsibilities separated.
-- Keep filesystem IPC scoped to the current project and reject traversal out of
-  the project root.
-- When editing generated or sample project files, preserve unrelated user
-  changes.
+- 新しい抽象化を作るより、既存のプロジェクトパターンを優先してください。
+- Electron の renderer、preload、main process の責務は分離してください。
+- ファイルシステム IPC は現在のプロジェクト内に限定し、プロジェクトルート
+  外へのパストラバーサルを拒否してください。
+- 生成済みファイルやサンプルプロジェクトを編集する場合は、関係のない
+  ユーザー変更を保持してください。
 
-## Regression Testing
+## 回帰テスト
 
-- After making code changes, run the relevant regression tests to confirm that
-  the change did not introduce a degradation.
-- Choose the narrowest test command that covers the edited area, and broaden
-  the test scope when shared behavior, public APIs, or cross-module contracts
-  are affected.
-- If tests cannot be run, explain the reason and the remaining risk in the
-  final response.
+- コードを変更した後は、関連する回帰テストを実行し、デグレードが発生して
+  いないことを確認してください。
+- 編集した範囲をカバーする最小限のテストコマンドを選び、共有挙動、公開 API、
+  モジュール間契約に影響する変更ではテスト範囲を広げてください。
+- テストを実行できない場合は、最終回答でその理由と残るリスクを説明して
+  ください。
 
-## Commit Message Policy
+## コミットメッセージ方針
 
-- When Codex creates a commit in this repository, write the commit message in
-  Japanese.
-- Use a concise Japanese subject line that describes the actual change.
-- If a commit body is needed, write the body in Japanese as well.
-- Do not use English commit subjects unless the user explicitly requests one.
+- Codex がこのリポジトリでコミットを作成する場合、コミットメッセージは
+  日本語で書いてください。
+- 件名は、実際の変更内容を表す簡潔な日本語にしてください。
+- コミット本文が必要な場合も、日本語で書いてください。
+- ユーザーが明示的に依頼した場合を除き、英語のコミット件名は使わないで
+  ください。
+
+## Windows / PowerShell での文字コード注意
+
+- Windows 環境の PowerShell ターミナルは Shift_JIS / CP932 として表示・入出力されることがあり、UTF-8 の日本語を含む JSON / HTML / JS を既定設定のまま `Get-Content` / `Set-Content` すると文字化けや構文破壊を起こす可能性があります。
+- 日本語を含むファイル、または既存ファイルの文字コードが不明なファイルを PowerShell で読む場合は、必ず UTF-8 を明示してください。
+
+```powershell
+Get-Content -LiteralPath path\to\file -Encoding UTF8
+```

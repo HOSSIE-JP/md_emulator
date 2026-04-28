@@ -244,6 +244,8 @@ const el = {
   btnCodeNewFolder: $('btnCodeNewFolder'),
   btnCodeDelete: $('btnCodeDelete'),
   btnCodeReload: $('btnCodeReload'),
+  btnCodeTreeExpandAll: $('btnCodeTreeExpandAll'),
+  btnCodeTreeCollapseAll: $('btnCodeTreeCollapseAll'),
   btnSaveCode: $('btnSaveCode'),
   btnCopyCode: $('btnCopyCode'),
   btnOpenSrcFolder: $('btnOpenSrcFolder'),
@@ -1225,6 +1227,27 @@ function isCodeDirectoryCollapsed(pathValue) {
   return (state.code.collapsedDirs || []).includes(String(pathValue || ''));
 }
 
+function collectAllDirPaths(nodes, result = []) {
+  if (!Array.isArray(nodes)) return result;
+  for (const node of nodes) {
+    if (node.type === 'directory') {
+      result.push(String(node.path || ''));
+      collectAllDirPaths(node.children, result);
+    }
+  }
+  return result;
+}
+
+function expandAllCodeDirs() {
+  state.code.collapsedDirs = [];
+  renderCodeTree();
+}
+
+function collapseAllCodeDirs() {
+  state.code.collapsedDirs = collectAllDirPaths(state.code.tree);
+  renderCodeTree();
+}
+
 function findCodeTreeNode(nodes, pathValue) {
   if (!Array.isArray(nodes)) return null;
   for (const node of nodes) {
@@ -2088,6 +2111,17 @@ function inferTypeFromExtension(ext) {
   return 'BIN';
 }
 
+function allowedTypesForExtension(ext) {
+  const e = String(ext || '').toLowerCase();
+  if (e === '.png' || e === '.bmp') return ['PALETTE', 'IMAGE', 'BITMAP', 'SPRITE', 'MAP', 'TILEMAP', 'TILESET'];
+  if (e === '.wav') return ['WAV'];
+  if (e === '.xgm' || e === '.vgm') return ['XGM', 'XGM2'];
+  if (e === '.tsx') return ['TILESET'];
+  if (e === '.tmx') return ['MAP', 'TILEMAP'];
+  if (e === '.pal') return ['PALETTE'];
+  return TYPE_OPTIONS;
+}
+
 function defaultSubDirForType(type) {
   switch (type) {
     case 'PALETTE': return 'pal';
@@ -2110,6 +2144,7 @@ function normalizeSymbolName(name) {
     .replace(/[^A-Za-z0-9_]/g, '_')
     .replace(/^[^A-Za-z_]+/, '')
     .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
     .toLowerCase() || 'asset_name';
 }
 
@@ -2838,16 +2873,17 @@ async function loadResDefinitions({ keepSelection = false } = {}) {
   renderAssetTable();
 }
 
-function populateAssetTypeOptions(selectedType) {
+function populateAssetTypeOptions(selectedType, ext) {
   if (!el.assetTypeInput) return;
+  const allowed = allowedTypesForExtension(ext);
   el.assetTypeInput.innerHTML = '';
-  TYPE_OPTIONS.forEach((type) => {
+  TYPE_OPTIONS.filter((t) => allowed.includes(t)).forEach((type) => {
     const opt = document.createElement('option');
     opt.value = type;
     opt.textContent = type;
     el.assetTypeInput.appendChild(opt);
   });
-  el.assetTypeInput.value = selectedType || 'IMAGE';
+  el.assetTypeInput.value = allowed.includes(selectedType) ? selectedType : (allowed[0] || 'IMAGE');
 }
 
 function populateAssetResFileOptions() {
@@ -2871,6 +2907,11 @@ function syncAssetModalForType() {
   if (el.assetSymbolNameInput && fileName && !el.assetSymbolNameInput.dataset.userEdited) {
     el.assetSymbolNameInput.value = normalizeSymbolName(fileName);
   }
+  const showResize = type !== 'PALETTE';
+  const wRow = el.assetResizeTargetWidth?.closest('.form-group');
+  const hRow = el.assetResizeTargetHeight?.closest('.form-group');
+  if (wRow) wRow.style.display = showResize ? '' : 'none';
+  if (hRow) hRow.style.display = showResize ? '' : 'none';
 }
 
 function openResFileModal() {
@@ -4220,7 +4261,7 @@ async function openAssetModal() {
   }
   if (el.assetResizeTargetWidth) el.assetResizeTargetWidth.value = '';
   if (el.assetResizeTargetHeight) el.assetResizeTargetHeight.value = '';
-  populateAssetTypeOptions(initialType);
+  populateAssetTypeOptions(initialType, picked.ext);
   populateAssetResFileOptions();
   syncAssetModalForType();
   openModal(el.assetModal);
@@ -4260,9 +4301,10 @@ async function submitAssetModal() {
     && targetWidth > 0
     && targetHeight > 0;
   const isImageAsset = IMAGE_EXTS.includes((picked.ext || '').toLowerCase());
+  const supportsResize = normalizedType !== 'PALETTE';
   if (isImageAsset && ['PALETTE', 'IMAGE', 'BITMAP', 'SPRITE', 'MAP', 'TILEMAP', 'TILESET'].includes(normalizedType)) {
     const converted = await maybeConvertImageToIndexed16(picked.sourcePath, {
-      targetSize: hasTargetSize ? { width: Math.round(targetWidth), height: Math.round(targetHeight) } : null,
+      targetSize: (hasTargetSize && supportsResize) ? { width: Math.round(targetWidth), height: Math.round(targetHeight) } : null,
     });
     if (converted.canceled) {
       closeModal(el.assetModal);
@@ -4455,6 +4497,12 @@ function bindEvents() {
     const keepPath = state.code.selectedIsDirectory ? undefined : state.code.selectedPath;
     await loadCodeTree(keepPath);
     updateCodeStatus('プロジェクトツリーを再読み込みしました');
+  });
+  el.btnCodeTreeExpandAll?.addEventListener('click', () => {
+    expandAllCodeDirs();
+  });
+  el.btnCodeTreeCollapseAll?.addEventListener('click', () => {
+    collapseAllCodeDirs();
   });
   el.btnCodeNewEntryConfirm?.addEventListener('click', async () => {
     await confirmCodeNewEntry();
@@ -4775,7 +4823,6 @@ function bindEvents() {
 
   window.electronAPI.onBuildLog((payload) => {
     appendLog('build', payload.text || '', payload.level);
-    setLogOpen(true);
   });
 
   window.electronAPI.onPluginLog?.((payload) => {
