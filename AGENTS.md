@@ -43,4 +43,21 @@ guidance.
   the project root.
 - When editing generated or sample project files, preserve unrelated user
   changes.
-- Write commit messages in Japanese.
+
+## Regression Testing
+
+- After making code changes, run the relevant regression tests to confirm that
+  the change did not introduce a degradation.
+- Choose the narrowest test command that covers the edited area, and broaden
+  the test scope when shared behavior, public APIs, or cross-module contracts
+  are affected.
+- If tests cannot be run, explain the reason and the remaining risk in the
+  final response.
+
+## Commit Message Policy
+
+- When Codex creates a commit in this repository, write the commit message in
+  Japanese.
+- Use a concise Japanese subject line that describes the actual change.
+- If a commit body is needed, write the body in Japanese as well.
+- Do not use English commit subjects unless the user explicitly requests one.
