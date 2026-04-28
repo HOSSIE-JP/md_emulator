@@ -1332,6 +1332,24 @@ body {
   cursor: pointer;
 }
 
+.code-tree-toggle {
+  width: 12px;
+  flex: 0 0 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.code-tree-icon {
+  flex: 0 0 auto;
+}
+
+.code-tree-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .code-tree-node:hover {
   background: var(--panel-hover);
 }

@@ -158,7 +158,7 @@ function openDebugWindow(options = {}) {
   });
 
   debugWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openExternalUrl(url);
     return { action: 'deny' };
   });
 
@@ -238,21 +238,56 @@ async function invokePluginHookSafe(pluginId, hookName, payload, context = {}) {
   return result;
 }
 
-function getProjectSrcRoot() {
-  return path.join(buildSystem.getProjectDir(), 'src');
+function getCodeRoot() {
+  return buildSystem.getProjectDir();
 }
 
-function resolveUnderSrc(relativePath = '') {
-  const srcRoot = path.resolve(getProjectSrcRoot());
-  const cleaned = String(relativePath || '').replace(/^[/\\]+/, '');
-  const absPath = path.resolve(srcRoot, cleaned);
-  if (absPath !== srcRoot && !absPath.startsWith(`${srcRoot}${path.sep}`)) {
-    throw new Error(`src 配下のみアクセス可能です: ${relativePath}`);
+function isPathInside(parentPath, childPath) {
+  const rel = path.relative(parentPath, childPath);
+  return rel === '' || (!!rel && !rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+function findExistingAncestor(targetPath) {
+  let current = path.resolve(targetPath);
+  while (!fs.existsSync(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
   }
-  return { srcRoot, absPath };
+  return current;
 }
 
-function readSrcTree(absDir, srcRoot) {
+function openExternalUrl(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) {
+      return;
+    }
+    shell.openExternal(parsed.toString());
+  } catch (_err) {
+  }
+}
+
+function resolveUnderCodeRoot(relativePath = '') {
+  const codeRoot = path.resolve(getCodeRoot());
+  const cleaned = String(relativePath || '').replace(/^[/\\]+/, '');
+  const absPath = path.resolve(codeRoot, cleaned);
+  if (!isPathInside(codeRoot, absPath)) {
+    throw new Error(`project 配下のみアクセス可能です: ${relativePath}`);
+  }
+  const realCodeRoot = fs.existsSync(codeRoot) ? fs.realpathSync(codeRoot) : codeRoot;
+  const realCheckPath = fs.existsSync(absPath)
+    ? fs.realpathSync(absPath)
+    : fs.realpathSync(findExistingAncestor(path.dirname(absPath)));
+  if (!isPathInside(realCodeRoot, realCheckPath)) {
+    throw new Error(`project path escapes project: ${relativePath}`);
+  }
+  return { codeRoot, absPath };
+}
+
+function readCodeTree(absDir, codeRoot) {
   const entries = fs.readdirSync(absDir, { withFileTypes: true })
     .sort((a, b) => {
       if (a.isDirectory() && !b.isDirectory()) return -1;
@@ -262,13 +297,13 @@ function readSrcTree(absDir, srcRoot) {
 
   return entries.map((entry) => {
     const fullPath = path.join(absDir, entry.name);
-    const relPath = path.relative(srcRoot, fullPath).replace(/\\/g, '/');
+    const relPath = path.relative(codeRoot, fullPath).replace(/\\/g, '/');
     if (entry.isDirectory()) {
       return {
         type: 'directory',
         name: entry.name,
         path: relPath,
-        children: readSrcTree(fullPath, srcRoot),
+        children: readCodeTree(fullPath, codeRoot),
       };
     }
     return {
@@ -582,9 +617,9 @@ ipcMain.handle('fs:saveRomAs', async (_event, sourcePath) => {
 
 ipcMain.handle('codefs:getRoot', async () => {
   try {
-    const srcRoot = getProjectSrcRoot();
-    fs.mkdirSync(srcRoot, { recursive: true });
-    return { ok: true, root: srcRoot };
+    const codeRoot = getCodeRoot();
+    fs.mkdirSync(codeRoot, { recursive: true });
+    return { ok: true, root: codeRoot };
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
   }
@@ -592,7 +627,7 @@ ipcMain.handle('codefs:getRoot', async () => {
 
 ipcMain.handle('codefs:list', async (_event, payload) => {
   try {
-    const { srcRoot, absPath } = resolveUnderSrc(payload?.path || '');
+    const { codeRoot, absPath } = resolveUnderCodeRoot(payload?.path || '');
     if (!fs.existsSync(absPath)) {
       return { ok: false, error: `path not found: ${payload?.path || ''}` };
     }
@@ -602,9 +637,9 @@ ipcMain.handle('codefs:list', async (_event, payload) => {
     }
     return {
       ok: true,
-      root: srcRoot,
-      path: path.relative(srcRoot, absPath).replace(/\\/g, '/'),
-      entries: readSrcTree(absPath, srcRoot),
+      root: codeRoot,
+      path: path.relative(codeRoot, absPath).replace(/\\/g, '/'),
+      entries: readCodeTree(absPath, codeRoot),
     };
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
@@ -613,7 +648,7 @@ ipcMain.handle('codefs:list', async (_event, payload) => {
 
 ipcMain.handle('codefs:read', async (_event, payload) => {
   try {
-    const { absPath } = resolveUnderSrc(payload?.path || '');
+    const { absPath } = resolveUnderCodeRoot(payload?.path || '');
     if (!fs.existsSync(absPath)) {
       return { ok: false, error: `file not found: ${payload?.path || ''}` };
     }
@@ -628,7 +663,7 @@ ipcMain.handle('codefs:read', async (_event, payload) => {
 
 ipcMain.handle('codefs:write', async (_event, payload) => {
   try {
-    const { absPath } = resolveUnderSrc(payload?.path || '');
+    const { absPath } = resolveUnderCodeRoot(payload?.path || '');
     fs.mkdirSync(path.dirname(absPath), { recursive: true });
     fs.writeFileSync(absPath, String(payload?.content ?? ''), 'utf-8');
     return { ok: true, path: payload?.path || '' };
@@ -640,7 +675,7 @@ ipcMain.handle('codefs:write', async (_event, payload) => {
 ipcMain.handle('codefs:create', async (_event, payload) => {
   try {
     const targetType = String(payload?.type || 'file');
-    const { absPath } = resolveUnderSrc(payload?.path || '');
+    const { absPath } = resolveUnderCodeRoot(payload?.path || '');
     if (fs.existsSync(absPath)) {
       return { ok: false, error: `already exists: ${payload?.path || ''}` };
     }
@@ -659,9 +694,9 @@ ipcMain.handle('codefs:create', async (_event, payload) => {
 
 ipcMain.handle('codefs:delete', async (_event, payload) => {
   try {
-    const { absPath, srcRoot } = resolveUnderSrc(payload?.path || '');
-    if (absPath === srcRoot) {
-      return { ok: false, error: 'src root は削除できません' };
+    const { absPath, codeRoot } = resolveUnderCodeRoot(payload?.path || '');
+    if (absPath === codeRoot) {
+      return { ok: false, error: 'project root は削除できません' };
     }
     if (!fs.existsSync(absPath)) {
       return { ok: false, error: `not found: ${payload?.path || ''}` };

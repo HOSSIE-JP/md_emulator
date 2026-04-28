@@ -1,3 +1,8 @@
+---
+name: mega-drive-emulator-develop
+description: Work on Mega Drive / Genesis emulator architecture and implementation. Use for CPU, Z80, VDP, APU, memory map, deterministic execution, WASM bindings, JSON-RPC/WebSocket/MCP control APIs, save states, trace logging, hardware accuracy, and emulator testing.
+---
+
 # SKILL: MegaDrive Emulator Engineering
 
 ## 📚 Required Knowledge Domains

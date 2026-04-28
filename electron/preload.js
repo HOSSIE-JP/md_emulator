@@ -66,7 +66,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listProjects: () => ipcRenderer.invoke('project:list'),
   openExistingProject: (payload) => ipcRenderer.invoke('project:openExisting', payload),
   createNewProject: (payload) => ipcRenderer.invoke('project:createNew', payload),
-  // --- コードエディタ向け (src 配下のみ) ---
+  // --- コードエディタ向け (プロジェクト配下) ---
   getCodeRoot: () => ipcRenderer.invoke('codefs:getRoot'),
   listCodeTree: (payload) => ipcRenderer.invoke('codefs:list', payload),
   readCodeFile: (payload) => ipcRenderer.invoke('codefs:read', payload),

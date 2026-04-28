@@ -262,14 +262,24 @@ function createProject(projectDir, config = {}, sourceCode) {
   return result;
 }
 
-function createProjectInRoot(projectName, config = {}, sourceCode) {
+function normalizeProjectName(projectName) {
   const normalizedName = String(projectName || '').trim();
   if (!normalizedName) {
     throw new Error('project name is empty');
   }
-  if (normalizedName.includes('..') || /[\\/:*?"<>|]/.test(normalizedName)) {
+  if (
+    normalizedName === '.' ||
+    normalizedName === '..' ||
+    normalizedName.includes('..') ||
+    /[\\/:*?"<>|]/.test(normalizedName)
+  ) {
     throw new Error(`invalid project name: ${normalizedName}`);
   }
+  return normalizedName;
+}
+
+function createProjectInRoot(projectName, config = {}, sourceCode) {
+  const normalizedName = normalizeProjectName(projectName);
 
   const projectDir = path.join(ensureProjectsRootDir(), normalizedName);
   return createProject(projectDir, config, sourceCode);
@@ -292,10 +302,7 @@ function openProject(projectDir) {
 }
 
 function openProjectByName(projectName) {
-  const normalizedName = String(projectName || '').trim();
-  if (!normalizedName) {
-    throw new Error('project name is empty');
-  }
+  const normalizedName = normalizeProjectName(projectName);
   return openProject(path.join(ensureProjectsRootDir(), normalizedName));
 }
 

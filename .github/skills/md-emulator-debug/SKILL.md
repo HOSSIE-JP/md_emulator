@@ -1,7 +1,6 @@
 ---
 name: md-emulator-debug
-description: 'Mega Drive エミュレータのバグ診断・修正ワークフロー。音声無音・音程ずれ・CPU ハング・VDP 描画不具合などの症状を診断する。USE FOR: Z80バス問題, YM2612/PSG 音声不具合, M68K クラッシュ, VDP スプライト/プレーン不具合, WASM ビルド後の動作確認。診断ツール群 (tools/diag_*.py) を活用した段階的デバッグを実施する。'
-argument-hint: '診断したい症状 (例: "ぷよぷよBGMが鳴らない", "Z80クラッシュ", "VDP描画バグ")'
+description: Diagnose and fix Mega Drive / Genesis emulator bugs. Use for Z80 bus issues, YM2612/PSG audio silence or pitch problems, M68K crashes, VDP sprite/plane rendering bugs, WASM behavior checks, and staged debugging with tools/diag_*.py scripts.
 ---
 
 # Mega Drive エミュレータ デバッグワークフロー

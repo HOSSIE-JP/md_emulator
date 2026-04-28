@@ -44,8 +44,9 @@ const state = {
   },
   code: {
     tree: [],
-    selectedPath: 'main.c',
+    selectedPath: 'src/main.c',
     selectedIsDirectory: false,
+    collapsedDirs: [],
     dirty: false,
   },
   logs: {
@@ -1190,11 +1191,55 @@ function updateCodeStatus(message) {
   }
 }
 
+function formatProjectPath(pathValue = '') {
+  return pathValue ? `project/${pathValue}` : 'project';
+}
+
+function getCodeDisplayPath(pathValue = state.code.selectedPath) {
+  return formatProjectPath(pathValue || '');
+}
+
+function getCodeEntryParentPath(pathValue = state.code.selectedPath) {
+  const current = String(pathValue || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!current || state.code.selectedIsDirectory) return current;
+  const index = current.lastIndexOf('/');
+  return index >= 0 ? current.slice(0, index) : '';
+}
+
+function buildCodeEntryPath(name) {
+  const cleanName = String(name || '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
+  if (!cleanName) return '';
+  const parent = getCodeEntryParentPath();
+  return parent ? `${parent}/${cleanName}` : cleanName;
+}
+
+function setCodeDirectoryCollapsed(pathValue, collapsed) {
+  const normalized = String(pathValue || '');
+  const next = new Set(state.code.collapsedDirs || []);
+  if (collapsed) next.add(normalized);
+  else next.delete(normalized);
+  state.code.collapsedDirs = Array.from(next);
+}
+
+function isCodeDirectoryCollapsed(pathValue) {
+  return (state.code.collapsedDirs || []).includes(String(pathValue || ''));
+}
+
+function findCodeTreeNode(nodes, pathValue) {
+  if (!Array.isArray(nodes)) return null;
+  for (const node of nodes) {
+    if (node.path === pathValue) return node;
+    const child = findCodeTreeNode(node.children, pathValue);
+    if (child) return child;
+  }
+  return null;
+}
+
 function setCodeDirty(dirty) {
   state.code.dirty = Boolean(dirty);
-  const fileName = state.code.selectedPath || 'main.c';
+  const fileName = state.code.selectedPath || 'src/main.c';
   if (el.codeFileName) {
-    el.codeFileName.textContent = `${state.code.selectedIsDirectory ? '📁' : '📄'} src/${fileName}${state.code.dirty && !state.code.selectedIsDirectory ? ' *' : ''}`;
+    el.codeFileName.textContent = `${state.code.selectedIsDirectory ? '📁' : '📄'} ${getCodeDisplayPath(fileName)}${state.code.dirty && !state.code.selectedIsDirectory ? ' *' : ''}`;
   }
 }
 
@@ -1334,16 +1379,25 @@ function bindCodeScrollSync() {
   });
 }
 
-function renderCodeTreeNodes(nodes) {
+function renderCodeTreeNodes(nodes, level = 0) {
   if (!Array.isArray(nodes) || nodes.length === 0) {
-    return '<div class="code-tree-empty">src 配下にファイルがありません。</div>';
+    return level === 0 ? '<div class="code-tree-empty">プロジェクト内にファイルがありません。</div>' : '';
   }
   return `<ul class="code-tree-list">${nodes.map((node) => {
-    const isActive = !node.children && node.path === state.code.selectedPath;
+    const isActive = node.path === state.code.selectedPath;
     if (node.type === 'directory') {
-      return `<li class="code-tree-item"><div class="code-tree-node" data-path="${escHtml(node.path)}" data-kind="directory">📁 ${escHtml(node.name)}</div><div class="code-tree-children">${renderCodeTreeNodes(node.children || [])}</div></li>`;
+      const collapsed = isCodeDirectoryCollapsed(node.path);
+      const hasChildren = Array.isArray(node.children) && node.children.length > 0;
+      return `<li class="code-tree-item">
+        <div class="code-tree-node${isActive ? ' active' : ''}" data-path="${escHtml(node.path)}" data-kind="directory">
+          <span class="code-tree-toggle">${hasChildren ? (collapsed ? '▸' : '▾') : ''}</span>
+          <span class="code-tree-icon">📁</span>
+          <span class="code-tree-label">${escHtml(node.name)}</span>
+        </div>
+        ${collapsed ? '' : `<div class="code-tree-children">${renderCodeTreeNodes(node.children || [], level + 1)}</div>`}
+      </li>`;
     }
-    return `<li class="code-tree-item"><div class="code-tree-node${isActive ? ' active' : ''}" data-path="${escHtml(node.path)}" data-kind="file">📄 ${escHtml(node.name)}</div></li>`;
+    return `<li class="code-tree-item"><div class="code-tree-node${isActive ? ' active' : ''}" data-path="${escHtml(node.path)}" data-kind="file"><span class="code-tree-toggle"></span><span class="code-tree-icon">📄</span><span class="code-tree-label">${escHtml(node.name)}</span></div></li>`;
   }).join('')}</ul>`;
 }
 
@@ -1353,10 +1407,18 @@ function bindCodeTreeEvents() {
       const nextPath = node.getAttribute('data-path') || '';
       const kind = node.getAttribute('data-kind') || 'file';
       if (kind === 'directory') {
+        if (state.code.dirty && !state.code.selectedIsDirectory && state.code.selectedPath !== nextPath) {
+          const ok = window.confirm(`${getCodeDisplayPath(state.code.selectedPath)} の未保存変更を破棄して切り替えますか？`);
+          if (!ok) return;
+        }
         state.code.selectedPath = nextPath;
         state.code.selectedIsDirectory = true;
+        const treeNode = findCodeTreeNode(state.code.tree, nextPath);
+        if (treeNode?.children?.length) {
+          setCodeDirectoryCollapsed(nextPath, !isCodeDirectoryCollapsed(nextPath));
+        }
         setCodeDirty(false);
-        updateCodeStatus(`フォルダを選択中: src/${nextPath}`);
+        updateCodeStatus(`フォルダを選択中: ${getCodeDisplayPath(nextPath)}`);
         renderCodeTree();
         return;
       }
@@ -1374,7 +1436,7 @@ function renderCodeTree() {
 
 async function openCodeFile(pathValue) {
   if (state.code.dirty && !state.code.selectedIsDirectory && state.code.selectedPath !== pathValue) {
-    const ok = window.confirm(`src/${state.code.selectedPath} の未保存変更を破棄して切り替えますか？`);
+    const ok = window.confirm(`${getCodeDisplayPath(state.code.selectedPath)} の未保存変更を破棄して切り替えますか？`);
     if (!ok) return;
   }
   const result = await window.electronAPI.readCodeFile({ path: pathValue });
@@ -1390,13 +1452,13 @@ async function openCodeFile(pathValue) {
   }
   setCodeDirty(false);
   renderCodeTree();
-  updateCodeStatus(`src/${pathValue} を読み込みました`);
+  updateCodeStatus(`${getCodeDisplayPath(pathValue)} を読み込みました`);
 }
 
 async function loadCodeTree(openPath) {
   const result = await window.electronAPI.listCodeTree({ path: '' });
   if (!result?.ok) {
-    updateCodeStatus(`src ツリー取得失敗: ${result?.error || 'unknown'}`);
+    updateCodeStatus(`プロジェクトツリー取得失敗: ${result?.error || 'unknown'}`);
     return;
   }
   state.code.tree = Array.isArray(result.entries) ? result.entries : [];
@@ -1412,9 +1474,9 @@ async function loadCodeTree(openPath) {
       return;
     }
   }
-  const mainExists = JSON.stringify(state.code.tree).includes('"path":"main.c"');
+  const mainExists = JSON.stringify(state.code.tree).includes('"path":"src/main.c"');
   if (mainExists) {
-    await openCodeFile('main.c');
+    await openCodeFile('src/main.c');
   }
 }
 
@@ -1423,7 +1485,7 @@ async function saveCurrentCodeFile() {
     updateCodeStatus('フォルダは保存できません。ファイルを選択してください。');
     return false;
   }
-  const targetPath = state.code.selectedPath || 'main.c';
+  const targetPath = state.code.selectedPath || 'src/main.c';
   const result = await window.electronAPI.writeCodeFile({
     path: targetPath,
     content: el.codeEditor?.value || '',
@@ -1433,7 +1495,7 @@ async function saveCurrentCodeFile() {
     return false;
   }
   setCodeDirty(false);
-  updateCodeStatus(`✓ src/${targetPath} を保存しました`);
+  updateCodeStatus(`✓ ${getCodeDisplayPath(targetPath)} を保存しました`);
   await loadCodeTree(targetPath);
   return true;
 }
@@ -1466,8 +1528,9 @@ async function confirmCodeNewEntry() {
 }
 
 async function createCodeEntry(kind, name) {
+  const targetPath = buildCodeEntryPath(name);
   const result = await window.electronAPI.createCodeEntry({
-    path: name,
+    path: targetPath,
     type: kind,
     content: kind === 'file' ? '' : undefined,
   });
@@ -1475,8 +1538,11 @@ async function createCodeEntry(kind, name) {
     updateCodeStatus(`作成失敗: ${result?.error || 'unknown'}`);
     return;
   }
-  updateCodeStatus(`✓ src/${name} を作成しました`);
-  await loadCodeTree(kind === 'file' ? name : state.code.selectedPath);
+  if (kind === 'directory') {
+    setCodeDirectoryCollapsed(targetPath, false);
+  }
+  updateCodeStatus(`✓ ${getCodeDisplayPath(targetPath)} を作成しました`);
+  await loadCodeTree(kind === 'file' ? targetPath : state.code.selectedPath);
 }
 
 async function deleteSelectedCodeEntry() {
@@ -1484,18 +1550,18 @@ async function deleteSelectedCodeEntry() {
     updateCodeStatus('削除対象が選択されていません。');
     return;
   }
-  const ok = window.confirm(`src/${state.code.selectedPath} を削除します。元に戻せません。`);
+  const ok = window.confirm(`${getCodeDisplayPath(state.code.selectedPath)} を削除します。元に戻せません。`);
   if (!ok) return;
   const result = await window.electronAPI.deleteCodeEntry({ path: state.code.selectedPath });
   if (!result?.ok) {
     updateCodeStatus(`削除失敗: ${result?.error || 'unknown'}`);
     return;
   }
-  state.code.selectedPath = 'main.c';
+  state.code.selectedPath = 'src/main.c';
   state.code.selectedIsDirectory = false;
   if (el.codeEditor) el.codeEditor.value = '';
   setCodeDirty(false);
-  updateCodeStatus(`✓ src/${result.path || ''} を削除しました`);
+  updateCodeStatus(`✓ ${getCodeDisplayPath(result.path || '')} を削除しました`);
   await loadCodeTree();
 }
 
@@ -1541,7 +1607,7 @@ int main(void)
 function loadSampleCode() {
   if (!el.codeEditor || !el.codeStatus) return;
   el.codeEditor.value = HELLO_WORLD_C;
-  state.code.selectedPath = 'main.c';
+  state.code.selectedPath = 'src/main.c';
   state.code.selectedIsDirectory = false;
   updateCodeEditor(HELLO_WORLD_C);
   setCodeDirty(true);
@@ -1859,7 +1925,7 @@ async function runBuild(opts = {}) {
     state.projectConfig = settingsResult.config;
     updateProjectNameDisplay();
 
-    // 既存の src ツリーを尊重し、Build 前は構造整備のみを行う
+    // 既存のプロジェクトツリーを尊重し、Build 前は構造整備のみを行う
     const genResult = await window.electronAPI.generateStructureOnly(state.projectConfig);
     if (!genResult.ok) {
       appendBuildLog(`[ERROR] プロジェクト生成失敗: ${genResult.error}`, 'error');
@@ -4388,7 +4454,7 @@ function bindEvents() {
   el.btnCodeReload?.addEventListener('click', async () => {
     const keepPath = state.code.selectedIsDirectory ? undefined : state.code.selectedPath;
     await loadCodeTree(keepPath);
-    updateCodeStatus('src ツリーを再読み込みしました');
+    updateCodeStatus('プロジェクトツリーを再読み込みしました');
   });
   el.btnCodeNewEntryConfirm?.addEventListener('click', async () => {
     await confirmCodeNewEntry();

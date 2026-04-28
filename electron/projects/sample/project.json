@@ -3,7 +3,7 @@
   "author": "AUTHOR",
   "serial": "GM 00000000-00",
   "region": "JUE",
-  "generatedAt": "2026-04-27T14:07:34.084Z",
-  "builderPlugin": "slideshow",
+  "generatedAt": "2026-04-27T15:10:27.910Z",
+  "builderPlugin": "block-builder",
   "emulatorPlugin": "standard-emulator"
 }
