@@ -1,6 +1,7 @@
 {
   "private": true,
   "scripts": {
+    "test": "npm --prefix electron test",
     "check:duplication": "jscpd --config .jscpd.json",
     "check:duplication:core": "jscpd --config .jscpd-core.json crates src frontend",
     "check:duplication:strict": "jscpd --config .jscpd.json --threshold 0",

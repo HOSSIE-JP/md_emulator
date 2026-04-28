@@ -523,4 +523,6 @@ module.exports = {
   reorderResEntries,
   writeAssetIntoRes,
   normalizeResPath,
+  parseResContent,
+  entryToResLine,
 };
