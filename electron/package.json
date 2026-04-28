@@ -8,7 +8,7 @@
     "copy-pkg": "node scripts/copy-pkg.js",
     "inject-build-meta": "node scripts/inject-build-meta.js",
     "prepare:dist": "node scripts/prepare-dist.js",
-    "test": "node --test tests/**/*.test.js",
+    "test": "node tests/run-tests.js",
     "start": "npm run inject-build-meta && npm run copy-pkg && electron .",
     "dev": "npm run start",
     "build:mac": "npm run prepare:dist && electron-builder --mac",

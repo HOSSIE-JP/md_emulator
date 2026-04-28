@@ -52,4 +52,43 @@ function loadWithMockedElectron(modulePath, appOverrides = {}) {
   }
 }
 
-module.exports = { loadWithMockedElectron };
+function loadPreloadWithMockedElectron(modulePath) {
+  const originalLoad = Module._load;
+  const exposed = {};
+  const invocations = [];
+  const listeners = new Map();
+
+  const ipcRenderer = {
+    invoke(channel, ...args) {
+      invocations.push({ channel, args });
+      return Promise.resolve({ channel, args });
+    },
+    on(channel, listener) {
+      listeners.set(channel, listener);
+    },
+  };
+
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === 'electron') {
+      return {
+        contextBridge: {
+          exposeInMainWorld(name, api) {
+            exposed[name] = api;
+          },
+        },
+        ipcRenderer,
+      };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  };
+
+  try {
+    delete require.cache[require.resolve(modulePath)];
+    require(modulePath);
+    return { exposed, invocations, listeners };
+  } finally {
+    Module._load = originalLoad;
+  }
+}
+
+module.exports = { loadWithMockedElectron, loadPreloadWithMockedElectron };

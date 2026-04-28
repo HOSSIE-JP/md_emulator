@@ -382,3 +382,40 @@ rm -rf ~/Library/Logs/MegaDriveEmulator
 | macOS (ポータブル) | `<.appバンドルの親フォルダ>\data\` |
 | 開発モード (通常) | OS デフォルトの userData パス |
 | 開発モード (ポータブル) | `electron/data\` |
+
+---
+
+## テスト
+
+Electron 配下の JavaScript テストは Node.js 標準の `node:test` で実行します。Electron 本体は起動せず、`electron` モジュールをテスト用モックに差し替えるため、main process 用モジュールや preload の IPC ブリッジを軽量に検証できます。
+
+### コマンドラインで実行
+
+リポジトリルートから実行します。
+
+```powershell
+npm --prefix electron test
+```
+
+または `electron/` に移動してから実行します。
+
+```powershell
+cd electron
+npm test
+```
+
+### VSCode タスクで実行
+
+VSCode の `Terminal: Run Task` から次のタスクを選択します。
+
+- `Electron: Run Tests`
+
+### テスト対象
+
+- `tests/build-system.test.js`: プロジェクト作成、既存プロジェクトを開く処理、プラグイン選択保存、ツールチェーン未設定時の失敗経路
+- `tests/setup-manager.test.js`: テストプレイ設定の正規化、SGDK / Marsdev パス検出
+- `tests/preload.test.js`: renderer に公開する preload API と IPC チャンネル
+- `tests/plugin-manager.test.js`: プラグイン manifest 正規化、有効化と依存関係処理
+- `tests/rescomp-manager.test.js`: `.res` 解析、生成、更新、削除、パストラバーサル拒否
+
+新しい Electron 側機能を追加した場合は、対象モジュールに近い `electron/tests/*.test.js` にケースを追加してください。Electron の実ウィンドウを必要としないロジックは、既存の `tests/helpers/mock-electron.js` を使って `app` / `ipcRenderer` / `contextBridge` をモックします。

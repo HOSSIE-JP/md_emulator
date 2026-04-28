@@ -43,3 +43,4 @@ guidance.
   the project root.
 - When editing generated or sample project files, preserve unrelated user
   changes.
+- Write commit messages in Japanese.
