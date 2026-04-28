@@ -141,9 +141,25 @@ function parseEntryByType(type, tokens) {
       break;
     case 'WAV':
       out.driver = args[1] || 'DEFAULT';
-      out.outRate = args[2] || '';
-      out.far = args[3] || 'TRUE';
-      out.extras = args.slice(4);
+      {
+        const token2 = String(args[2] || '');
+        const token3 = String(args[3] || '');
+        const upper2 = token2.toUpperCase();
+        const upper3 = token3.toUpperCase();
+        const isBool2 = upper2 === 'TRUE' || upper2 === 'FALSE';
+        const isBool3 = upper3 === 'TRUE' || upper3 === 'FALSE';
+
+        if (isBool2) {
+          out.outRate = '';
+          out.far = isBool3 ? upper3 : upper2;
+          out.extras = isBool3 ? args.slice(4) : args.slice(3);
+          break;
+        }
+
+        out.outRate = token2;
+        out.far = isBool3 ? upper3 : (token3 || 'TRUE');
+        out.extras = args.slice(4);
+      }
       break;
     case 'MAP':
       out.tileset = args[1] || '';

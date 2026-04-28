@@ -44,6 +44,24 @@ test('entryToResLine quotes names and paths only when needed', () => {
   assert.equal(line, 'IMAGE "title bg" "gfx/title screen.png" NONE ALL 0');
 });
 
+test('parseResContent parses WAV with omitted out_rate correctly', () => {
+  const parsed = rescomp.parseResContent([
+    'WAV bgm sfx/bgm.wav XGM2 TRUE',
+    'WAV se sfx/se.wav PCM 22050 FALSE',
+  ].join('\n'));
+
+  assert.equal(parsed.entries.length, 2);
+  assert.equal(parsed.entries[0].type, 'WAV');
+  assert.equal(parsed.entries[0].driver, 'XGM2');
+  assert.equal(parsed.entries[0].outRate, '');
+  assert.equal(parsed.entries[0].far, 'TRUE');
+
+  assert.equal(parsed.entries[1].type, 'WAV');
+  assert.equal(parsed.entries[1].driver, 'PCM');
+  assert.equal(parsed.entries[1].outRate, '22050');
+  assert.equal(parsed.entries[1].far, 'FALSE');
+});
+
 test('listResDefinitions creates a default resources.res when none exists', () => {
   const projectDir = makeProject();
   const result = rescomp.listResDefinitions(projectDir);

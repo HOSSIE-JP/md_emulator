@@ -472,6 +472,105 @@
     </section>
   </div>
 
+  <div class="app-modal" id="audioConvertModal" aria-hidden="true">
+    <div class="app-backdrop" id="audioConvertBackdrop"></div>
+    <section class="app-panel app-panel-lg" role="dialog" aria-modal="true" aria-labelledby="audioConvertTitle">
+      <div class="page-header modal-header">
+        <h2 id="audioConvertTitle">音声変換コンバーター</h2>
+        <button class="icon-btn" id="btnAudioConvertClose" type="button">✕</button>
+      </div>
+      <div class="audio-convert-layout">
+        <div class="audio-convert-preview">
+          <div class="hint-text" id="audioConvertSourceLabel">-</div>
+          <canvas id="audioConvertWaveCanvas" width="960" height="220"></canvas>
+          <div class="audio-convert-zoom-bar">
+            <button class="btn-icon" id="btnAudioConvertZoomOut" type="button" title="縮小">−</button>
+            <input type="range" id="audioConvertZoomSlider" min="1" max="32" step="0.1" value="1" style="flex:1;min-width:0" />
+            <button class="btn-icon" id="btnAudioConvertZoomIn" type="button" title="拡大">＋</button>
+            <span id="audioConvertZoomLabel" style="min-width:40px;text-align:right;font-size:11px;color:var(--muted)">×1.0</span>
+            <button class="btn-icon" id="btnAudioConvertZoomReset" type="button" title="ズームリセット">↺</button>
+          </div>
+          <input type="range" id="audioConvertScrollSlider" class="audio-convert-scroll-slider" min="0" max="1000" step="1" value="0" />
+          <div class="audio-convert-time-row">
+            <span>開始: <strong id="audioConvertStartLabel">0.00s</strong></span>
+            <span>終了: <strong id="audioConvertEndLabel">0.00s</strong></span>
+            <span>全長: <strong id="audioConvertDurationLabel">0.00s</strong></span>
+            <span>周波数: <strong id="audioConvertSampleRateLabel">-</strong></span>
+            <span>レベル: <strong id="audioConvertLevelLabel">-</strong></span>
+          </div>
+          <div class="audio-convert-slider-grid">
+            <label>開始位置</label>
+            <input type="range" id="audioConvertStartSlider" min="0" max="1000" value="0" step="1" />
+            <label>終了位置</label>
+            <input type="range" id="audioConvertEndSlider" min="0" max="1000" value="1000" step="1" />
+          </div>
+          <div class="audio-convert-controls">
+            <button class="icon-btn" id="btnAudioConvertRewind" type="button" title="開始位置へ巻き戻し" aria-label="開始位置へ巻き戻し">⏮</button>
+            <button class="icon-btn" id="btnAudioConvertPreview" type="button" title="選択範囲を再生" aria-label="選択範囲を再生">▶</button>
+            <button class="icon-btn" id="btnAudioConvertPause" type="button" title="一時停止" aria-label="一時停止">⏸</button>
+            <button class="icon-btn" id="btnAudioConvertStop" type="button" title="停止" aria-label="停止">⏹</button>
+            <button class="icon-btn" id="btnAudioConvertLoop" type="button" title="選択範囲をループ再生" aria-label="選択範囲をループ再生">🔁</button>
+            <audio id="audioConvertPlayer" preload="auto"></audio>
+          </div>
+          <div class="audio-convert-playhead-row">
+            <span class="audio-convert-playhead-time">再生位置: <strong id="audioConvertPlayheadLabel">0.00s</strong></span>
+            <button class="icon-btn" id="btnAudioConvertSetStart" type="button" title="現在位置を開始位置にセット" aria-label="開始位置にセット">⟸</button>
+            <button class="icon-btn" id="btnAudioConvertSetEnd" type="button" title="現在位置を終了位置にセット" aria-label="終了位置にセット">⟹</button>
+          </div>
+        </div>
+        <div class="audio-convert-options settings-form compact-form">
+          <div class="form-group">
+            <label class="form-label">開始位置（秒）</label>
+            <input type="number" class="form-input form-input-mono" id="audioConvertStartInput" min="0" step="0.01" placeholder="0.00" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">終了位置（秒）</label>
+            <input type="number" class="form-input form-input-mono" id="audioConvertEndInput" min="0" step="0.01" placeholder="末尾まで" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">正規化</label>
+            <select class="form-input form-input-mono" id="audioConvertNormalizeInput">
+              <option value="FALSE">FALSE</option>
+              <option value="TRUE">TRUE</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">ボリューム調整（dB）</label>
+            <input type="number" class="form-input form-input-mono" id="audioConvertVolumeDbInput" step="0.1" placeholder="0.0" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">モノラル変換</label>
+            <select class="form-input form-input-mono" id="audioConvertMonoInput">
+              <option value="FALSE">FALSE</option>
+              <option value="TRUE" selected>TRUE</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">出力周波数（Hz）</label>
+            <select class="form-input form-input-mono" id="audioConvertSampleRateInput">
+              <option value="">変換なし（元の周波数）</option>
+              <option value="44100">44100 Hz</option>
+              <option value="32000">32000 Hz</option>
+              <option value="22050" selected>22050 Hz</option>
+              <option value="16000">16000 Hz</option>
+              <option value="11025">11025 Hz</option>
+              <option value="8000">8000 Hz</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <button class="btn-sm" id="btnAudioConvertNormalizeApply" type="button" style="width:100%">正規化/ボリュームをプレビューに適用</button>
+          </div>
+          <div class="hint-text" id="audioConvertHint">選択範囲を確認してから「変換して追加」を実行してください。</div>
+        </div>
+      </div>
+      <div class="form-actions-inline modal-actions-end">
+        <button class="btn-sm" id="btnAudioConvertCancel" type="button">キャンセル</button>
+        <button class="btn-sm" id="btnAudioConvertSkip" type="button" style="display:none">WAVのままコピー（変換なし）</button>
+        <button class="btn-primary" id="btnAudioConvertApply" type="button">変換して追加</button>
+      </div>
+    </section>
+  </div>
+
   <div class="app-modal" id="projectModal" aria-hidden="true">
     <div class="app-backdrop" data-modal-close="projectModal"></div>
     <section class="app-panel app-panel-md" role="dialog" aria-modal="true" aria-labelledby="projectModalTitle">

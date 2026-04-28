@@ -74,7 +74,16 @@ const SPRITE_OPT_LEVEL_OPTIONS = ['FAST', 'MEDIUM', 'SLOW', 'MAX'];
 const BOOLEAN_WORD_OPTIONS = ['TRUE', 'FALSE'];
 const XGM_TIMING_OPTIONS = ['AUTO', 'NTSC', 'PAL'];
 const WAV_DRIVER_OPTIONS = ['DEFAULT', 'PCM', 'DPCM2', 'PCM4', 'XGM', 'XGM2'];
+const WAV_OUT_RATE_OPTIONS_BY_DRIVER = {
+  PCM: ['8000', '11025', '13400', '16000', '22050', '32000'],
+  XGM2: ['6650', '13300'],
+};
+const WAV_OUT_RATE_DEFAULT_BY_DRIVER = {
+  PCM: '16000',
+  XGM2: '13300',
+};
 const IMAGE_EXTS = ['.png', '.bmp'];
+const AUDIO_EXTS = ['.wav', '.mp3', '.ogg'];
 
 const FORM_FIELDS_BY_TYPE = {
   PALETTE: [
@@ -120,7 +129,7 @@ const FORM_FIELDS_BY_TYPE = {
     { key: 'name', label: 'シンボル名', type: 'text' },
     { key: 'sourcePath', label: '入力wav', type: 'text' },
     { key: 'driver', label: 'driver', type: 'select', options: WAV_DRIVER_OPTIONS },
-    { key: 'outRate', label: 'out_rate', type: 'text' },
+    { key: 'outRate', label: 'out_rate', type: 'select', options: [] },
     { key: 'far', label: 'far', type: 'select', options: BOOLEAN_WORD_OPTIONS },
   ],
   MAP: [
@@ -199,6 +208,24 @@ const quantizeState = {
   lastReferenceLogToken: '',
   referencePaletteLabel: '',
   onApply: null,
+};
+
+const audioConvertState = {
+  active: false,
+  pending: null,
+  dataUrl: '',
+  audioBuffer: null,
+  originalAudioBuffer: null,
+  durationSec: 0,
+  sampleRate: 0,
+  startSec: 0,
+  endSec: 0,
+  stopTimer: null,
+  waveZoom: 1,
+  waveScroll: 0,
+  playheadSec: 0,
+  playheadRAF: null,
+  loopPlayback: false,
 };
 
 // -------------------------------------------------------------------- DOM --
@@ -352,6 +379,44 @@ const el = {
   assetCommentInput: $('assetCommentInput'),
   assetResizeTargetWidth: $('assetResizeTargetWidth'),
   assetResizeTargetHeight: $('assetResizeTargetHeight'),
+  audioConvertModal: $('audioConvertModal'),
+  audioConvertBackdrop: $('audioConvertBackdrop'),
+  btnAudioConvertClose: $('btnAudioConvertClose'),
+  btnAudioConvertCancel: $('btnAudioConvertCancel'),
+  btnAudioConvertApply: $('btnAudioConvertApply'),
+  btnAudioConvertSkip: $('btnAudioConvertSkip'),
+  btnAudioConvertRewind: $('btnAudioConvertRewind'),
+  btnAudioConvertPreview: $('btnAudioConvertPreview'),
+  btnAudioConvertPause: $('btnAudioConvertPause'),
+  btnAudioConvertStop: $('btnAudioConvertStop'),
+  btnAudioConvertLoop: $('btnAudioConvertLoop'),
+  audioConvertPlayheadLabel: $('audioConvertPlayheadLabel'),
+  btnAudioConvertSetStart: $('btnAudioConvertSetStart'),
+  btnAudioConvertSetEnd: $('btnAudioConvertSetEnd'),
+  audioConvertLevelLabel: $('audioConvertLevelLabel'),
+  audioConvertPlayer: $('audioConvertPlayer'),
+  audioConvertSourceLabel: $('audioConvertSourceLabel'),
+  audioConvertWaveCanvas: $('audioConvertWaveCanvas'),
+  audioConvertZoomSlider: $('audioConvertZoomSlider'),
+  audioConvertScrollSlider: $('audioConvertScrollSlider'),
+  audioConvertZoomLabel: $('audioConvertZoomLabel'),
+  btnAudioConvertZoomIn: $('btnAudioConvertZoomIn'),
+  btnAudioConvertZoomOut: $('btnAudioConvertZoomOut'),
+  btnAudioConvertZoomReset: $('btnAudioConvertZoomReset'),
+  audioConvertStartLabel: $('audioConvertStartLabel'),
+  audioConvertEndLabel: $('audioConvertEndLabel'),
+  audioConvertDurationLabel: $('audioConvertDurationLabel'),
+  audioConvertSampleRateLabel: $('audioConvertSampleRateLabel'),
+  audioConvertStartSlider: $('audioConvertStartSlider'),
+  audioConvertEndSlider: $('audioConvertEndSlider'),
+  audioConvertStartInput: $('audioConvertStartInput'),
+  audioConvertEndInput: $('audioConvertEndInput'),
+  audioConvertNormalizeInput: $('audioConvertNormalizeInput'),
+  audioConvertVolumeDbInput: $('audioConvertVolumeDbInput'),
+  audioConvertMonoInput: $('audioConvertMonoInput'),
+  audioConvertSampleRateInput: $('audioConvertSampleRateInput'),
+  audioConvertHint: $('audioConvertHint'),
+  btnAudioConvertNormalizeApply: $('btnAudioConvertNormalizeApply'),
   resizeModal: $('resizeModal'),
   btnResizeModalClose: $('btnResizeModalClose'),
   resizeMode: $('resizeMode'),
@@ -2103,7 +2168,7 @@ function getCurrentSelectedEntry() {
 function inferTypeFromExtension(ext) {
   const e = String(ext || '').toLowerCase();
   if (e === '.pal') return 'PALETTE';
-  if (e === '.wav') return 'WAV';
+  if (AUDIO_EXTS.includes(e)) return 'WAV';
   if (e === '.vgm' || e === '.xgm') return 'XGM';
   if (e === '.tsx') return 'TILESET';
   if (e === '.tmx') return 'MAP';
@@ -2114,7 +2179,7 @@ function inferTypeFromExtension(ext) {
 function allowedTypesForExtension(ext) {
   const e = String(ext || '').toLowerCase();
   if (e === '.png' || e === '.bmp') return ['PALETTE', 'IMAGE', 'BITMAP', 'SPRITE', 'MAP', 'TILEMAP', 'TILESET'];
-  if (e === '.wav') return ['WAV'];
+  if (AUDIO_EXTS.includes(e)) return ['WAV'];
   if (e === '.xgm' || e === '.vgm') return ['XGM', 'XGM2'];
   if (e === '.tsx') return ['TILESET'];
   if (e === '.tmx') return ['MAP', 'TILEMAP'];
@@ -2652,13 +2717,13 @@ function createFieldInput(field, value) {
   if (field.type === 'select') {
     input = document.createElement('select');
     input.className = 'form-input form-input-mono';
-    field.options.forEach((opt) => {
+    (field.options || []).forEach((opt) => {
       const o = document.createElement('option');
       o.value = opt;
       o.textContent = opt;
       input.appendChild(o);
     });
-    input.value = value || field.options[0] || '';
+    input.value = value || field.options?.[0] || '';
   } else {
     input = document.createElement('input');
     input.type = 'text';
@@ -2667,6 +2732,68 @@ function createFieldInput(field, value) {
   }
   input.dataset.field = field.key;
   return input;
+}
+
+function isWavOutRateSupportedDriver(driver) {
+  const normalized = String(driver || '').toUpperCase();
+  return Object.prototype.hasOwnProperty.call(WAV_OUT_RATE_OPTIONS_BY_DRIVER, normalized);
+}
+
+function getWavOutRateOptions(driver) {
+  const normalized = String(driver || '').toUpperCase();
+  const list = WAV_OUT_RATE_OPTIONS_BY_DRIVER[normalized] || [];
+  return ['', ...list];
+}
+
+function getWavDefaultOutRate(driver) {
+  const normalized = String(driver || '').toUpperCase();
+  return WAV_OUT_RATE_DEFAULT_BY_DRIVER[normalized] || '';
+}
+
+function setSelectOptions(select, options, value) {
+  if (!select) return;
+  select.innerHTML = '';
+  options.forEach((opt) => {
+    const o = document.createElement('option');
+    o.value = String(opt);
+    o.textContent = opt === '' ? '(省略)' : String(opt);
+    select.appendChild(o);
+  });
+  const desired = String(value || '');
+  if (options.includes(desired)) {
+    select.value = desired;
+    return;
+  }
+  select.value = options[0] || '';
+}
+
+function bindWavOutRateDriverSync(container) {
+  const driverInput = container?.querySelector('[data-field="driver"]');
+  const outRateInput = container?.querySelector('[data-field="outRate"]');
+  if (!(driverInput instanceof HTMLSelectElement) || !(outRateInput instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  const sync = () => {
+    const driver = String(driverInput.value || '').toUpperCase();
+    const supported = isWavOutRateSupportedDriver(driver);
+    const options = getWavOutRateOptions(driver);
+    const current = String(outRateInput.value || '');
+    setSelectOptions(outRateInput, options, current);
+    outRateInput.disabled = !supported;
+    if (!supported) {
+      outRateInput.value = '';
+      return;
+    }
+    const defaultValue = getWavDefaultOutRate(driver);
+    if (!outRateInput.value || !options.includes(outRateInput.value)) {
+      outRateInput.value = defaultValue;
+    }
+  };
+
+  driverInput.addEventListener('change', sync);
+  driverInput.addEventListener('input', sync);
+  sync();
 }
 
 let _autoSaveTimer = null;
@@ -2734,6 +2861,9 @@ function renderAssetEditor(entry) {
   if (warning.textContent) {
     el.assetEditForm.appendChild(warning);
   }
+  if (entry.type === 'WAV') {
+    bindWavOutRateDriverSync(el.assetEditForm);
+  }
 
   // auto-save on edit
   el.assetEditForm.querySelectorAll('[data-field]').forEach((input) => {
@@ -2757,6 +2887,15 @@ function collectEditedEntry(entry) {
   next.type = String(entry.type || '').toUpperCase();
   if (next.type === 'XGM2') {
     next.files = [next.sourcePath || ''];
+  }
+  if (next.type === 'WAV') {
+    const driver = String(next.driver || 'DEFAULT').toUpperCase();
+    const options = getWavOutRateOptions(driver);
+    if (!isWavOutRateSupportedDriver(driver)) {
+      next.outRate = '';
+    } else if (!options.includes(String(next.outRate || ''))) {
+      next.outRate = getWavDefaultOutRate(driver);
+    }
   }
 
   return next;
@@ -2907,11 +3046,15 @@ function syncAssetModalForType() {
   if (el.assetSymbolNameInput && fileName && !el.assetSymbolNameInput.dataset.userEdited) {
     el.assetSymbolNameInput.value = normalizeSymbolName(fileName);
   }
-  const showResize = type !== 'PALETTE';
+  const showResize = ['IMAGE', 'BITMAP', 'SPRITE', 'MAP', 'TILEMAP', 'TILESET'].includes(type);
   const wRow = el.assetResizeTargetWidth?.closest('.form-group');
   const hRow = el.assetResizeTargetHeight?.closest('.form-group');
   if (wRow) wRow.style.display = showResize ? '' : 'none';
   if (hRow) hRow.style.display = showResize ? '' : 'none';
+  if (!showResize) {
+    if (el.assetResizeTargetWidth) el.assetResizeTargetWidth.value = '';
+    if (el.assetResizeTargetHeight) el.assetResizeTargetHeight.value = '';
+  }
 }
 
 function openResFileModal() {
@@ -4247,7 +4390,13 @@ async function openAssetModal() {
   state.rescomp.pendingAssetPick = picked;
   const initialType = inferTypeFromExtension(picked.ext);
   if (el.assetSourcePathInput) el.assetSourcePathInput.value = picked.sourcePath;
-  if (el.assetTargetFileNameInput) el.assetTargetFileNameInput.value = picked.fileName;
+  if (el.assetTargetFileNameInput) {
+    const isAudioInput = AUDIO_EXTS.includes((picked.ext || '').toLowerCase());
+    const suggestedFileName = (initialType === 'WAV' && isAudioInput)
+      ? `${picked.fileName.replace(/\.[^.]+$/, '')}.wav`
+      : picked.fileName;
+    el.assetTargetFileNameInput.value = suggestedFileName;
+  }
   if (el.assetTargetSubdirInput) {
     el.assetTargetSubdirInput.value = defaultSubDirForType(initialType);
     delete el.assetTargetSubdirInput.dataset.userEdited;
@@ -4267,6 +4416,651 @@ async function openAssetModal() {
   openModal(el.assetModal);
 }
 
+function formatSeconds(seconds) {
+  const n = Number(seconds);
+  if (!Number.isFinite(n) || n < 0) return '0.00';
+  return n.toFixed(2);
+}
+
+function syncPlayheadLabel() {
+  if (el.audioConvertPlayheadLabel) {
+    el.audioConvertPlayheadLabel.textContent = `${formatSeconds(audioConvertState.playheadSec)}s`;
+  }
+}
+
+function syncAudioConvertLoopButton() {
+  if (!el.btnAudioConvertLoop) return;
+  el.btnAudioConvertLoop.classList.toggle('is-active', !!audioConvertState.loopPlayback);
+}
+
+function computeAudioPeakDb(buffer) {
+  if (!buffer || typeof buffer.numberOfChannels !== 'number') return null;
+  let peak = 0;
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = 0; i < data.length; i++) {
+      const v = Math.abs(data[i]);
+      if (v > peak) peak = v;
+    }
+  }
+  if (peak <= 0) return -Infinity;
+  return 20 * Math.log10(peak);
+}
+
+function formatDb(db) {
+  if (db === -Infinity) return '-inf dB';
+  if (!Number.isFinite(db)) return '-';
+  return `${db.toFixed(1)} dB`;
+}
+
+function updateAudioConvertLevelLabel() {
+  if (!el.audioConvertLevelLabel) return;
+  const current = computeAudioPeakDb(audioConvertState.audioBuffer);
+  const base = computeAudioPeakDb(audioConvertState.originalAudioBuffer);
+  if (!Number.isFinite(current) && current !== -Infinity) {
+    el.audioConvertLevelLabel.textContent = '-';
+    return;
+  }
+  if (base == null || audioConvertState.originalAudioBuffer === audioConvertState.audioBuffer) {
+    el.audioConvertLevelLabel.textContent = `Peak ${formatDb(current)}`;
+    return;
+  }
+  const delta = Number.isFinite(current) && Number.isFinite(base)
+    ? ` (${current >= base ? '+' : ''}${(current - base).toFixed(1)} dB)`
+    : '';
+  el.audioConvertLevelLabel.textContent = `Peak ${formatDb(base)} -> ${formatDb(current)}${delta}`;
+}
+
+function getAudioConvertViewport() {
+  const duration = Math.max(0.001, audioConvertState.durationSec);
+  const zoom = audioConvertState.waveZoom;
+  const scroll = audioConvertState.waveScroll;
+  const visFrac = 1 / zoom;
+  const startFrac = scroll * (1 - visFrac);
+  const endFrac = startFrac + visFrac;
+  return { duration, visFrac, startFrac, endFrac };
+}
+
+function seekAudioConvertPlayhead(sec) {
+  const duration = Math.max(0, audioConvertState.durationSec);
+  const targetSec = clamp(Number(sec) || 0, 0, duration);
+  audioConvertState.playheadSec = targetSec;
+  if (el.audioConvertPlayer) {
+    try {
+      el.audioConvertPlayer.currentTime = targetSec;
+    } catch (_) {}
+  }
+  ensurePlayheadVisible();
+  syncPlayheadLabel();
+  renderAudioConvertWaveform();
+}
+
+function ensurePlayheadVisible() {
+  if (audioConvertState.waveZoom <= 1.001 || audioConvertState.durationSec <= 0) return;
+  const { duration, visFrac, startFrac } = getAudioConvertViewport();
+  const endFrac = startFrac + visFrac;
+  const ratio = clamp(audioConvertState.playheadSec / duration, 0, 1);
+  const margin = visFrac * 0.12;
+  let changed = false;
+
+  if (ratio < startFrac + margin) {
+    const targetStart = clamp(ratio - margin, 0, Math.max(0, 1 - visFrac));
+    const denom = Math.max(0.000001, 1 - visFrac);
+    audioConvertState.waveScroll = clamp(targetStart / denom, 0, 1);
+    changed = true;
+  } else if (ratio > endFrac - margin) {
+    const targetStart = clamp(ratio + margin - visFrac, 0, Math.max(0, 1 - visFrac));
+    const denom = Math.max(0.000001, 1 - visFrac);
+    audioConvertState.waveScroll = clamp(targetStart / denom, 0, 1);
+    changed = true;
+  }
+
+  if (changed) {
+    syncAudioConvertZoomUI();
+  }
+}
+
+function stopAudioConvertPreview() {
+  if (audioConvertState.stopTimer) {
+    clearInterval(audioConvertState.stopTimer);
+    audioConvertState.stopTimer = null;
+  }
+  if (audioConvertState.playheadRAF) {
+    cancelAnimationFrame(audioConvertState.playheadRAF);
+    audioConvertState.playheadRAF = null;
+  }
+  if (el.audioConvertPlayer) {
+    try { el.audioConvertPlayer.pause(); } catch (_) {}
+  }
+  audioConvertState.playheadSec = audioConvertState.startSec;
+  ensurePlayheadVisible();
+  syncPlayheadLabel();
+  renderAudioConvertWaveform();
+}
+
+function pauseAudioConvertPreview() {
+  if (audioConvertState.stopTimer) {
+    clearInterval(audioConvertState.stopTimer);
+    audioConvertState.stopTimer = null;
+  }
+  if (audioConvertState.playheadRAF) {
+    cancelAnimationFrame(audioConvertState.playheadRAF);
+    audioConvertState.playheadRAF = null;
+  }
+  if (el.audioConvertPlayer) {
+    audioConvertState.playheadSec = el.audioConvertPlayer.currentTime;
+    try { el.audioConvertPlayer.pause(); } catch (_) {}
+  }
+  ensurePlayheadVisible();
+  syncPlayheadLabel();
+  renderAudioConvertWaveform();
+}
+
+function startAudioConvertPlayheadLoop() {
+  if (audioConvertState.playheadRAF) {
+    cancelAnimationFrame(audioConvertState.playheadRAF);
+    audioConvertState.playheadRAF = null;
+  }
+  function tick() {
+    if (!el.audioConvertPlayer || el.audioConvertPlayer.paused) {
+      audioConvertState.playheadRAF = null;
+      return;
+    }
+    audioConvertState.playheadSec = el.audioConvertPlayer.currentTime;
+    if (audioConvertState.playheadSec >= audioConvertState.endSec) {
+      if (audioConvertState.loopPlayback) {
+        audioConvertState.playheadSec = audioConvertState.startSec;
+        try {
+          el.audioConvertPlayer.currentTime = audioConvertState.startSec;
+        } catch (_) {}
+      } else {
+        stopAudioConvertPreview();
+        return;
+      }
+    }
+    ensurePlayheadVisible();
+    syncPlayheadLabel();
+    renderAudioConvertWaveform();
+    audioConvertState.playheadRAF = requestAnimationFrame(tick);
+  }
+  audioConvertState.playheadRAF = requestAnimationFrame(tick);
+}
+
+function syncAudioConvertLabels() {
+  if (el.audioConvertStartLabel) el.audioConvertStartLabel.textContent = `${formatSeconds(audioConvertState.startSec)}s`;
+  if (el.audioConvertEndLabel) el.audioConvertEndLabel.textContent = `${formatSeconds(audioConvertState.endSec)}s`;
+  if (el.audioConvertDurationLabel) el.audioConvertDurationLabel.textContent = `${formatSeconds(audioConvertState.durationSec)}s`;
+  if (el.audioConvertSampleRateLabel) {
+    el.audioConvertSampleRateLabel.textContent = audioConvertState.sampleRate > 0
+      ? `${Math.round(audioConvertState.sampleRate)}Hz`
+      : '-';
+  }
+}
+
+function syncAudioConvertZoomUI() {
+  const zoom = audioConvertState.waveZoom;
+  const scroll = audioConvertState.waveScroll;
+  if (el.audioConvertZoomSlider) el.audioConvertZoomSlider.value = String(zoom);
+  if (el.audioConvertZoomLabel) el.audioConvertZoomLabel.textContent = `×${zoom.toFixed(1)}`;
+  const hasScroll = zoom > 1.001;
+  if (el.audioConvertScrollSlider) {
+    el.audioConvertScrollSlider.disabled = !hasScroll;
+    el.audioConvertScrollSlider.value = String(Math.round(scroll * 1000));
+  }
+}
+
+function setAudioConvertZoom(zoom, anchorRatio) {
+  const clamped = clamp(zoom, 1, 32);
+  const prevZoom = audioConvertState.waveZoom;
+  const prevScroll = audioConvertState.waveScroll;
+  audioConvertState.waveZoom = clamped;
+  if (clamped <= 1) {
+    audioConvertState.waveScroll = 0;
+  } else if (anchorRatio != null) {
+    // zoom around anchorRatio (0..1 in audio time)
+    const visibleFrac = 1 / prevZoom;
+    const anchorAbs = prevScroll * (1 - visibleFrac) + anchorRatio * visibleFrac;
+    const newVisFrac = 1 / clamped;
+    const newScroll = (anchorAbs - anchorRatio * newVisFrac) / (1 - newVisFrac);
+    audioConvertState.waveScroll = clamp(newScroll, 0, 1);
+  }
+  syncAudioConvertZoomUI();
+  renderAudioConvertWaveform();
+}
+
+function renderAudioConvertWaveform() {
+  const canvas = el.audioConvertWaveCanvas;
+  const buffer = audioConvertState.audioBuffer;
+  if (!(canvas instanceof HTMLCanvasElement)) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#0a0e16';
+  ctx.fillRect(0, 0, w, h);
+
+  if (!buffer) return;
+  const data = buffer.getChannelData(0);
+  const totalSamples = data.length;
+  const mid = h / 2;
+
+  const { duration, visFrac, startFrac, endFrac } = getAudioConvertViewport();
+  const i0Total = Math.floor(startFrac * totalSamples);
+  const i1Total = Math.min(totalSamples, Math.ceil(endFrac * totalSamples));
+  const visibleSamples = Math.max(1, i1Total - i0Total);
+  const step = Math.max(1, visibleSamples / w);
+
+  const toCanvasX = (r) => Math.floor(((r - startFrac) / visFrac) * w);
+
+  // Draw original waveform in the background for before/after comparison.
+  if (audioConvertState.originalAudioBuffer && audioConvertState.originalAudioBuffer !== buffer) {
+    const originalData = audioConvertState.originalAudioBuffer.getChannelData(0);
+    const originalTotal = originalData.length;
+    const o0 = Math.floor(startFrac * originalTotal);
+    const o1 = Math.min(originalTotal, Math.ceil(endFrac * originalTotal));
+    const oVisible = Math.max(1, o1 - o0);
+    const oStep = Math.max(1, oVisible / w);
+    ctx.strokeStyle = 'rgba(150, 150, 150, 0.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x < w; x++) {
+      const si = Math.floor(o0 + x * oStep);
+      const ei = Math.min(originalTotal, Math.floor(o0 + (x + 1) * oStep));
+      let min = 1;
+      let max = -1;
+      for (let i = si; i < ei; i++) {
+        const v = originalData[i];
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      const y1 = mid + (min * mid * 0.92);
+      const y2 = mid + (max * mid * 0.92);
+      ctx.moveTo(x + 0.5, y1);
+      ctx.lineTo(x + 0.5, y2);
+    }
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = 'rgba(106, 181, 255, 0.95)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 0; x < w; x++) {
+    const si = Math.floor(i0Total + x * step);
+    const ei = Math.min(totalSamples, Math.floor(i0Total + (x + 1) * step));
+    let min = 1;
+    let max = -1;
+    for (let i = si; i < ei; i++) {
+      const v = data[i];
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    const y1 = mid + (min * mid * 0.92);
+    const y2 = mid + (max * mid * 0.92);
+    ctx.moveTo(x + 0.5, y1);
+    ctx.lineTo(x + 0.5, y2);
+  }
+  ctx.stroke();
+
+  // Draw trim markers in visible coordinate space
+  const startRatio = audioConvertState.startSec / duration;
+  const endRatio = audioConvertState.endSec / duration;
+  const sx = toCanvasX(startRatio);
+  const ex = toCanvasX(endRatio);
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  if (sx > 0) ctx.fillRect(0, 0, Math.max(0, sx), h);
+  if (ex < w) ctx.fillRect(Math.max(0, ex), 0, Math.max(0, w - ex), h);
+
+  ctx.strokeStyle = '#ffd166';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  if (sx >= 0 && sx <= w) { ctx.moveTo(sx + 0.5, 0); ctx.lineTo(sx + 0.5, h); }
+  if (ex >= 0 && ex <= w) { ctx.moveTo(ex + 0.5, 0); ctx.lineTo(ex + 0.5, h); }
+  ctx.stroke();
+
+  // Draw playhead indicator
+  if (audioConvertState.durationSec > 0) {
+    const phRatio = audioConvertState.playheadSec / duration;
+    const px = toCanvasX(phRatio);
+    if (px >= 0 && px <= w) {
+      ctx.strokeStyle = '#ff4d4d';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(px + 0.5, 0);
+      ctx.lineTo(px + 0.5, h);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#ff4d4d';
+      ctx.beginPath();
+      ctx.moveTo(px - 6, 0);
+      ctx.lineTo(px + 6, 0);
+      ctx.lineTo(px + 0.5, 10);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  ctx.setLineDash([]);
+
+  // Draw time axis ticks at reasonable intervals
+  const visibleDurationSec = duration * visFrac;
+  const rawInterval = visibleDurationSec / 8;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawInterval)));
+  const normalized = rawInterval / magnitude;
+  const niceStep = normalized < 1.5 ? magnitude : normalized < 3.5 ? 2 * magnitude : normalized < 7 ? 5 * magnitude : 10 * magnitude;
+  const firstTick = Math.ceil((startFrac * duration) / niceStep) * niceStep;
+  ctx.fillStyle = 'rgba(180, 200, 220, 0.55)';
+  ctx.font = '10px monospace';
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(120, 150, 180, 0.3)';
+  for (let t = firstTick; t <= endFrac * duration + niceStep * 0.01; t += niceStep) {
+    const r = t / duration;
+    const tx = toCanvasX(r);
+    if (tx < 0 || tx > w) continue;
+    ctx.beginPath();
+    ctx.moveTo(tx + 0.5, h - 18);
+    ctx.lineTo(tx + 0.5, h);
+    ctx.stroke();
+    const label = t < 60 ? `${t.toFixed(t < 1 ? 2 : 1)}s` : `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    ctx.fillText(label, tx + 2, h - 4);
+  }
+}
+
+function syncAudioConvertInputsFromState() {
+  const duration = Math.max(0, audioConvertState.durationSec);
+  const toSlider = (v) => Math.round((duration <= 0 ? 0 : (v / duration)) * 1000);
+
+  if (el.audioConvertStartInput) el.audioConvertStartInput.value = formatSeconds(audioConvertState.startSec);
+  if (el.audioConvertEndInput) el.audioConvertEndInput.value = formatSeconds(audioConvertState.endSec);
+  if (el.audioConvertStartSlider) el.audioConvertStartSlider.value = String(clamp(toSlider(audioConvertState.startSec), 0, 1000));
+  if (el.audioConvertEndSlider) el.audioConvertEndSlider.value = String(clamp(toSlider(audioConvertState.endSec), 0, 1000));
+  syncAudioConvertLabels();
+  updateAudioConvertLevelLabel();
+  renderAudioConvertWaveform();
+}
+
+function setAudioConvertRange(startSec, endSec) {
+  const duration = Math.max(0, audioConvertState.durationSec);
+  const minGap = duration > 0.02 ? 0.01 : 0;
+  let s = clamp(Number(startSec) || 0, 0, duration);
+  let e = clamp(Number(endSec) || duration, 0, duration);
+  if (e < s + minGap) {
+    if (e >= duration) s = clamp(e - minGap, 0, duration);
+    else e = clamp(s + minGap, 0, duration);
+  }
+  audioConvertState.startSec = s;
+  audioConvertState.endSec = e;
+  syncAudioConvertInputsFromState();
+}
+
+function closeAudioConvertModal(clearPending = true) {
+  stopAudioConvertPreview();
+  closeModal(el.audioConvertModal);
+  audioConvertState.active = false;
+  audioConvertState.audioBuffer = null;
+  audioConvertState.originalAudioBuffer = null;
+  audioConvertState.dataUrl = '';
+  audioConvertState.durationSec = 0;
+  audioConvertState.sampleRate = 0;
+  audioConvertState.startSec = 0;
+  audioConvertState.endSec = 0;
+  if (clearPending) {
+    audioConvertState.pending = null;
+    state.rescomp.pendingAssetPick = null;
+  }
+}
+
+async function finalizeAssetRegistration({
+  normalizedType,
+  copyResult,
+  targetFileName,
+  symbol,
+  comment,
+  warning,
+  resFile,
+}) {
+  const defaultEntry = createDefaultEntry(normalizedType, copyResult.relativePath, targetFileName);
+  defaultEntry.name = normalizeSymbolName(symbol || defaultEntry.name);
+  defaultEntry.comment = comment || '';
+
+  const addResult = await window.electronAPI.addResEntry({
+    file: resFile || state.rescomp.selectedFile,
+    entry: defaultEntry,
+  });
+
+  if (!addResult?.ok) {
+    if (el.assetTableHint) el.assetTableHint.textContent = `定義追加失敗: ${addResult?.error || 'unknown'}`;
+    return false;
+  }
+
+  state.rescomp.selectedFile = resFile || state.rescomp.selectedFile;
+  await loadResDefinitions({ keepSelection: true });
+
+  const file = getSelectedFile();
+  const matched = file?.entries.find((e) => e.name === defaultEntry.name && e.type === normalizedType && e.sourcePath === defaultEntry.sourcePath);
+  if (matched) {
+    state.rescomp.selectedEntryLine = matched.lineNumber;
+    renderAssetTable();
+  }
+
+  if (el.assetTableHint) {
+    const msg = copyResult?.warning || warning || `追加しました: ${defaultEntry.type} ${defaultEntry.name}`;
+    el.assetTableHint.textContent = msg;
+  }
+  return true;
+}
+
+async function openAudioConvertModal(pending) {
+  audioConvertState.pending = pending;
+  audioConvertState.active = true;
+  openModal(el.audioConvertModal);
+
+  if (el.audioConvertSourceLabel) {
+    el.audioConvertSourceLabel.textContent = `${pending.picked.fileName} -> ${pending.targetFileName}`;
+  }
+  if (el.audioConvertNormalizeInput) el.audioConvertNormalizeInput.value = 'FALSE';
+  if (el.audioConvertMonoInput) el.audioConvertMonoInput.value = 'TRUE';
+  if (el.audioConvertVolumeDbInput) el.audioConvertVolumeDbInput.value = '';
+  if (el.audioConvertSampleRateInput) el.audioConvertSampleRateInput.value = '22050';
+  if (el.audioConvertHint) el.audioConvertHint.textContent = '音声を解析中...';
+  audioConvertState.waveZoom = 1;
+  audioConvertState.waveScroll = 0;
+  audioConvertState.playheadSec = 0;
+  audioConvertState.loopPlayback = false;
+  syncAudioConvertZoomUI();
+  syncPlayheadLabel();
+  syncAudioConvertLoopButton();
+
+  const isSourceWav = (pending.picked.ext || '').toLowerCase() === '.wav';
+  if (el.btnAudioConvertSkip) {
+    el.btnAudioConvertSkip.style.display = isSourceWav ? '' : 'none';
+  }
+
+  const read = await window.electronAPI.readFileAsDataUrl(pending.picked.sourcePath);
+  if (!read?.ok || !read?.dataUrl) {
+    if (el.audioConvertHint) el.audioConvertHint.textContent = `音声読み込み失敗: ${read?.error || 'unknown'}`;
+    return;
+  }
+
+  audioConvertState.dataUrl = read.dataUrl;
+  if (el.audioConvertPlayer) {
+    el.audioConvertPlayer.src = read.dataUrl;
+  }
+
+  try {
+    const resp = await fetch(read.dataUrl);
+    const buf = await resp.arrayBuffer();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const decoded = await ctx.decodeAudioData(buf.slice(0));
+    await ctx.close();
+
+    audioConvertState.audioBuffer = decoded;
+    audioConvertState.originalAudioBuffer = decoded;
+    audioConvertState.durationSec = Number(decoded.duration) || 0;
+    audioConvertState.sampleRate = Number(decoded.sampleRate) || 0;
+    audioConvertState.startSec = 0;
+    audioConvertState.endSec = audioConvertState.durationSec;
+    audioConvertState.playheadSec = 0;
+    syncAudioConvertInputsFromState();
+    if (el.audioConvertHint) el.audioConvertHint.textContent = '範囲を指定してプレビューできます。';
+  } catch (err) {
+    if (el.audioConvertHint) el.audioConvertHint.textContent = `音声解析失敗: ${String(err?.message || err)}`;
+  }
+}
+
+async function applyAudioConvertNormalizePreview() {
+  const pending = audioConvertState.pending;
+  if (!pending) return;
+
+  const normalize = String(el.audioConvertNormalizeInput?.value || 'FALSE').toUpperCase() === 'TRUE';
+  const volumeDb = Number(el.audioConvertVolumeDbInput?.value || 0) || 0;
+  if (!normalize && volumeDb === 0) {
+    if (el.audioConvertHint) el.audioConvertHint.textContent = '正規化が FALSE かつボリューム調整が 0 のため適用不要です。';
+    return;
+  }
+
+  if (el.audioConvertHint) el.audioConvertHint.textContent = '正規化/ボリューム調整を適用中...';
+  if (el.btnAudioConvertNormalizeApply) el.btnAudioConvertNormalizeApply.disabled = true;
+
+  try {
+    const result = await window.electronAPI.previewConvertAudio({
+      sourcePath: pending.picked.sourcePath,
+      options: {
+        trimStartSec: null,
+        trimEndSec: null,
+        normalize,
+        volumeDb,
+        mono: false,
+        sampleRate: null,
+      },
+    });
+
+    if (!result?.ok || !result?.dataUrl) {
+      if (el.audioConvertHint) el.audioConvertHint.textContent = `適用失敗: ${result?.error || 'unknown'}`;
+      return;
+    }
+
+    stopAudioConvertPreview();
+    audioConvertState.dataUrl = result.dataUrl;
+    if (el.audioConvertPlayer) el.audioConvertPlayer.src = result.dataUrl;
+
+    const resp = await fetch(result.dataUrl);
+    const buf = await resp.arrayBuffer();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const decoded = await ctx.decodeAudioData(buf.slice(0));
+    await ctx.close();
+
+    audioConvertState.audioBuffer = decoded;
+    audioConvertState.durationSec = Number(decoded.duration) || 0;
+    audioConvertState.sampleRate = Number(decoded.sampleRate) || 0;
+    audioConvertState.playheadSec = clamp(audioConvertState.playheadSec, 0, audioConvertState.durationSec);
+    audioConvertState.startSec = clamp(audioConvertState.startSec, 0, audioConvertState.durationSec);
+    audioConvertState.endSec = clamp(audioConvertState.endSec, audioConvertState.startSec, audioConvertState.durationSec);
+    syncAudioConvertInputsFromState();
+
+    if (el.audioConvertHint) el.audioConvertHint.textContent = '正規化/ボリューム適用済み（灰:元波形 / 青:適用後）';
+  } catch (err) {
+    if (el.audioConvertHint) el.audioConvertHint.textContent = `適用失敗: ${String(err?.message || err)}`;
+  } finally {
+    if (el.btnAudioConvertNormalizeApply) el.btnAudioConvertNormalizeApply.disabled = false;
+  }
+}
+
+async function skipAudioConvertModal() {
+  const pending = audioConvertState.pending;
+  if (!pending) {
+    closeAudioConvertModal(true);
+    return;
+  }
+
+  if (el.audioConvertHint) el.audioConvertHint.textContent = 'ファイルをコピー中...';
+
+  const copyResult = await window.electronAPI.writeAssetFile({
+    sourcePath: pending.picked.sourcePath,
+    targetSubdir: pending.targetSubdir,
+    targetFileName: pending.targetFileName,
+  });
+
+  if (!copyResult?.ok) {
+    if (el.audioConvertHint) el.audioConvertHint.textContent = `コピー失敗: ${copyResult?.error || 'unknown'}`;
+    return;
+  }
+
+  const added = await finalizeAssetRegistration({
+    normalizedType: 'WAV',
+    copyResult,
+    targetFileName: pending.targetFileName,
+    symbol: pending.symbol,
+    comment: pending.comment,
+    warning: '',
+    resFile: pending.resFile,
+  });
+  if (!added) return;
+
+  closeAudioConvertModal(true);
+}
+
+async function applyAudioConvertModal() {
+  const pending = audioConvertState.pending;
+  if (!pending) {
+    closeAudioConvertModal(true);
+    return;
+  }
+
+  const startSec = Number(el.audioConvertStartInput?.value || audioConvertState.startSec || 0);
+  const endSec = Number(el.audioConvertEndInput?.value || audioConvertState.endSec || 0);
+  if (Number.isFinite(startSec) && startSec < 0) {
+    if (el.audioConvertHint) el.audioConvertHint.textContent = '開始位置は 0 以上にしてください。';
+    return;
+  }
+  if (Number.isFinite(endSec) && endSec <= 0) {
+    if (el.audioConvertHint) el.audioConvertHint.textContent = '終了位置は 0 より大きくしてください。';
+    return;
+  }
+  if (Number.isFinite(startSec) && Number.isFinite(endSec) && endSec <= startSec) {
+    if (el.audioConvertHint) el.audioConvertHint.textContent = '終了位置は開始位置より後にしてください。';
+    return;
+  }
+
+  const sampleRate = Number(el.audioConvertSampleRateInput?.value || 0);
+  const payload = {
+    sourcePath: pending.picked.sourcePath,
+    targetSubdir: pending.targetSubdir,
+    targetFileName: pending.targetFileName,
+    options: {
+      trimStartSec: Number.isFinite(startSec) ? startSec : null,
+      trimEndSec: Number.isFinite(endSec) ? endSec : null,
+      normalize: String(el.audioConvertNormalizeInput?.value || 'FALSE').toUpperCase() === 'TRUE',
+      volumeDb: Number(el.audioConvertVolumeDbInput?.value || 0) || 0,
+      mono: String(el.audioConvertMonoInput?.value || 'FALSE').toUpperCase() === 'TRUE',
+      sampleRate: Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : null,
+    },
+  };
+
+  if (el.audioConvertHint) el.audioConvertHint.textContent = '音声を変換しています...';
+  const copyResult = await window.electronAPI.convertAndWriteAudioAsset(payload);
+  if (!copyResult?.ok) {
+    if (el.audioConvertHint) el.audioConvertHint.textContent = `変換失敗: ${copyResult?.error || 'unknown'}`;
+    return;
+  }
+
+  const added = await finalizeAssetRegistration({
+    normalizedType: 'WAV',
+    copyResult,
+    targetFileName: pending.targetFileName,
+    symbol: pending.symbol,
+    comment: pending.comment,
+    warning: '',
+    resFile: pending.resFile,
+  });
+  if (!added) return;
+
+  closeAudioConvertModal(true);
+}
+
 async function submitAssetModal() {
   const picked = state.rescomp.pendingAssetPick;
   if (!picked) {
@@ -4281,14 +5075,22 @@ async function submitAssetModal() {
   }
 
   const targetSubdir = el.assetTargetSubdirInput?.value.trim() || defaultSubDirForType(normalizedType);
-  const targetFileName = el.assetTargetFileNameInput?.value.trim() || picked.fileName;
-  if (!targetFileName) return;
+  const inputFileName = el.assetTargetFileNameInput?.value.trim() || picked.fileName;
+  if (!inputFileName) return;
+  const targetFileName = (normalizedType === 'WAV' && AUDIO_EXTS.includes((picked.ext || '').toLowerCase()))
+    ? (String(inputFileName).toLowerCase().endsWith('.wav') ? inputFileName : `${inputFileName.replace(/\.[^.]+$/, '')}.wav`)
+    : inputFileName;
+
+  const symbol = el.assetSymbolNameInput?.value.trim() || normalizeSymbolName(targetFileName);
+  const comment = el.assetCommentInput?.value.trim() || '';
+  const resFile = el.assetResFileInput?.value || state.rescomp.selectedFile;
 
   let convertedDataUrl = '';
   let warning = '';
   const rawTargetW = String(el.assetResizeTargetWidth?.value || '').trim();
   const rawTargetH = String(el.assetResizeTargetHeight?.value || '').trim();
-  if ((rawTargetW && !rawTargetH) || (!rawTargetW && rawTargetH)) {
+  const resizeEnabled = ['IMAGE', 'BITMAP', 'SPRITE', 'MAP', 'TILEMAP', 'TILESET'].includes(normalizedType);
+  if (resizeEnabled && ((rawTargetW && !rawTargetH) || (!rawTargetW && rawTargetH))) {
     if (el.assetTableHint) {
       el.assetTableHint.textContent = '画像サイズ指定は幅と高さを両方入力してください。';
     }
@@ -4300,7 +5102,9 @@ async function submitAssetModal() {
     && Number.isFinite(targetHeight)
     && targetWidth > 0
     && targetHeight > 0;
-  const isImageAsset = IMAGE_EXTS.includes((picked.ext || '').toLowerCase());
+  const sourceExt = (picked.ext || '').toLowerCase();
+  const isImageAsset = IMAGE_EXTS.includes(sourceExt);
+  const isAudioInput = AUDIO_EXTS.includes(sourceExt);
   const supportsResize = normalizedType !== 'PALETTE';
   if (isImageAsset && ['PALETTE', 'IMAGE', 'BITMAP', 'SPRITE', 'MAP', 'TILEMAP', 'TILESET'].includes(normalizedType)) {
     const converted = await maybeConvertImageToIndexed16(picked.sourcePath, {
@@ -4317,6 +5121,19 @@ async function submitAssetModal() {
     warning = converted.warning || '';
   }
 
+  if (normalizedType === 'WAV' && isAudioInput) {
+    closeModal(el.assetModal);
+    await openAudioConvertModal({
+      picked,
+      targetSubdir,
+      targetFileName,
+      symbol,
+      comment,
+      resFile,
+    });
+    return;
+  }
+
   const copyResult = await window.electronAPI.writeAssetFile({
     sourcePath: picked.sourcePath,
     targetSubdir,
@@ -4329,34 +5146,17 @@ async function submitAssetModal() {
     return;
   }
 
-  const defaultEntry = createDefaultEntry(normalizedType, copyResult.relativePath, targetFileName);
-  const symbol = el.assetSymbolNameInput?.value.trim() || defaultEntry.name;
-  defaultEntry.name = normalizeSymbolName(symbol);
-  defaultEntry.comment = el.assetCommentInput?.value.trim() || '';
-
-  const addResult = await window.electronAPI.addResEntry({
-    file: el.assetResFileInput?.value || state.rescomp.selectedFile,
-    entry: defaultEntry,
+  const added = await finalizeAssetRegistration({
+    normalizedType,
+    copyResult,
+    targetFileName,
+    symbol,
+    comment,
+    warning,
+    resFile,
   });
+  if (!added) return;
 
-  if (!addResult?.ok) {
-    if (el.assetTableHint) el.assetTableHint.textContent = `定義追加失敗: ${addResult?.error || 'unknown'}`;
-    return;
-  }
-
-  state.rescomp.selectedFile = el.assetResFileInput?.value || state.rescomp.selectedFile;
-  await loadResDefinitions({ keepSelection: true });
-
-  const file = getSelectedFile();
-  const matched = file?.entries.find((e) => e.name === defaultEntry.name && e.type === normalizedType && e.sourcePath === defaultEntry.sourcePath);
-  if (matched) {
-    state.rescomp.selectedEntryLine = matched.lineNumber;
-    renderAssetTable();
-  }
-
-  if (el.assetTableHint) {
-    el.assetTableHint.textContent = warning || `追加しました: ${defaultEntry.type} ${defaultEntry.name}`;
-  }
   state.rescomp.pendingAssetPick = null;
   closeModal(el.assetModal);
 }
@@ -4610,6 +5410,112 @@ function bindEvents() {
   el.btnAssetModalClose?.addEventListener('click', () => closeModal(el.assetModal));
   el.btnAssetModalCancel?.addEventListener('click', () => closeModal(el.assetModal));
   el.btnAssetModalCreate?.addEventListener('click', submitAssetModal);
+
+  el.btnAudioConvertClose?.addEventListener('click', () => closeAudioConvertModal(true));
+  el.btnAudioConvertCancel?.addEventListener('click', () => closeAudioConvertModal(true));
+  el.audioConvertBackdrop?.addEventListener('click', () => closeAudioConvertModal(true));
+  el.btnAudioConvertApply?.addEventListener('click', applyAudioConvertModal);
+  el.btnAudioConvertSkip?.addEventListener('click', skipAudioConvertModal);
+  el.btnAudioConvertNormalizeApply?.addEventListener('click', applyAudioConvertNormalizePreview);
+  el.btnAudioConvertStop?.addEventListener('click', stopAudioConvertPreview);
+  el.btnAudioConvertPause?.addEventListener('click', pauseAudioConvertPreview);
+  el.btnAudioConvertRewind?.addEventListener('click', () => {
+    seekAudioConvertPlayhead(audioConvertState.startSec);
+  });
+  el.btnAudioConvertLoop?.addEventListener('click', () => {
+    audioConvertState.loopPlayback = !audioConvertState.loopPlayback;
+    syncAudioConvertLoopButton();
+  });
+  el.btnAudioConvertSetStart?.addEventListener('click', () => {
+    if (!audioConvertState.durationSec) return;
+    setAudioConvertRange(audioConvertState.playheadSec, audioConvertState.endSec);
+  });
+  el.btnAudioConvertSetEnd?.addEventListener('click', () => {
+    if (!audioConvertState.durationSec) return;
+    setAudioConvertRange(audioConvertState.startSec, audioConvertState.playheadSec);
+  });
+
+  el.btnAudioConvertZoomIn?.addEventListener('click', () => {
+    setAudioConvertZoom(audioConvertState.waveZoom * 2, 0.5);
+  });
+  el.btnAudioConvertZoomOut?.addEventListener('click', () => {
+    setAudioConvertZoom(audioConvertState.waveZoom / 2, 0.5);
+  });
+  el.btnAudioConvertZoomReset?.addEventListener('click', () => {
+    audioConvertState.waveZoom = 1;
+    audioConvertState.waveScroll = 0;
+    syncAudioConvertZoomUI();
+    renderAudioConvertWaveform();
+  });
+  el.audioConvertZoomSlider?.addEventListener('input', () => {
+    const z = Number(el.audioConvertZoomSlider?.value || 1);
+    setAudioConvertZoom(z, 0.5);
+  });
+  el.audioConvertScrollSlider?.addEventListener('input', () => {
+    audioConvertState.waveScroll = clamp(Number(el.audioConvertScrollSlider?.value || 0) / 1000, 0, 1);
+    renderAudioConvertWaveform();
+  });
+  el.audioConvertWaveCanvas?.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = el.audioConvertWaveCanvas.getBoundingClientRect();
+    const mouseFrac = (e.clientX - rect.left) / rect.width;
+    const zoom = audioConvertState.waveZoom;
+    const visFrac = 1 / zoom;
+    const startFrac = audioConvertState.waveScroll * (1 - visFrac);
+    const anchorRatio = startFrac + mouseFrac * visFrac;
+    const factor = e.deltaY < 0 ? 1.5 : 1 / 1.5;
+    setAudioConvertZoom(zoom * factor, anchorRatio);
+  }, { passive: false });
+
+  el.audioConvertWaveCanvas?.addEventListener('click', (e) => {
+    if (!audioConvertState.durationSec || !el.audioConvertWaveCanvas) return;
+    const rect = el.audioConvertWaveCanvas.getBoundingClientRect();
+    const xRatio = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+    const { duration, visFrac, startFrac } = getAudioConvertViewport();
+    const ratio = startFrac + xRatio * visFrac;
+    const sec = clamp(ratio * duration, 0, duration);
+    seekAudioConvertPlayhead(sec);
+  });
+
+  el.btnAudioConvertPreview?.addEventListener('click', async () => {
+    if (!audioConvertState.dataUrl || !el.audioConvertPlayer) return;
+    // 再生中なら先頭から再開、一時停止中ならそこから再開
+    const isPlaying = !el.audioConvertPlayer.paused;
+    if (isPlaying) {
+      stopAudioConvertPreview();
+      return;
+    }
+    const resumeFrom = audioConvertState.playheadSec;
+    const startFrom = (resumeFrom >= audioConvertState.endSec || resumeFrom < audioConvertState.startSec)
+      ? audioConvertState.startSec
+      : resumeFrom;
+    try {
+      el.audioConvertPlayer.currentTime = startFrom;
+      await el.audioConvertPlayer.play();
+      startAudioConvertPlayheadLoop();
+    } catch (_err) {
+      if (el.audioConvertHint) el.audioConvertHint.textContent = 'プレビュー再生に失敗しました。';
+    }
+  });
+
+  el.audioConvertStartSlider?.addEventListener('input', () => {
+    const duration = Math.max(0, audioConvertState.durationSec);
+    const startSec = (Number(el.audioConvertStartSlider?.value || 0) / 1000) * duration;
+    setAudioConvertRange(startSec, audioConvertState.endSec);
+  });
+  el.audioConvertEndSlider?.addEventListener('input', () => {
+    const duration = Math.max(0, audioConvertState.durationSec);
+    const endSec = (Number(el.audioConvertEndSlider?.value || 1000) / 1000) * duration;
+    setAudioConvertRange(audioConvertState.startSec, endSec);
+  });
+  el.audioConvertStartInput?.addEventListener('change', () => {
+    const n = Number(el.audioConvertStartInput?.value || 0);
+    if (Number.isFinite(n)) setAudioConvertRange(n, audioConvertState.endSec);
+  });
+  el.audioConvertEndInput?.addEventListener('change', () => {
+    const n = Number(el.audioConvertEndInput?.value || 0);
+    if (Number.isFinite(n)) setAudioConvertRange(audioConvertState.startSec, n);
+  });
 
   el.btnAccordionParams?.addEventListener('click', () => {
     setAccordionOpen('params', !state.preview.paramsOpen);

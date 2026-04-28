@@ -787,7 +787,7 @@ ipcMain.handle('res:pickAssetSource', async () => {
   const result = await dialog.showOpenDialog(owner, {
     properties: ['openFile'],
     filters: [
-      { name: 'Assets', extensions: ['png', 'bmp', 'pal', 'tsx', 'tmx', 'vgm', 'xgm', 'wav'] },
+      { name: 'Assets', extensions: ['png', 'bmp', 'pal', 'tsx', 'tmx', 'vgm', 'xgm', 'wav', 'mp3', 'ogg'] },
       { name: 'All Files', extensions: ['*'] },
     ],
   });
@@ -815,7 +815,13 @@ ipcMain.handle('res:readFileAsDataUrl', async (_event, sourcePath) => {
       ? 'image/png'
       : ext === '.bmp'
         ? 'image/bmp'
-        : 'application/octet-stream';
+        : ext === '.wav'
+          ? 'audio/wav'
+          : ext === '.mp3'
+            ? 'audio/mpeg'
+            : ext === '.ogg'
+              ? 'audio/ogg'
+              : 'application/octet-stream';
     const data = fs.readFileSync(sourcePath).toString('base64');
     return { ok: true, dataUrl: `data:${mime};base64,${data}` };
   } catch (err) {
@@ -830,6 +836,93 @@ ipcMain.handle('res:writeAssetFile', async (_event, payload) => {
     return { ok: true, ...result };
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('res:previewConvertAudio', async (_event, payload) => {
+  let outPath = '';
+  try {
+    const pluginId = 'audio-converter';
+    const convertResult = await pluginManager.invokeHook(
+      pluginId,
+      'convertAudio',
+      {
+        sourcePath: payload?.sourcePath,
+        options: payload?.options || {},
+      },
+      {
+        projectDir: buildSystem.getProjectDir(),
+        logger: createPluginLogger(pluginId),
+      },
+    );
+
+    if (!convertResult?.ok) {
+      return { ok: false, error: convertResult?.error || 'audio preview conversion failed' };
+    }
+
+    outPath = String(convertResult?.result?.outputPath || convertResult?.outputPath || '');
+    if (!outPath || !fs.existsSync(outPath)) {
+      return { ok: false, error: 'audio converter did not produce output file' };
+    }
+
+    const data = fs.readFileSync(outPath);
+    const dataUrl = `data:audio/wav;base64,${data.toString('base64')}`;
+    return { ok: true, dataUrl };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  } finally {
+    try {
+      if (outPath && fs.existsSync(outPath)) fs.unlinkSync(outPath);
+    } catch (_) {}
+  }
+});
+
+ipcMain.handle('res:convertAndWriteAudioAsset', async (_event, payload) => {
+  let convertedPath = '';
+  try {
+    const projectDir = buildSystem.getProjectDir();
+    const pluginId = 'audio-converter';
+    const convertResult = await pluginManager.invokeHook(
+      pluginId,
+      'convertAudio',
+      {
+        sourcePath: payload?.sourcePath,
+        options: payload?.options || {},
+      },
+      {
+        projectDir,
+        logger: createPluginLogger(pluginId),
+      },
+    );
+
+    if (!convertResult?.ok) {
+      return { ok: false, error: convertResult?.error || 'audio conversion failed' };
+    }
+
+    convertedPath = String(convertResult?.result?.outputPath || convertResult?.outputPath || '');
+    if (!convertedPath || !fs.existsSync(convertedPath)) {
+      return { ok: false, error: 'audio converter did not produce output file' };
+    }
+
+    const writeResult = rescompManager.writeAssetIntoRes(projectDir, {
+      sourcePath: convertedPath,
+      targetSubdir: payload?.targetSubdir,
+      targetFileName: payload?.targetFileName,
+      dataUrl: '',
+    });
+    return {
+      ok: true,
+      ...writeResult,
+      warning: convertResult?.result?.warning || convertResult?.warning || '',
+    };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  } finally {
+    try {
+      if (convertedPath && convertedPath !== String(payload?.sourcePath || '') && fs.existsSync(convertedPath)) {
+        fs.unlinkSync(convertedPath);
+      }
+    } catch (_) {}
   }
 });
 

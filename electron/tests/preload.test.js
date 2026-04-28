@@ -12,6 +12,7 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.equal(typeof api.openRomDialog, 'function');
   assert.equal(typeof api.generateProject, 'function');
   assert.equal(typeof api.listResDefinitions, 'function');
+  assert.equal(typeof api.convertAndWriteAudioAsset, 'function');
   assert.equal(typeof api.listPlugins, 'function');
   assert.equal(typeof api.exportHtml, 'function');
 

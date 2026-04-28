@@ -62,6 +62,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pickAssetSource: () => ipcRenderer.invoke('res:pickAssetSource'),
   readFileAsDataUrl: (sourcePath) => ipcRenderer.invoke('res:readFileAsDataUrl', sourcePath),
   writeAssetFile: (payload) => ipcRenderer.invoke('res:writeAssetFile', payload),
+  convertAndWriteAudioAsset: (payload) => ipcRenderer.invoke('res:convertAndWriteAudioAsset', payload),
+  previewConvertAudio: (payload) => ipcRenderer.invoke('res:previewConvertAudio', payload),
   getCurrentProject: () => ipcRenderer.invoke('project:getCurrent'),
   listProjects: () => ipcRenderer.invoke('project:list'),
   openExistingProject: (payload) => ipcRenderer.invoke('project:openExisting', payload),
