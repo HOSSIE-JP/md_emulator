@@ -21,7 +21,7 @@ GitHub Copilot は以下のタスクを依頼されることがあります:
 
 1. **このゲームプロジェクトを解析**して、MD Game Editor が使用できるプラグインを生成する
 2. **既存プラグインを改修**してアセット構成の変化に対応させる
-3. **新しいプラグインタイプ**（editor / emulator）を追加する
+3. **新しいプラグインタイプ**（editor / emulator / converter）や renderer module を追加する
 
 ---
 
@@ -59,7 +59,13 @@ Copilot がプラグインを生成するとき、以下の順序で作業する
   "description": "<説明>",
   "version": "1.0.0",
   "types": ["build"],           // 必ず配列
-  "hooks": ["onBuildStart", "onBuildEnd"]
+  "hooks": ["onBuildStart", "onBuildEnd"],
+  "renderer": {                  // UI/capability を提供する場合のみ
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "my-page",
+    "capabilities": ["page"]
+  }
 }
 ```
 
@@ -86,6 +92,20 @@ function onBuildStart(payload, context) {
 
 module.exports = { generateSource, onBuildStart };
 ```
+
+### renderer.js を持つ場合
+
+Plugin Runtime v2.1 では、Assets / Code / Converter のような機能固有 UI を本体 `electron/renderer/renderer.js` に追加しない。
+プラグイン配下の `renderer.js` で capability を登録する。
+
+```js
+export function activatePlugin({ plugin, root, api, logger, registerCapability }) {
+  registerCapability('my-capability', { root });
+  logger.info(`${plugin.id} renderer activated`);
+}
+```
+
+`renderer.entry` と `renderer.styles` は plugin ディレクトリ内の相対パスに限定する。`../` や絶対パスで plugin 外へ出る指定は禁止。
 
 ### Step 4: 配置場所を案内する
 
@@ -220,4 +240,4 @@ TYPE   name   "ファイルパス"   [追加パラメータ]
 
 ---
 
-*Last Updated: 2025-01 / SGDK 2.11 / Plugin Runtime v2*
+*Last Updated: 2026-04 / SGDK 2.11 / Plugin Runtime v2.1*

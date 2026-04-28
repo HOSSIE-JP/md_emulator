@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2025-01 / Plugin Runtime v2
+> § Last Updated: 2026-04 / Plugin Runtime v2.1
 
 ---
 
@@ -29,10 +29,11 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 
 ### MD Game Editor のプラグインシステム
 
-- **Plugin Runtime v2** を採用
-- プラグインは `manifest.json` + `index.js` の 2 ファイルで構成
-- Electron メインプロセス (Node.js) 上で動作する（ブラウザ API は使用不可）
-- `require()` で Node.js 標準モジュールや相対パスのファイルを読み込める
+- **Plugin Runtime v2.1** を採用
+- プラグインは `manifest.json` を必須とし、必要に応じて `index.js` と `renderer.js` を持つ
+- `index.js` は Electron メインプロセス (Node.js) 上で動作する（ブラウザ API は使用不可）
+- `renderer.js` は Electron renderer process の ES module として動作し、UI/capability を登録する
+- `index.js` は `require()`、`renderer.js` は `export function activatePlugin(...)` を使う
 
 ### 配置場所
 
@@ -59,6 +60,12 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
     "page": "my-page",
     "order": 20
   },
+  "renderer": {                 // 任意: renderer process 側の UI/capability
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "my-page",
+    "capabilities": ["page"]
+  },
   "dependencies": ["other-id"] // 任意: 依存プラグイン ID
 }
 ```
@@ -71,7 +78,27 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 | `editor` | エディタ UI タブを提供 | `getTab` / `onActivate` / `onDeactivate` |
 | `asset` | アセット管理機能 | `editor` との組み合わせが一般的 |
 | `emulator` | Test Play 実行 | `onTestPlay` |
-| `converter` | 画像変換などの処理 | （レンダラーから直接呼び出し） |
+| `converter` | 画像・音声変換などの処理/UI capability | `renderer.capabilities` / 独自 hook |
+
+### renderer module パターン
+
+Plugin Runtime v2.1 では、機能固有 UI は本体 `electron/renderer/renderer.js` へ直接追加せず、プラグイン配下の renderer module に置く。
+
+```js
+export function activatePlugin({ plugin, root, api, logger, registerCapability }) {
+  registerCapability('my-capability', { root });
+  return {
+    deactivate() {
+      // イベント購読や DOM 状態を片付ける
+    },
+  };
+}
+```
+
+- `entry` と `styles` は plugin ディレクトリ内の相対パスだけを指定する
+- `../` や絶対パスで plugin 外へ出る指定は禁止
+- Assets / Code のようなページ UI は `renderer.page` と `tab.page` を一致させる
+- Converter は `image-resize`, `image-quantize`, `audio-convert-ui` などの capability を登録し、利用側 plugin は capability 経由で呼び出す
 
 ---
 
@@ -264,6 +291,7 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `asset-manager` | `editor`, `asset` | resources.res アセット管理 |
 | `image-resize-converter` | `converter` | 8px 境界リサイズ |
 | `image-quantize-converter` | `converter` | 16 色減色変換 |
+| `audio-converter` | `converter` | WAV/MP3/OGG 変換と音声変換 UI |
 | `standard-emulator` | `emulator` | WASM Mega Drive エミュレーター |
 
 > 新しいプラグインが追加されたら、このテーブルに追記し § Last Updated を更新すること。

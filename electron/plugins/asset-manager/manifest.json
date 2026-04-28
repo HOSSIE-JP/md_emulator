@@ -10,5 +10,11 @@
     "icon": "assets",
     "page": "assets",
     "order": 10
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "assets",
+    "capabilities": ["page", "asset-manager"]
   }
 }

@@ -11,6 +11,13 @@
   ],
   "tab": {
     "label": "コード",
-    "icon": "code"
+    "icon": "code",
+    "page": "code"
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "code",
+    "capabilities": ["page", "code-editor"]
   }
 }

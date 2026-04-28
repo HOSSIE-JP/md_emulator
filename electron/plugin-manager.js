@@ -22,6 +22,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 const { app } = require('electron');
 
 function getPluginsDir() {
@@ -81,6 +82,77 @@ function normalizeDependencies(manifest) {
   ));
 }
 
+function normalizeRendererCapabilities(renderer) {
+  if (!Array.isArray(renderer?.capabilities)) return [];
+  return Array.from(new Set(
+    renderer.capabilities
+      .map((capability) => String(capability || '').trim())
+      .filter(Boolean),
+  ));
+}
+
+function resolvePluginFile(pluginDir, relativePath) {
+  const value = String(relativePath || '').trim();
+  if (!value || path.isAbsolute(value)) return null;
+
+  const root = path.resolve(pluginDir);
+  const abs = path.resolve(root, value);
+  const rel = path.relative(root, abs);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+    return null;
+  }
+  return abs;
+}
+
+function normalizeRenderer(manifest, pluginDir) {
+  const raw = manifest.renderer && typeof manifest.renderer === 'object'
+    ? manifest.renderer
+    : null;
+  if (!raw) {
+    return { renderer: null, rendererAssets: null, hasRenderer: false };
+  }
+
+  const renderer = {
+    entry: String(raw.entry || '').trim(),
+    styles: Array.isArray(raw.styles)
+      ? raw.styles.map((style) => String(style || '').trim()).filter(Boolean)
+      : [],
+    page: String(raw.page || raw.mountPage || manifest.tab?.page || '').trim(),
+    capabilities: normalizeRendererCapabilities(raw),
+  };
+
+  const entryPath = resolvePluginFile(pluginDir, renderer.entry);
+  if (!entryPath || !fs.existsSync(entryPath)) {
+    return {
+      renderer: { ...renderer, error: 'renderer entry is missing or outside plugin directory' },
+      rendererAssets: null,
+      hasRenderer: false,
+    };
+  }
+
+  const stylePaths = [];
+  for (const style of renderer.styles) {
+    const stylePath = resolvePluginFile(pluginDir, style);
+    if (!stylePath || !fs.existsSync(stylePath)) {
+      return {
+        renderer: { ...renderer, error: `renderer style is missing or outside plugin directory: ${style}` },
+        rendererAssets: null,
+        hasRenderer: false,
+      };
+    }
+    stylePaths.push(stylePath);
+  }
+
+  return {
+    renderer,
+    rendererAssets: {
+      scriptUrl: pathToFileURL(entryPath).href,
+      styleUrls: stylePaths.map((stylePath) => pathToFileURL(stylePath).href),
+    },
+    hasRenderer: true,
+  };
+}
+
 function isPluginEnabled(id) {
   const s = readState();
   return Boolean(s[id]?.enabled ?? true);
@@ -120,8 +192,10 @@ function listPlugins() {
         manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
       } catch (_) {}
 
-      const hasGenerator = fs.existsSync(path.join(baseDir, id, 'index.js'));
+      const pluginDir = path.join(baseDir, id);
+      const hasGenerator = fs.existsSync(path.join(pluginDir, 'index.js'));
       const pluginTypes = normalizePluginTypes(manifest);
+      const rendererInfo = normalizeRenderer(manifest, pluginDir);
 
       return {
         id,
@@ -134,11 +208,30 @@ function listPlugins() {
         dependencies: normalizeDependencies(manifest),
         hooks: normalizeHooks(manifest),
         hasGenerator,
+        renderer: rendererInfo.renderer,
+        hasRenderer: rendererInfo.hasRenderer,
+        rendererAssets: rendererInfo.rendererAssets,
         enabled: Boolean(state[id]?.enabled ?? true),
         isUserPlugin: isUser,  // ユーザー追加プラグインか否か
       };
     })
     .sort((a, b) => a.id.localeCompare(b.id, 'ja'));
+}
+
+function getRendererAssets(id) {
+  const plugin = listPlugins().find((p) => p.id === id);
+  if (!plugin) {
+    return { ok: false, error: `plugin not found: ${id}` };
+  }
+  if (!plugin.hasRenderer || !plugin.rendererAssets) {
+    return { ok: false, error: `plugin has no renderer module: ${id}` };
+  }
+  return {
+    ok: true,
+    id: plugin.id,
+    renderer: plugin.renderer,
+    rendererAssets: plugin.rendererAssets,
+  };
 }
 
 // ── 有効 / 無効切替 ────────────────────────────────────────────────────────
@@ -295,6 +388,7 @@ async function invokeHook(id, hookName, payload = {}, context = {}) {
 
 module.exports = {
   listPlugins,
+  getRendererAssets,
   setEnabled,
   setEnabledWithDependencies,
   runGenerator,

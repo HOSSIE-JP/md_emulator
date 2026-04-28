@@ -195,13 +195,17 @@ function migrateLegacyMainSignature(projectDir, logger) {
 function onBuildStart(payload, context = {}) {
   migrateLegacyMainSignature(payload?.projectDir, context?.logger);
   context?.logger?.info(`build start: project=${payload?.projectDir || '-'}`);
-  return { ok: true };
+  return {
+    ok: true,
+    // Slideshow is a generated single-file program. Limit SGDK's wildcard source scan
+    // so old game-specific src/*.c files in the project do not break the build.
+    makeVariables: {
+      SRC_C: 'src/main.c',
+    },
+  };
 }
 
 function onBuildLog(payload, context = {}) {
-  if (payload?.level === 'error') {
-    context?.logger?.error(payload?.line || '');
-  }
   return { ok: true };
 }
 

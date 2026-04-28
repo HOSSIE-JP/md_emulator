@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteCodeEntry: (payload) => ipcRenderer.invoke('codefs:delete', payload),
   // --- プラグイン ---
   listPlugins: () => ipcRenderer.invoke('plugins:list'),
+  getPluginRendererAssets: (id) => ipcRenderer.invoke('plugins:getRendererAssets', { id }),
   setPluginEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', { id, enabled }),
   runPluginGenerator: (id) => ipcRenderer.invoke('plugins:runGenerator', { id }),
   openPluginsFolder: () => ipcRenderer.invoke('plugins:openFolder'),

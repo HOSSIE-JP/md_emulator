@@ -377,6 +377,27 @@ function resolveMakeCommand(toolchainPath, isWin) {
   return 'make';
 }
 
+function stripAnsi(value) {
+  return String(value || '').replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
+}
+
+function sanitizeBuildLogLine(value) {
+  return stripAnsi(value).replace(/\r/g, '');
+}
+
+function normalizeMakeVariables(makeVariables = {}) {
+  const result = [];
+  Object.entries(makeVariables || {}).forEach(([key, value]) => {
+    const name = String(key || '').trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return;
+    if (value == null) return;
+    const text = String(value);
+    if (/[\r\n]/.test(text)) return;
+    result.push(`${name}=${text}`);
+  });
+  return result;
+}
+
 // -------------------------------------------------------------- generation --
 
 /**
@@ -417,9 +438,10 @@ function generateProjectStructureOnly(config = {}) {
  * @param {string} sgdkPath     - SGDK のルートディレクトリ
  * @param {string} javaPath     - java 実行ファイルのパス（または 'java'）
  * @param {function} onLog      - (line: string, level: 'info'|'error') => void
+ * @param {{ makeVariables?: Record<string,string> }} options
  * @returns {Promise<{success, romPath, romSize, error}>}
  */
-function buildProject(sgdkPath, javaPath, onLog) {
+function buildProject(sgdkPath, javaPath, onLog, options = {}) {
   return new Promise((resolve) => {
     const projectDir = getProjectDir();
     const log = (msg, level = 'info') => onLog && onLog(msg, level);
@@ -519,8 +541,10 @@ function buildProject(sgdkPath, javaPath, onLog) {
       log(`ビルド用エイリアスを使用: project=${buildPaths.projectDir}, gdk=${buildPaths.sgdkPath}`);
     }
 
+    const makeVariableArgs = normalizeMakeVariables(options.makeVariables);
+
     function runMakeTarget(target, onExit) {
-      const targetArgs = [...args, target];
+      const targetArgs = [...args, ...makeVariableArgs, target];
       log(`${target.toUpperCase()} を開始: ${command} ${targetArgs.join(' ')}`);
 
       const proc = spawn(command, targetArgs, {
@@ -531,20 +555,22 @@ function buildProject(sgdkPath, javaPath, onLog) {
 
       proc.stdout.on('data', (data) => {
         data.toString().split('\n').forEach((line) => {
-          if (line.trim()) log(line, 'info');
+          const cleanLine = sanitizeBuildLogLine(line);
+          if (cleanLine.trim()) log(cleanLine, 'info');
         });
       });
 
       proc.stderr.on('data', (data) => {
         data.toString().split('\n').forEach((line) => {
-          if (!line.trim()) return;
+          const cleanLine = sanitizeBuildLogLine(line);
+          if (!cleanLine.trim()) return;
           // SGDK / make が内部的に無視する行はエラー表示しない
           // 例: make[1]: [<tmp>.o] Error 127 (ignored)
-          if (/Error\s+\d+\s+\(ignored\)/i.test(line)) {
-            log(line, 'info');
+          if (/Error\s+\d+\s+\(ignored\)/i.test(cleanLine)) {
+            log(cleanLine, 'info');
             return;
           }
-          log(line, 'error');
+          log(cleanLine, 'error');
         });
       });
 
@@ -677,4 +703,7 @@ module.exports = {
   getEmulatorPlugin,
   setEmulatorPlugin,
   getSampleSourceCode,
+  stripAnsi,
+  sanitizeBuildLogLine,
+  normalizeMakeVariables,
 };

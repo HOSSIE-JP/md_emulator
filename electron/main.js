@@ -975,6 +975,10 @@ ipcMain.handle('plugins:list', () => {
   return pluginManager.listPlugins();
 });
 
+ipcMain.handle('plugins:getRendererAssets', (_event, { id }) => {
+  return pluginManager.getRendererAssets(id);
+});
+
 ipcMain.handle('plugins:setEnabled', (_event, { id, enabled }) => {
   const result = pluginManager.setEnabledWithDependencies(id, Boolean(enabled));
   if (!result?.ok) {
@@ -1249,14 +1253,18 @@ async function runBuildFull() {
       assets: collectProjectAssets(projectDir),
     };
 
+    let buildMakeVariables = {};
     if (builderPluginId) {
-      await invokePluginHookSafe(builderPluginId, 'onBuildStart', {
+      const buildStartResult = await invokePluginHookSafe(builderPluginId, 'onBuildStart', {
         projectDir,
         toolchainPath,
       }, {
         ...pluginContext,
         logger: createPluginLogger(builderPluginId),
       });
+      if (buildStartResult?.ok && buildStartResult.makeVariables && typeof buildStartResult.makeVariables === 'object') {
+        buildMakeVariables = buildStartResult.makeVariables;
+      }
     }
 
     const result = await buildSystem.buildProject(toolchainPath, javaPath, (line, level) => {
@@ -1270,6 +1278,8 @@ async function runBuildFull() {
           logger: createPluginLogger(builderPluginId),
         }).catch(() => {});
       }
+    }, {
+      makeVariables: buildMakeVariables,
     });
 
     if (builderPluginId) {

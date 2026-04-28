@@ -92,3 +92,21 @@ test('buildProject fails fast when the toolchain path is missing', async () => {
   assert.match(result.error, /missing-sgdk/);
   assert.equal(logs.at(-1).level, 'error');
 });
+
+test('build log sanitization strips GCC ANSI color escapes', () => {
+  const buildSystem = loadBuildSystem(makeTempDir('md-editor-build-sanitize-test-'));
+
+  const clean = buildSystem.sanitizeBuildLogLine('\u001b[01m\u001b[Ksrc/main.c:7:\u001b[m\u001b[K error');
+  assert.equal(clean, 'src/main.c:7: error');
+});
+
+test('make variables are normalized for command-line overrides', () => {
+  const buildSystem = loadBuildSystem(makeTempDir('md-editor-build-vars-test-'));
+
+  assert.deepEqual(buildSystem.normalizeMakeVariables({
+    SRC_C: 'src/main.c',
+    'BAD-NAME': 'ignored',
+    MULTILINE: 'a\nb',
+    EMPTY_OK: '',
+  }), ['SRC_C=src/main.c', 'EMPTY_OK=']);
+});

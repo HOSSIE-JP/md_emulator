@@ -3,6 +3,15 @@
  * エディタのフロントエンドロジック
  */
 
+import {
+  AUDIO_EXTS,
+  IMAGE_EXTS,
+  allowedTypesForExtension as getAllowedAssetTypesForExtension,
+  defaultSubDirForType,
+  inferTypeFromExtension,
+  normalizeSymbolName,
+} from '../plugins/asset-manager/asset-utils.mjs';
+
 // ------------------------------------------------------------------ state --
 const state = {
   currentPage: 'assets',
@@ -82,9 +91,6 @@ const WAV_OUT_RATE_DEFAULT_BY_DRIVER = {
   PCM: '16000',
   XGM2: '13300',
 };
-const IMAGE_EXTS = ['.png', '.bmp'];
-const AUDIO_EXTS = ['.wav', '.mp3', '.ogg'];
-
 const FORM_FIELDS_BY_TYPE = {
   PALETTE: [
     { key: 'name', label: 'シンボル名', type: 'text' },
@@ -664,17 +670,13 @@ const pluginState = {
   draggingSidebarPluginId: null,
 };
 
-const SIDEBAR_PLUGIN_ORDER_KEY_PREFIX = 'md-editor.sidebarPluginOrder.v1';
-
-const PLUGIN_NAV_PAGE_MAP = {
-  'asset-manager': 'assets',
-  'code-editor': 'code',
+const pluginRuntime = {
+  activations: new Map(),
+  capabilities: new Map(),
+  styleLinks: [],
 };
 
-const PLUGIN_PAGE_BINDINGS = [
-  { pluginId: 'asset-manager', pageId: 'assets' },
-  { pluginId: 'code-editor', pageId: 'code' },
-];
+const SIDEBAR_PLUGIN_ORDER_KEY_PREFIX = 'md-editor.sidebarPluginOrder.v1';
 
 function pluginSupportsType(plugin, type) {
   const kinds = Array.isArray(plugin?.pluginTypes) ? plugin.pluginTypes : [];
@@ -700,6 +702,124 @@ function isPluginFeatureEnabled(id) {
   return plugin ? Boolean(plugin.enabled) : true;
 }
 
+function pluginHasDeclaredCapability(plugin, capability) {
+  const capabilities = Array.isArray(plugin?.renderer?.capabilities)
+    ? plugin.renderer.capabilities
+    : [];
+  return capabilities.includes(capability);
+}
+
+function getPluginRendererPageId(plugin) {
+  return String(plugin?.renderer?.page || plugin?.tab?.page || '').trim();
+}
+
+function createPluginLogger(plugin) {
+  const source = `plugin:${plugin.id}:renderer`;
+  return {
+    info: (message) => appendLog(source, String(message || ''), 'info'),
+    warn: (message) => appendLog(source, String(message || ''), 'warn'),
+    error: (message) => appendLog(source, String(message || ''), 'error'),
+    debug: (message) => appendLog(source, String(message || ''), 'debug'),
+    log: (message) => appendLog(source, String(message || ''), 'info'),
+  };
+}
+
+function registerPluginCapability(plugin, name, implementation = {}) {
+  const capability = String(name || '').trim();
+  if (!capability) return;
+  const entries = pluginRuntime.capabilities.get(capability) || [];
+  entries.push({ pluginId: plugin.id, implementation });
+  pluginRuntime.capabilities.set(capability, entries);
+}
+
+function getPluginCapability(name) {
+  const entries = pluginRuntime.capabilities.get(name) || [];
+  return entries.find((entry) => isPluginFeatureEnabled(entry.pluginId))?.implementation || null;
+}
+
+function ensurePluginPageRoot(plugin) {
+  const pageId = getPluginRendererPageId(plugin);
+  if (!pageId) return null;
+
+  let section = document.getElementById(`page-${pageId}`);
+  if (section) return section;
+
+  section = document.createElement('section');
+  section.className = 'editor-page';
+  section.id = `page-${pageId}`;
+  section.dataset.pluginPageOwner = plugin.id;
+  const host = document.querySelector('.editor-area');
+  host?.appendChild(section);
+  return section;
+}
+
+function createPluginHostApi() {
+  return {
+    electronAPI: window.electronAPI,
+    openModal,
+    closeModal,
+    openResizeModal,
+    openQuantizeModal,
+    openAudioConvertModal,
+    countUniqueColors,
+    imageDataToIndexedPng,
+  };
+}
+
+function clearPluginRuntime() {
+  pluginRuntime.activations.forEach((activation) => {
+    try {
+      activation?.deactivate?.();
+    } catch (err) {
+      appendLog('app', `プラグイン renderer 停止失敗: ${String(err?.message || err)}`, 'warn');
+    }
+  });
+  pluginRuntime.activations.clear();
+  pluginRuntime.capabilities.clear();
+  pluginRuntime.styleLinks.forEach((link) => link.remove());
+  pluginRuntime.styleLinks = [];
+}
+
+async function activatePluginRenderers() {
+  clearPluginRuntime();
+
+  for (const plugin of pluginState.plugins) {
+    if (!plugin.enabled || !plugin.hasRenderer || !plugin.rendererAssets?.scriptUrl) continue;
+
+    const root = ensurePluginPageRoot(plugin);
+    (plugin.rendererAssets.styleUrls || []).forEach((styleUrl) => {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = styleUrl;
+      link.dataset.pluginStyle = plugin.id;
+      document.head.appendChild(link);
+      pluginRuntime.styleLinks.push(link);
+    });
+
+    const logger = createPluginLogger(plugin);
+    try {
+      const cacheKey = encodeURIComponent(`${plugin.id}-${plugin.version}-${Date.now()}`);
+      const module = await import(`${plugin.rendererAssets.scriptUrl}?v=${cacheKey}`);
+      if (typeof module.activatePlugin !== 'function') {
+        logger.warn('activatePlugin が見つかりません');
+        continue;
+      }
+      const activation = await module.activatePlugin({
+        plugin,
+        root,
+        api: createPluginHostApi(),
+        logger,
+        registerCapability: (name, implementation) => registerPluginCapability(plugin, name, implementation),
+      });
+      if (activation && typeof activation.deactivate === 'function') {
+        pluginRuntime.activations.set(plugin.id, activation);
+      }
+    } catch (err) {
+      logger.error(`renderer 読み込み失敗: ${String(err?.message || err)}`);
+    }
+  }
+}
+
 function getFirstVisiblePageId() {
   const candidates = ['assets', 'code', 'plugins', 'settings'];
   return candidates.find((pageId) => {
@@ -709,13 +829,9 @@ function getFirstVisiblePageId() {
 }
 
 function resolvePluginPageId(plugin) {
-  const mapped = PLUGIN_NAV_PAGE_MAP[plugin?.id];
-  if (mapped && document.getElementById(`page-${mapped}`)) {
-    return mapped;
-  }
-  const fromTab = String(plugin?.tab?.page || '').trim();
-  if (fromTab && document.getElementById(`page-${fromTab}`)) {
-    return fromTab;
+  const pageId = getPluginRendererPageId(plugin);
+  if (pageId && document.getElementById(`page-${pageId}`)) {
+    return pageId;
   }
   return null;
 }
@@ -888,10 +1004,16 @@ function renderPluginSidebarTabs() {
 }
 
 function applyPluginPageAvailability() {
-  PLUGIN_PAGE_BINDINGS.forEach(({ pluginId, pageId }) => {
+  const pageBindings = new Map();
+  pluginState.plugins.forEach((plugin) => {
+    const pageId = getPluginRendererPageId(plugin);
+    if (pageId) pageBindings.set(pageId, plugin);
+  });
+
+  pageBindings.forEach((plugin, pageId) => {
     const section = document.getElementById(`page-${pageId}`);
     if (!section) return;
-    section.hidden = !isPluginFeatureEnabled(pluginId);
+    section.hidden = !(plugin.enabled && (plugin.hasRenderer || plugin.tab));
   });
 
   if (el.pageCode?.hidden) {
@@ -1060,6 +1182,7 @@ async function loadPlugins() {
     try { await window.electronAPI.setEmulatorPlugin(null); } catch (_) {}
   }
 
+  await activatePluginRenderers();
   updateBuildButtonLabel();
   renderPluginSidebarTabs();
   applyPluginPageAvailability();
@@ -2165,52 +2288,8 @@ function getCurrentSelectedEntry() {
   return file.entries.find((e) => Number(e.lineNumber) === Number(state.rescomp.selectedEntryLine)) || null;
 }
 
-function inferTypeFromExtension(ext) {
-  const e = String(ext || '').toLowerCase();
-  if (e === '.pal') return 'PALETTE';
-  if (AUDIO_EXTS.includes(e)) return 'WAV';
-  if (e === '.vgm' || e === '.xgm') return 'XGM';
-  if (e === '.tsx') return 'TILESET';
-  if (e === '.tmx') return 'MAP';
-  if (e === '.png' || e === '.bmp') return 'IMAGE';
-  return 'BIN';
-}
-
 function allowedTypesForExtension(ext) {
-  const e = String(ext || '').toLowerCase();
-  if (e === '.png' || e === '.bmp') return ['PALETTE', 'IMAGE', 'BITMAP', 'SPRITE', 'MAP', 'TILEMAP', 'TILESET'];
-  if (AUDIO_EXTS.includes(e)) return ['WAV'];
-  if (e === '.xgm' || e === '.vgm') return ['XGM', 'XGM2'];
-  if (e === '.tsx') return ['TILESET'];
-  if (e === '.tmx') return ['MAP', 'TILEMAP'];
-  if (e === '.pal') return ['PALETTE'];
-  return TYPE_OPTIONS;
-}
-
-function defaultSubDirForType(type) {
-  switch (type) {
-    case 'PALETTE': return 'pal';
-    case 'SPRITE': return 'sprite';
-    case 'IMAGE':
-    case 'BITMAP':
-    case 'TILESET':
-    case 'TILEMAP':
-    case 'MAP': return 'gfx';
-    case 'XGM':
-    case 'XGM2': return 'music';
-    case 'WAV': return 'sfx';
-    default: return 'assets';
-  }
-}
-
-function normalizeSymbolName(name) {
-  return String(name || '')
-    .replace(/\.[^.]+$/, '')
-    .replace(/[^A-Za-z0-9_]/g, '_')
-    .replace(/^[^A-Za-z_]+/, '')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .toLowerCase() || 'asset_name';
+  return getAllowedAssetTypesForExtension(ext, TYPE_OPTIONS);
 }
 
 function createDefaultEntry(type, sourcePath, fileName) {
@@ -4281,8 +4360,8 @@ async function openResizeModal(dataUrl, imgWidth, imgHeight, options = {}) {
 }
 
 async function maybeConvertImageToIndexed16(sourcePath, options = {}) {
-  const resizeConverter = getPluginById('image-resize-converter');
-  if (!resizeConverter || !resizeConverter.enabled) {
+  const resizeCapability = getPluginCapability('image-resize');
+  if (!resizeCapability?.openResizeModal) {
     return {
       canceled: true,
       convertedDataUrl: '',
@@ -4302,7 +4381,7 @@ async function maybeConvertImageToIndexed16(sourcePath, options = {}) {
 
   let warning = '';
   let workingDataUrl = read.dataUrl;
-  const resizeResult = await openResizeModal(read.dataUrl, img.naturalWidth, img.naturalHeight, {
+  const resizeResult = await resizeCapability.openResizeModal(read.dataUrl, img.naturalWidth, img.naturalHeight, {
     targetSize: options.targetSize || null,
   });
   if (!resizeResult.ok) {
@@ -4323,7 +4402,9 @@ async function maybeConvertImageToIndexed16(sourcePath, options = {}) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(workImg, 0, 0);
   const imageData = ctx.getImageData(0, 0, workImg.width, workImg.height);
-  const unique = countUniqueColors(imageData);
+  const quantizeCapability = getPluginCapability('image-quantize');
+  const countColors = quantizeCapability?.countUniqueColors || countUniqueColors;
+  const unique = countColors(imageData);
 
   if (unique <= 16) {
     // canvas を経由した場合 (リサイズ/クリッピング後) は RGBA PNG になっているため
@@ -4331,7 +4412,8 @@ async function maybeConvertImageToIndexed16(sourcePath, options = {}) {
     let savedDataUrl = '';
     if (workingDataUrl !== read.dataUrl) {
       try {
-        savedDataUrl = await imageDataToIndexedPng(imageData);
+        const encodeIndexed = quantizeCapability?.imageDataToIndexedPng || imageDataToIndexedPng;
+        savedDataUrl = await encodeIndexed(imageData);
       } catch (e) {
         console.warn('indexed PNG 変換失敗、RGBA PNG にフォールバック:', e);
         savedDataUrl = workingDataUrl;
@@ -4345,8 +4427,7 @@ async function maybeConvertImageToIndexed16(sourcePath, options = {}) {
     };
   }
 
-  const quantizeConverter = getPluginById('image-quantize-converter');
-  if (!quantizeConverter || !quantizeConverter.enabled) {
+  if (!quantizeCapability?.openQuantizeModal) {
     return {
       canceled: true,
       convertedDataUrl: '',
@@ -4355,7 +4436,7 @@ async function maybeConvertImageToIndexed16(sourcePath, options = {}) {
     };
   }
 
-  const quantized = await openQuantizeModal(workingDataUrl, {
+  const quantized = await quantizeCapability.openQuantizeModal(workingDataUrl, {
     sourcePath,
   });
   if (!quantized.ok) {
@@ -5122,8 +5203,15 @@ async function submitAssetModal() {
   }
 
   if (normalizedType === 'WAV' && isAudioInput) {
+    const audioCapability = getPluginCapability('audio-convert-ui');
+    if (!audioCapability?.openAudioConvertModal) {
+      if (el.assetTableHint) {
+        el.assetTableHint.textContent = '音声変換コンバータープラグインが無効または未インストールです';
+      }
+      return;
+    }
     closeModal(el.assetModal);
-    await openAudioConvertModal({
+    await audioCapability.openAudioConvertModal({
       picked,
       targetSubdir,
       targetFileName,

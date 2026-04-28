@@ -3,5 +3,10 @@
   "name": "音声変換コンバーター",
   "description": "WAV/MP3/OGG を WAV へ変換し、トリミング・正規化・音量調整・モノラル化・周波数変換を提供します。",
   "version": "1.0.0",
-  "types": ["converter"]
+  "types": ["converter"],
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "capabilities": ["audio-convert-ui"]
+  }
 }

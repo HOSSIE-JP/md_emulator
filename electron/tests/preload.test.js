@@ -14,15 +14,17 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.equal(typeof api.listResDefinitions, 'function');
   assert.equal(typeof api.convertAndWriteAudioAsset, 'function');
   assert.equal(typeof api.listPlugins, 'function');
+  assert.equal(typeof api.getPluginRendererAssets, 'function');
   assert.equal(typeof api.exportHtml, 'function');
 
   await api.readRomFile('game.bin');
   await api.setBuilderPlugin('standard-builder');
+  await api.getPluginRendererAssets('asset-manager');
   await api.createCodeEntry({ path: 'src/new.c', type: 'file' });
 
   assert.deepEqual(invocations.slice(-3), [
-    { channel: 'fs:readRomFile', args: ['game.bin'] },
     { channel: 'build:setBuilderPlugin', args: [{ id: 'standard-builder' }] },
+    { channel: 'plugins:getRendererAssets', args: [{ id: 'asset-manager' }] },
     { channel: 'codefs:create', args: [{ path: 'src/new.c', type: 'file' }] },
   ]);
 
