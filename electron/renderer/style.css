@@ -139,6 +139,10 @@ body {
   gap: 4px;
 }
 
+.plugin-runtime-root {
+  display: contents;
+}
+
 .nav-btn {
   display: flex;
   flex-direction: column;

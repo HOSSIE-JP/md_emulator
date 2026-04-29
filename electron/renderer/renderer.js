@@ -673,7 +673,10 @@ const pluginState = {
 const pluginRuntime = {
   activations: new Map(),
   capabilities: new Map(),
+  capabilityWaiters: new Map(),
+  hostRoots: [],
   styleLinks: [],
+  eventTarget: new EventTarget(),
 };
 
 const SIDEBAR_PLUGIN_ORDER_KEY_PREFIX = 'md-editor.sidebarPluginOrder.v1';
@@ -730,11 +733,64 @@ function registerPluginCapability(plugin, name, implementation = {}) {
   const entries = pluginRuntime.capabilities.get(capability) || [];
   entries.push({ pluginId: plugin.id, implementation });
   pluginRuntime.capabilities.set(capability, entries);
+
+  const waiters = pluginRuntime.capabilityWaiters.get(capability) || [];
+  waiters.forEach((resolve) => resolve(implementation));
+  pluginRuntime.capabilityWaiters.delete(capability);
+
+  pluginRuntime.eventTarget.dispatchEvent(new CustomEvent('capability:registered', {
+    detail: { capability, pluginId: plugin.id, implementation },
+  }));
 }
 
 function getPluginCapability(name) {
   const entries = pluginRuntime.capabilities.get(name) || [];
   return entries.find((entry) => isPluginFeatureEnabled(entry.pluginId))?.implementation || null;
+}
+
+function listPluginCapabilities() {
+  return Array.from(pluginRuntime.capabilities.entries()).map(([name, entries]) => ({
+    name,
+    providers: entries
+      .filter((entry) => isPluginFeatureEnabled(entry.pluginId))
+      .map((entry) => entry.pluginId),
+  })).filter((entry) => entry.providers.length > 0);
+}
+
+function waitForPluginCapability(name, timeoutMs = 3000) {
+  const capability = String(name || '').trim();
+  if (!capability) return Promise.resolve(null);
+  const current = getPluginCapability(capability);
+  if (current) return Promise.resolve(current);
+
+  return new Promise((resolve) => {
+    const waiters = pluginRuntime.capabilityWaiters.get(capability) || [];
+    const timer = window.setTimeout(() => {
+      const next = pluginRuntime.capabilityWaiters.get(capability) || [];
+      const remaining = next.filter((fn) => fn !== done);
+      if (remaining.length > 0) {
+        pluginRuntime.capabilityWaiters.set(capability, remaining);
+      } else {
+        pluginRuntime.capabilityWaiters.delete(capability);
+      }
+      resolve(null);
+    }, Math.max(0, Number(timeoutMs) || 0));
+
+    function done(implementation) {
+      window.clearTimeout(timer);
+      resolve(implementation || null);
+    }
+
+    waiters.push(done);
+    pluginRuntime.capabilityWaiters.set(capability, waiters);
+  });
+}
+
+function getPluginDomId(plugin, suffix) {
+  const safeId = String(plugin?.id || 'plugin')
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .replace(/^-+|-+$/g, '') || 'plugin';
+  return `plugin-${safeId}-${suffix}`;
 }
 
 function ensurePluginPageRoot(plugin) {
@@ -753,11 +809,101 @@ function ensurePluginPageRoot(plugin) {
   return section;
 }
 
-function createPluginHostApi() {
+function ensurePluginHostRoot(plugin) {
+  let root = document.getElementById(getPluginDomId(plugin, 'runtime-root'));
+  if (root) return root;
+
+  root = document.createElement('div');
+  root.id = getPluginDomId(plugin, 'runtime-root');
+  root.className = 'plugin-runtime-root';
+  root.dataset.pluginHostOwner = plugin.id;
+  document.body.appendChild(root);
+  pluginRuntime.hostRoots.push(root);
+  return root;
+}
+
+function createPluginModal(plugin, options = {}) {
+  const id = String(options.id || getPluginDomId(plugin, 'modal')).trim();
+  if (!id) throw new Error('modal id is required');
+
+  let modal = document.getElementById(id);
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = id;
+    modal.className = options.className || 'app-modal';
+    modal.setAttribute('aria-hidden', 'true');
+    modal.dataset.pluginModalOwner = plugin.id;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = options.backdropClassName || 'app-backdrop';
+    backdrop.dataset.modalClose = id;
+    modal.appendChild(backdrop);
+
+    const panel = document.createElement('section');
+    panel.className = options.panelClassName || 'app-panel';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    if (options.labelledBy) panel.setAttribute('aria-labelledby', String(options.labelledBy));
+    if (options.html) panel.innerHTML = String(options.html);
+    modal.appendChild(panel);
+
+    ensurePluginHostRoot(plugin).appendChild(modal);
+    backdrop.addEventListener('click', () => closeModal(modal));
+  }
+
+  return {
+    modal,
+    panel: modal.querySelector('[role="dialog"]') || modal,
+    open: () => openModal(modal),
+    close: () => closeModal(modal),
+    destroy: () => modal.remove(),
+  };
+}
+
+function mountPluginElement(plugin, element, target = 'host') {
+  if (!(element instanceof Element)) {
+    throw new Error('mountPluginElement expects a DOM Element');
+  }
+  const parent = target === 'page'
+    ? ensurePluginPageRoot(plugin) || ensurePluginHostRoot(plugin)
+    : ensurePluginHostRoot(plugin);
+  element.dataset.pluginMountedBy = plugin.id;
+  parent.appendChild(element);
+  return element;
+}
+
+function createPluginHostApi(plugin, roots = {}) {
+  const on = (eventName, handler) => {
+    const type = String(eventName || '').trim();
+    if (!type || typeof handler !== 'function') return () => {};
+    const listener = (event) => handler(event.detail, event);
+    pluginRuntime.eventTarget.addEventListener(type, listener);
+    return () => pluginRuntime.eventTarget.removeEventListener(type, listener);
+  };
+
   return {
     electronAPI: window.electronAPI,
+    roots,
     openModal,
     closeModal,
+    createModal: (options) => createPluginModal(plugin, options),
+    mountElement: (element, target) => mountPluginElement(plugin, element, target),
+    unmountElement: (element) => element?.remove?.(),
+    capabilities: {
+      get: getPluginCapability,
+      list: listPluginCapabilities,
+      require: waitForPluginCapability,
+    },
+    events: {
+      emit: (eventName, detail) => {
+        const type = String(eventName || '').trim();
+        if (type) pluginRuntime.eventTarget.dispatchEvent(new CustomEvent(type, { detail }));
+      },
+      on,
+      off: (unsubscribe) => {
+        if (typeof unsubscribe === 'function') unsubscribe();
+      },
+    },
     openResizeModal,
     openQuantizeModal,
     openAudioConvertModal,
@@ -776,8 +922,14 @@ function clearPluginRuntime() {
   });
   pluginRuntime.activations.clear();
   pluginRuntime.capabilities.clear();
+  pluginRuntime.capabilityWaiters.forEach((waiters) => waiters.forEach((resolve) => resolve(null)));
+  pluginRuntime.capabilityWaiters.clear();
   pluginRuntime.styleLinks.forEach((link) => link.remove());
   pluginRuntime.styleLinks = [];
+  pluginRuntime.hostRoots.forEach((root) => root.remove());
+  pluginRuntime.hostRoots = [];
+  document.querySelectorAll('.editor-page[data-plugin-page-owner]').forEach((page) => page.remove());
+  pluginRuntime.eventTarget = new EventTarget();
 }
 
 async function activatePluginRenderers() {
@@ -786,7 +938,9 @@ async function activatePluginRenderers() {
   for (const plugin of pluginState.plugins) {
     if (!plugin.enabled || !plugin.hasRenderer || !plugin.rendererAssets?.scriptUrl) continue;
 
-    const root = ensurePluginPageRoot(plugin);
+    const pageRoot = ensurePluginPageRoot(plugin);
+    const hostRoot = ensurePluginHostRoot(plugin);
+    const root = pageRoot || hostRoot;
     (plugin.rendererAssets.styleUrls || []).forEach((styleUrl) => {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
@@ -807,7 +961,9 @@ async function activatePluginRenderers() {
       const activation = await module.activatePlugin({
         plugin,
         root,
-        api: createPluginHostApi(),
+        pageRoot,
+        hostRoot,
+        api: createPluginHostApi(plugin, { root, pageRoot, hostRoot }),
         logger,
         registerCapability: (name, implementation) => registerPluginCapability(plugin, name, implementation),
       });

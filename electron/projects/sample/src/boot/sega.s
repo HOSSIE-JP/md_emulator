@@ -1,4 +1,3 @@
-#include "config.h"
 #include "task_cst.h"
 
 .section .text.keepboot

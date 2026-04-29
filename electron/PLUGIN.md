@@ -1,7 +1,7 @@
 # MD Game Editor — プラグイン開発ガイド
 
 このドキュメントは、**MD Game Editor** 向けのカスタムプラグインを開発する方を対象としています。  
-プラグインシステム (Plugin Runtime v2.1) の仕様、マニフェスト定義、フック API、レンダラーモジュール、およびレンダラーからの呼び出し方を解説します。
+プラグインシステム (Plugin Runtime v2.2) の仕様、マニフェスト定義、フック API、レンダラーモジュール、およびレンダラーからの呼び出し方を解説します。
 
 ---
 
@@ -393,7 +393,7 @@ interface Logger {
 
 ## 10. Renderer Module
 
-Plugin Runtime v2.1 では、main process の `index.js` とは別に renderer process 用 ES module を提供できます。
+Plugin Runtime v2.2 では、main process の `index.js` とは別に renderer process 用 ES module を提供できます。
 本体 renderer はアプリシェル、ページ切替、IPC host API、プラグイン読込を担当し、Assets / Code / Converter などの機能固有 UI は renderer module が capability として登録します。
 
 ```jsonc
@@ -423,10 +423,57 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 | 引数 | 説明 |
 |---|---|
 | `plugin` | `PluginInfo` |
-| `root` | `renderer.page` / `tab.page` に対応する `<section>`。ページを持たない converter では `null` |
+| `root` | pageRoot があれば pageRoot、なければ hostRoot。v2.1 互換の既定 mount 先 |
+| `pageRoot` | ページを持つプラグインの `<section>`。ページを持たない場合は `null` |
+| `hostRoot` | すべての renderer plugin に割り当てられる plugin 専用 root。converter や modal UI はここへ mount する |
 | `api` | 本体が公開する安全な host API と `window.electronAPI` |
 | `logger` | Plugin Log / Build Log に出力する logger |
 | `registerCapability` | `capabilities` の実装を登録する関数 |
+
+> v2.2 以降、新規プラグインは `electron/renderer/renderer.js` や `electron/renderer/index.html` へ追記せず、`renderer.js` の `activatePlugin()` 内で `root` / `pageRoot` / `hostRoot` に DOM を構築してください。converter のようにページを持たないプラグインにも `hostRoot` が渡されるため、独自モーダルや非表示 UI を本体 HTML に事前定義する必要はありません。
+
+### Renderer Host API
+
+`activatePlugin()` に渡される `api` は、既存 IPC の薄いラッパーに加えて、プラグイン間連携と plugin-owned UI 用の helper を提供します。
+
+```js
+export function activatePlugin({ plugin, hostRoot, api, registerCapability }) {
+  const modal = api.createModal({
+    id: `${plugin.id}-modal`,
+    html: '<div class="settings-form compact-form"><p>Plugin UI</p></div>',
+  });
+
+  registerCapability('my-tool', {
+    open() {
+      modal.open();
+    },
+  });
+
+  const off = api.events.on('my-tool:refresh', (payload) => {
+    console.log(payload?.reason);
+  });
+
+  return {
+    deactivate() {
+      off();
+      modal.destroy();
+    },
+  };
+}
+```
+
+| API | 説明 |
+|---|---|
+| `api.mountElement(element, target?)` | plugin 専用 root へ DOM を mount する。`target: "page"` で pageRoot 優先 |
+| `api.unmountElement(element)` | mount 済み DOM を削除する |
+| `api.createModal(options)` | plugin 専用 root 配下に `.app-modal` 互換 modal を作成し、`open()` / `close()` / `destroy()` を返す |
+| `api.capabilities.get(name)` | 有効な provider の capability 実装を取得する |
+| `api.capabilities.require(name, timeoutMs?)` | capability 登録を待つ。見つからない場合は `null` |
+| `api.capabilities.list()` | 現在有効な capability と provider plugin ID を列挙する |
+| `api.events.emit(name, detail)` | renderer plugin 間の軽量イベントを発行する |
+| `api.events.on(name, handler)` | renderer plugin 間イベントを購読し、解除関数を返す |
+
+本体側に残すべきものは、プロジェクト内ファイル操作 IPC、ビルド/Test Play orchestration、plugin 読込、共通 shell UI です。新しいページ、ツール、converter、モーダル、プレビュー、plugin 間連携は plugin 側 renderer module と capability/event で実装してください。
 
 ---
 

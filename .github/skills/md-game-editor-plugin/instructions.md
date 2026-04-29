@@ -95,17 +95,28 @@ module.exports = { generateSource, onBuildStart };
 
 ### renderer.js を持つ場合
 
-Plugin Runtime v2.1 では、Assets / Code / Converter のような機能固有 UI を本体 `electron/renderer/renderer.js` に追加しない。
+Plugin Runtime v2.2 では、Assets / Code / Converter のような機能固有 UI を本体 `electron/renderer/renderer.js` に追加しない。
 プラグイン配下の `renderer.js` で capability を登録する。
 
 ```js
-export function activatePlugin({ plugin, root, api, logger, registerCapability }) {
+export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, registerCapability }) {
+  const modal = api.createModal({
+    id: `${plugin.id}-modal`,
+    html: '<p>Plugin UI</p>',
+  });
   registerCapability('my-capability', { root });
   logger.info(`${plugin.id} renderer activated`);
+  return {
+    deactivate() {
+      modal.destroy();
+    },
+  };
 }
 ```
 
 `renderer.entry` と `renderer.styles` は plugin ディレクトリ内の相対パスに限定する。`../` や絶対パスで plugin 外へ出る指定は禁止。
+ページを持たない converter でも `hostRoot` が渡されるため、独自 modal や背景処理のために本体 HTML を変更しない。
+プラグイン同士の連携は `api.capabilities.get()` / `api.capabilities.require()` / `api.events.on()` / `api.events.emit()` を使い、本体側に個別 plugin ID の分岐を追加しない。
 
 ### Step 4: 配置場所を案内する
 
@@ -240,4 +251,4 @@ TYPE   name   "ファイルパス"   [追加パラメータ]
 
 ---
 
-*Last Updated: 2026-04 / SGDK 2.11 / Plugin Runtime v2.1*
+*Last Updated: 2026-04 / SGDK 2.11 / Plugin Runtime v2.2*
