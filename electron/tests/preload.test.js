@@ -13,18 +13,31 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.equal(typeof api.generateProject, 'function');
   assert.equal(typeof api.listResDefinitions, 'function');
   assert.equal(typeof api.convertAndWriteAudioAsset, 'function');
+  assert.equal(typeof api.pickFile, 'function');
+  assert.equal(typeof api.readTempFileAsDataUrl, 'function');
   assert.equal(typeof api.listPlugins, 'function');
   assert.equal(typeof api.getPluginRendererAssets, 'function');
+  assert.equal(typeof api.invokePluginHook, 'function');
+  assert.equal(typeof api.getPluginRoles, 'function');
+  assert.equal(typeof api.setPluginRole, 'function');
   assert.equal(typeof api.exportHtml, 'function');
 
   await api.readRomFile('game.bin');
   await api.setBuilderPlugin('standard-builder');
+  await api.pickFile({ title: 'Pick' });
+  await api.readTempFileAsDataUrl('tmp.wav', { deleteAfter: true });
+  await api.setPluginRole('builder', 'slideshow');
   await api.getPluginRendererAssets('asset-manager');
+  await api.invokePluginHook('audio-converter', 'convertAudio', { sourcePath: 'in.wav' });
   await api.createCodeEntry({ path: 'src/new.c', type: 'file' });
 
-  assert.deepEqual(invocations.slice(-3), [
+  assert.deepEqual(invocations.slice(-7), [
     { channel: 'build:setBuilderPlugin', args: [{ id: 'standard-builder' }] },
+    { channel: 'dialog:pickFile', args: [{ title: 'Pick' }] },
+    { channel: 'res:readTempFileAsDataUrl', args: ['tmp.wav', { deleteAfter: true }] },
+    { channel: 'plugins:setRole', args: [{ roleId: 'builder', id: 'slideshow' }] },
     { channel: 'plugins:getRendererAssets', args: [{ id: 'asset-manager' }] },
+    { channel: 'plugins:invokeHook', args: [{ id: 'audio-converter', hook: 'convertAudio', payload: { sourcePath: 'in.wav' } }] },
     { channel: 'codefs:create', args: [{ path: 'src/new.c', type: 'file' }] },
   ]);
 

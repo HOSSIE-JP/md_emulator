@@ -91,6 +91,69 @@ function normalizeRendererCapabilities(renderer) {
   ));
 }
 
+function normalizeMainApi(manifest) {
+  const raw = manifest.mainApi && typeof manifest.mainApi === 'object'
+    ? manifest.mainApi
+    : {};
+  const normalizeList = (value) => (Array.isArray(value)
+    ? Array.from(new Set(value.map((item) => String(item || '').trim()).filter(Boolean)))
+    : []);
+  return {
+    hooks: normalizeList(raw.hooks),
+    capabilities: normalizeList(raw.capabilities),
+  };
+}
+
+function normalizePermissions(manifest) {
+  if (!Array.isArray(manifest.permissions)) return [];
+  return Array.from(new Set(
+    manifest.permissions
+      .map((permission) => String(permission || '').trim())
+      .filter(Boolean),
+  ));
+}
+
+function normalizeRoles(manifest, pluginTypes, hooks) {
+  const roles = [];
+  const seen = new Set();
+
+  const addRole = (role, inferred = false) => {
+    if (!role) return;
+    const id = String(typeof role === 'string' ? role : role.id || '').trim();
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    const label = String(typeof role === 'object' && role.label ? role.label : (
+      id === 'builder' ? 'Build' : id === 'testplay' ? 'Test Play' : id
+    )).trim();
+    const order = Number(typeof role === 'object' ? role.order : NaN);
+    roles.push({
+      id,
+      label,
+      exclusive: typeof role === 'object' && Object.prototype.hasOwnProperty.call(role, 'exclusive')
+        ? Boolean(role.exclusive)
+        : true,
+      order: Number.isFinite(order) ? order : (id === 'builder' ? 10 : id === 'testplay' ? 20 : 100),
+      inferred,
+    });
+  };
+
+  if (Array.isArray(manifest.roles)) {
+    manifest.roles.forEach((role) => addRole(role, false));
+  }
+
+  if (pluginTypes.includes('build')) {
+    addRole({ id: 'builder', label: 'Build', exclusive: true, order: 10 }, true);
+  }
+  if (pluginTypes.includes('emulator') || hooks.includes('onTestPlay')) {
+    addRole({ id: 'testplay', label: 'Test Play', exclusive: true, order: 20 }, true);
+  }
+
+  return roles.sort((a, b) => {
+    if (a.order !== b.order) return a.order - b.order;
+    return a.id.localeCompare(b.id, 'ja');
+  });
+}
+
 function resolvePluginFile(pluginDir, relativePath) {
   const value = String(relativePath || '').trim();
   if (!value || path.isAbsolute(value)) return null;
@@ -195,7 +258,10 @@ function listPlugins() {
       const pluginDir = path.join(baseDir, id);
       const hasGenerator = fs.existsSync(path.join(pluginDir, 'index.js'));
       const pluginTypes = normalizePluginTypes(manifest);
+      const hooks = normalizeHooks(manifest);
       const rendererInfo = normalizeRenderer(manifest, pluginDir);
+      const mainApi = normalizeMainApi(manifest);
+      const roles = normalizeRoles(manifest, pluginTypes, hooks);
 
       return {
         id,
@@ -206,7 +272,10 @@ function listPlugins() {
         pluginType: pluginTypes[0] || 'unknown',
         tab: manifest.tab || null,
         dependencies: normalizeDependencies(manifest),
-        hooks: normalizeHooks(manifest),
+        hooks,
+        mainApi,
+        permissions: normalizePermissions(manifest),
+        roles,
         hasGenerator,
         renderer: rendererInfo.renderer,
         hasRenderer: rendererInfo.hasRenderer,
@@ -216,6 +285,27 @@ function listPlugins() {
       };
     })
     .sort((a, b) => a.id.localeCompare(b.id, 'ja'));
+}
+
+function canInvokeRendererHook(pluginInfo, hookName) {
+  const hook = String(hookName || '').trim();
+  if (!hook || !pluginInfo?.enabled) return false;
+  const declaredHooks = Array.isArray(pluginInfo.hooks) ? pluginInfo.hooks : [];
+  const allowedHooks = Array.isArray(pluginInfo.mainApi?.hooks) ? pluginInfo.mainApi.hooks : [];
+  return declaredHooks.includes(hook) && allowedHooks.includes(hook);
+}
+
+async function invokeRendererHook(id, hookName, payload = {}, context = {}) {
+  const pluginId = String(id || '').trim();
+  const hook = String(hookName || '').trim();
+  const pluginInfo = listPlugins().find((plugin) => plugin.id === pluginId);
+  if (!pluginInfo) {
+    return { ok: false, error: `plugin not found: ${pluginId}` };
+  }
+  if (!canInvokeRendererHook(pluginInfo, hook)) {
+    return { ok: false, error: `renderer is not allowed to invoke hook: ${pluginId}.${hook}` };
+  }
+  return invokeHook(pluginId, hook, payload, context);
 }
 
 function getRendererAssets(id) {
@@ -328,10 +418,10 @@ function getPlugin(id) {
     : null;
   if (!indexPath) return null;
   // require キャッシュを強制クリアしてリロードに対応
-  const resolved = require.resolve(indexPath);
+  const resolved = path.resolve(indexPath);
   delete require.cache[resolved];
   try {
-    return require(indexPath);
+    return require(resolved);
   } catch (e) {
     return { _loadError: String(e.message || e) };
   }
@@ -391,8 +481,10 @@ module.exports = {
   getRendererAssets,
   setEnabled,
   setEnabledWithDependencies,
+  canInvokeRendererHook,
   runGenerator,
   invokeHook,
+  invokeRendererHook,
   isPluginEnabled,
   getPluginsDir,
   getUserPluginsDir,

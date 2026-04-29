@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-04 / Plugin Runtime v2.2
+> § Last Updated: 2026-04 / Plugin Runtime v2.4
 
 ---
 
@@ -29,7 +29,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 
 ### MD Game Editor のプラグインシステム
 
-- **Plugin Runtime v2.2** を採用
+- **Plugin Runtime v2.4** を採用
 - プラグインは `manifest.json` を必須とし、必要に応じて `index.js` と `renderer.js` を持つ
 - `index.js` は Electron メインプロセス (Node.js) 上で動作する（ブラウザ API は使用不可）
 - `renderer.js` は Electron renderer process の ES module として動作し、UI/capability を登録する
@@ -54,6 +54,14 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
   "version": "1.0.0",          // 必須: semver 形式
   "types": ["build"],          // 必須: 配列で記述（文字列単体は非推奨）
   "hooks": ["onBuildStart"],   // 任意: 実装するフック名の宣言
+  "permissions": ["project.read", "project.write", "build.configure"],
+  "roles": [
+    { "id": "builder", "label": "Build", "exclusive": true, "order": 10 }
+  ],
+  "mainApi": {                  // 任意: renderer から呼べる main hook/capability
+    "hooks": ["convertAudio"],
+    "capabilities": ["audio-convert"]
+  },
   "tab": {                     // 任意: editor タイプでタブを追加する場合
     "label": "My Tab",
     "icon": "code",
@@ -82,7 +90,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 
 ### renderer module パターン
 
-Plugin Runtime v2.2 では、機能固有 UI は本体 `electron/renderer/renderer.js` へ直接追加せず、プラグイン配下の renderer module に置く。
+Plugin Runtime v2.4 では、機能固有 UI は本体 `electron/renderer/renderer.js` へ直接追加せず、プラグイン配下の renderer module に置く。
 
 ```js
 export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, registerCapability }) {
@@ -101,6 +109,11 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 - Converter は `image-resize`, `image-quantize`, `audio-convert-ui` などの capability を登録し、利用側 plugin は capability 経由で呼び出す
 - 新規ページ、ツール、converter、モーダル、プレビューは本体 HTML/renderer に追加せず、`root` / `pageRoot` / `hostRoot` と `api.createModal()` / `api.mountElement()` で plugin 側に mount する
 - プラグイン同士の連携は `api.capabilities.get()` / `api.capabilities.require()` / `api.events.on()` / `api.events.emit()` を使い、本体側に個別 plugin ID の分岐を追加しない
+- renderer から main process hook を呼ぶ場合は `hooks` と `mainApi.hooks` の両方に宣言し、`api.plugins.invokeHook()` または `window.electronAPI.invokePluginHook()` を使う
+- asset type / import / image 変換は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として登録する
+- Build / Test Play など単一選択 plugin は `roles` で宣言し、project.json の標準保存先は `pluginRoles` とする
+- `permissions` は v2.4 では表示・レビュー用途の宣言で、sandbox 強制ではない
+- 新規 plugin で本体 `main.js` / `preload.js` / `build-system.js` の個別追記が必要に見える場合は、まず Runtime v2.4 の汎用 API 不足として扱う
 
 ---
 

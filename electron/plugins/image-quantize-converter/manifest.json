@@ -4,6 +4,7 @@
   "description": "画像を16色へ減色変換する標準コンバータープラグインです。",
   "version": "1.0.0",
   "types": ["converter"],
+  "permissions": ["project.read"],
   "renderer": {
     "entry": "renderer.js",
     "styles": ["style.css"],

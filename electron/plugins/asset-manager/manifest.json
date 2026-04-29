@@ -4,6 +4,7 @@
   "description": "Rescomp アセットの一覧/編集/登録を行う標準エディタプラグインです。",
   "version": "1.0.0",
   "types": ["editor", "asset"],
+  "permissions": ["project.read", "project.write", "dialog.openFile", "res.read", "res.write"],
   "dependencies": ["image-resize-converter", "image-quantize-converter", "audio-converter"],
   "tab": {
     "label": "Assets",
@@ -15,6 +16,6 @@
     "entry": "renderer.js",
     "styles": ["style.css"],
     "page": "assets",
-    "capabilities": ["page", "asset-manager"]
+    "capabilities": ["page", "asset-manager", "asset-type-provider", "asset-import-handler", "image-import-pipeline"]
   }
 }

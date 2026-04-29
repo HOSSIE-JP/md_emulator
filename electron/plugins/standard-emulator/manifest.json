@@ -4,5 +4,7 @@
   "description": "WASM ベースの標準 Mega Drive エミュレーターです。Test Play ボタン実行時に使用されます。",
   "version": "1.0.0",
   "types": ["emulator"],
+  "permissions": ["project.read"],
+  "roles": [{ "id": "testplay", "label": "Test Play", "exclusive": true, "order": 20 }],
   "hooks": ["onTestPlay"]
 }

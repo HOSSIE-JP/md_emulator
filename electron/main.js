@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const net = require('net');
 const { shell } = require('electron');
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
@@ -228,6 +229,52 @@ function createPluginLogger(pluginId) {
   };
 }
 
+const DEFAULT_ASSET_FILE_FILTERS = [
+  { name: 'Assets', extensions: ['png', 'bmp', 'pal', 'tsx', 'tmx', 'vgm', 'xgm', 'wav', 'mp3', 'ogg'] },
+  { name: 'All Files', extensions: ['*'] },
+];
+
+function normalizeDialogFilters(filters) {
+  if (!Array.isArray(filters) || filters.length === 0) return DEFAULT_ASSET_FILE_FILTERS;
+  const normalized = filters.map((filter) => ({
+    name: String(filter?.name || 'Files'),
+    extensions: Array.isArray(filter?.extensions)
+      ? filter.extensions.map((ext) => String(ext || '').replace(/^\./, '').trim()).filter(Boolean)
+      : ['*'],
+  })).filter((filter) => filter.extensions.length > 0);
+  return normalized.length > 0 ? normalized : DEFAULT_ASSET_FILE_FILTERS;
+}
+
+function normalizeDialogProperties(properties) {
+  const allowed = new Set(['openFile', 'openDirectory', 'multiSelections', 'showHiddenFiles']);
+  const values = Array.isArray(properties) ? properties : ['openFile'];
+  const normalized = values.map((prop) => String(prop || '').trim()).filter((prop) => allowed.has(prop));
+  return normalized.length > 0 ? Array.from(new Set(normalized)) : ['openFile'];
+}
+
+async function pickFile(options = {}) {
+  const owner = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : undefined;
+  const result = await dialog.showOpenDialog(owner, {
+    title: options?.title ? String(options.title) : undefined,
+    properties: normalizeDialogProperties(options?.properties),
+    filters: normalizeDialogFilters(options?.filters),
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { canceled: true, filePaths: [] };
+  }
+
+  const filePaths = result.filePaths;
+  const sourcePath = filePaths[0];
+  return {
+    canceled: false,
+    filePaths,
+    sourcePath,
+    fileName: path.basename(sourcePath),
+    ext: path.extname(sourcePath).toLowerCase(),
+  };
+}
+
 async function invokePluginHookSafe(pluginId, hookName, payload, context = {}) {
   if (!pluginId) return { ok: true, skipped: true };
   const result = await pluginManager.invokeHook(pluginId, hookName, payload, context);
@@ -236,6 +283,93 @@ async function invokePluginHookSafe(pluginId, hookName, payload, context = {}) {
     sendToRenderer('build-log', { text: msg, level: 'error' });
   }
   return result;
+}
+
+function getPluginMainCapability(plugin, capability) {
+  const capabilities = Array.isArray(plugin?.mainApi?.capabilities) ? plugin.mainApi.capabilities : [];
+  return capabilities.includes(capability);
+}
+
+function resolveAudioConverterPluginId(requestedPluginId) {
+  const requested = String(requestedPluginId || '').trim();
+  const plugins = pluginManager.listPlugins();
+  if (requested) return requested;
+  const byCapability = plugins.find((plugin) => (
+    plugin.enabled
+    && getPluginMainCapability(plugin, 'audio-convert')
+    && Array.isArray(plugin.mainApi?.hooks)
+    && plugin.mainApi.hooks.includes('convertAudio')
+  ));
+  if (byCapability) return byCapability.id;
+  const byHook = plugins.find((plugin) => (
+    plugin.enabled
+    && Array.isArray(plugin.mainApi?.hooks)
+    && plugin.mainApi.hooks.includes('convertAudio')
+  ));
+  return byHook?.id || '';
+}
+
+async function invokeRendererPluginHook(pluginId, hookName, payload) {
+  const projectDir = buildSystem.getProjectDir();
+  return pluginManager.invokeRendererHook(pluginId, hookName, payload || {}, {
+    projectDir,
+    assets: collectProjectAssets(projectDir),
+    logger: createPluginLogger(pluginId),
+  });
+}
+
+async function invokeAudioConvertHook(payload = {}) {
+  const pluginId = resolveAudioConverterPluginId(payload.pluginId);
+  if (!pluginId) {
+    return { ok: false, error: 'audio converter plugin is not available' };
+  }
+  return invokeRendererPluginHook(pluginId, 'convertAudio', {
+    sourcePath: payload?.sourcePath,
+    options: payload?.options || {},
+  });
+}
+
+function getMimeForPath(filePath) {
+  const ext = path.extname(filePath || '').toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.bmp') return 'image/bmp';
+  if (ext === '.wav') return 'audio/wav';
+  if (ext === '.mp3') return 'audio/mpeg';
+  if (ext === '.ogg') return 'audio/ogg';
+  return 'application/octet-stream';
+}
+
+function isTempPath(filePath) {
+  if (!filePath) return false;
+  const tempRoot = path.resolve(os.tmpdir());
+  const target = path.resolve(filePath);
+  const rel = path.relative(tempRoot, target);
+  return rel === '' || (!!rel && !rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+function pluginSupportsRole(plugin, roleId) {
+  const role = String(roleId || '').trim();
+  if (!role) return false;
+  const roles = Array.isArray(plugin?.roles) ? plugin.roles : [];
+  if (roles.some((entry) => entry?.id === role)) return true;
+  const types = Array.isArray(plugin?.pluginTypes) ? plugin.pluginTypes : [];
+  if (role === 'builder') return types.includes('build');
+  if (role === 'testplay') return types.includes('emulator');
+  return false;
+}
+
+function resolvePluginForRole(roleId, fallbackType) {
+  let pluginId = buildSystem.getPluginRole(roleId);
+  if (!pluginId) {
+    const fallback = pluginManager.listPlugins().find(
+      (p) => p.enabled && pluginSupportsRole(p, roleId) && (!fallbackType || p.pluginTypes?.includes(fallbackType)),
+    );
+    if (fallback) {
+      pluginId = fallback.id;
+      try { buildSystem.setPluginRole(roleId, pluginId); } catch (_) {}
+    }
+  }
+  return pluginId || '';
 }
 
 function getCodeRoot() {
@@ -782,48 +916,51 @@ ipcMain.handle('res:openDirectory', async () => {
   }
 });
 
-ipcMain.handle('res:pickAssetSource', async () => {
-  const owner = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : undefined;
-  const result = await dialog.showOpenDialog(owner, {
-    properties: ['openFile'],
-    filters: [
-      { name: 'Assets', extensions: ['png', 'bmp', 'pal', 'tsx', 'tmx', 'vgm', 'xgm', 'wav', 'mp3', 'ogg'] },
-      { name: 'All Files', extensions: ['*'] },
-    ],
-  });
+ipcMain.handle('dialog:pickFile', async (_event, options) => pickFile(options || {}));
 
-  if (result.canceled || result.filePaths.length === 0) {
-    return { canceled: true };
-  }
-
-  const sourcePath = result.filePaths[0];
-  return {
-    canceled: false,
-    sourcePath,
-    fileName: path.basename(sourcePath),
-    ext: path.extname(sourcePath).toLowerCase(),
-  };
-});
+ipcMain.handle('res:pickAssetSource', async () => pickFile({
+  properties: ['openFile'],
+  filters: DEFAULT_ASSET_FILE_FILTERS,
+}));
 
 ipcMain.handle('res:readFileAsDataUrl', async (_event, sourcePath) => {
   try {
     if (!sourcePath || !fs.existsSync(sourcePath)) {
       return { ok: false, error: 'source file not found' };
     }
-    const ext = path.extname(sourcePath).toLowerCase();
-    const mime = ext === '.png'
-      ? 'image/png'
-      : ext === '.bmp'
-        ? 'image/bmp'
-        : ext === '.wav'
-          ? 'audio/wav'
-          : ext === '.mp3'
-            ? 'audio/mpeg'
-            : ext === '.ogg'
-              ? 'audio/ogg'
-              : 'application/octet-stream';
     const data = fs.readFileSync(sourcePath).toString('base64');
-    return { ok: true, dataUrl: `data:${mime};base64,${data}` };
+    return { ok: true, dataUrl: `data:${getMimeForPath(sourcePath)};base64,${data}` };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('res:readTempFileAsDataUrl', async (_event, sourcePath, options = {}) => {
+  try {
+    if (!sourcePath || !isTempPath(sourcePath)) {
+      return { ok: false, error: 'temp file path is outside the allowed temp directory' };
+    }
+    if (!fs.existsSync(sourcePath)) {
+      return { ok: false, error: 'temp file not found' };
+    }
+    const data = fs.readFileSync(sourcePath).toString('base64');
+    const dataUrl = `data:${getMimeForPath(sourcePath)};base64,${data}`;
+    if (options?.deleteAfter) {
+      try { fs.unlinkSync(sourcePath); } catch (_) {}
+    }
+    return { ok: true, dataUrl };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('res:deleteTempFile', async (_event, sourcePath) => {
+  try {
+    if (!sourcePath || !isTempPath(sourcePath)) {
+      return { ok: false, error: 'temp file path is outside the allowed temp directory' };
+    }
+    if (fs.existsSync(sourcePath)) fs.unlinkSync(sourcePath);
+    return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
   }
@@ -842,19 +979,7 @@ ipcMain.handle('res:writeAssetFile', async (_event, payload) => {
 ipcMain.handle('res:previewConvertAudio', async (_event, payload) => {
   let outPath = '';
   try {
-    const pluginId = 'audio-converter';
-    const convertResult = await pluginManager.invokeHook(
-      pluginId,
-      'convertAudio',
-      {
-        sourcePath: payload?.sourcePath,
-        options: payload?.options || {},
-      },
-      {
-        projectDir: buildSystem.getProjectDir(),
-        logger: createPluginLogger(pluginId),
-      },
-    );
+    const convertResult = await invokeAudioConvertHook(payload || {});
 
     if (!convertResult?.ok) {
       return { ok: false, error: convertResult?.error || 'audio preview conversion failed' };
@@ -881,19 +1006,7 @@ ipcMain.handle('res:convertAndWriteAudioAsset', async (_event, payload) => {
   let convertedPath = '';
   try {
     const projectDir = buildSystem.getProjectDir();
-    const pluginId = 'audio-converter';
-    const convertResult = await pluginManager.invokeHook(
-      pluginId,
-      'convertAudio',
-      {
-        sourcePath: payload?.sourcePath,
-        options: payload?.options || {},
-      },
-      {
-        projectDir,
-        logger: createPluginLogger(pluginId),
-      },
-    );
+    const convertResult = await invokeAudioConvertHook(payload || {});
 
     if (!convertResult?.ok) {
       return { ok: false, error: convertResult?.error || 'audio conversion failed' };
@@ -998,6 +1111,10 @@ ipcMain.handle('plugins:openFolder', async () => {
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
   }
+});
+
+ipcMain.handle('plugins:invokeHook', async (_event, { id, hook, payload }) => {
+  return invokeRendererPluginHook(id, hook, payload || {});
 });
 
 ipcMain.handle('plugins:runGenerator', async (_event, { id }) => {
@@ -1121,16 +1238,7 @@ ipcMain.handle('setup:setMarsdevPath', async (_event, p) => {
 
 // ---- Test play window ----
 ipcMain.handle('window:openTestPlay', async (_event, romPath) => {
-  let emulatorPluginId = buildSystem.getEmulatorPlugin();
-  if (!emulatorPluginId) {
-    const fallback = pluginManager.listPlugins().find(
-      (p) => p.enabled && Array.isArray(p.pluginTypes) && p.pluginTypes.includes('emulator'),
-    );
-    if (fallback) {
-      emulatorPluginId = fallback.id;
-      try { buildSystem.setEmulatorPlugin(emulatorPluginId); } catch (_) {}
-    }
-  }
+  const emulatorPluginId = resolvePluginForRole('testplay');
   if (!emulatorPluginId) {
     return { opened: false, error: '有効な Emulator プラグインが未設定です' };
   }
@@ -1138,13 +1246,8 @@ ipcMain.handle('window:openTestPlay', async (_event, romPath) => {
     return { opened: false, error: `Emulator プラグイン "${emulatorPluginId}" は無効です` };
   }
   const emulatorMeta = pluginManager.listPlugins().find((p) => p.id === emulatorPluginId);
-  const isEmulatorType = Boolean(
-    emulatorMeta
-    && Array.isArray(emulatorMeta.pluginTypes)
-    && emulatorMeta.pluginTypes.includes('emulator'),
-  );
-  if (!isEmulatorType) {
-    return { opened: false, error: `Emulator プラグイン "${emulatorPluginId}" は emulator タイプではありません` };
+  if (!pluginSupportsRole(emulatorMeta, 'testplay')) {
+    return { opened: false, error: `Emulator プラグイン "${emulatorPluginId}" は testplay role ではありません` };
   }
 
   if (emulatorPluginId) {
@@ -1219,18 +1322,9 @@ async function runBuildFull() {
     const toolchainPath = setupManager.getToolchainDir();
     const javaPath = setupManager.getJavaExePath();
     const projectDir = buildSystem.getProjectDir();
-    let builderPluginId = buildSystem.getBuilderPlugin();
+    let builderPluginId = resolvePluginForRole('builder');
     if (!toolchainPath) {
       return { success: false, error: 'ツールチェーンが設定されていません。Setup を実行してください。' };
-    }
-    if (!builderPluginId) {
-      const fallback = pluginManager.listPlugins().find(
-        (p) => p.enabled && Array.isArray(p.pluginTypes) && p.pluginTypes.includes('build'),
-      );
-      if (fallback) {
-        builderPluginId = fallback.id;
-        try { buildSystem.setBuilderPlugin(builderPluginId); } catch (_) {}
-      }
     }
     if (!builderPluginId) {
       return { success: false, error: '有効な Build プラグインが未設定です。Plugins 画面で有効化してください。' };
@@ -1239,13 +1333,8 @@ async function runBuildFull() {
       return { success: false, error: `Build プラグイン "${builderPluginId}" は無効です` };
     }
     const builderMeta = pluginManager.listPlugins().find((p) => p.id === builderPluginId);
-    const builderIsBuild = Boolean(
-      builderMeta
-      && Array.isArray(builderMeta.pluginTypes)
-      && builderMeta.pluginTypes.includes('build'),
-    );
-    if (!builderIsBuild) {
-      return { success: false, error: `Build プラグイン "${builderPluginId}" は build タイプではありません` };
+    if (!pluginSupportsRole(builderMeta, 'builder')) {
+      return { success: false, error: `Build プラグイン "${builderPluginId}" は builder role ではありません` };
     }
 
     const pluginContext = {
@@ -1253,7 +1342,7 @@ async function runBuildFull() {
       assets: collectProjectAssets(projectDir),
     };
 
-    let buildMakeVariables = {};
+    const buildOptions = {};
     if (builderPluginId) {
       const buildStartResult = await invokePluginHookSafe(builderPluginId, 'onBuildStart', {
         projectDir,
@@ -1263,7 +1352,16 @@ async function runBuildFull() {
         logger: createPluginLogger(builderPluginId),
       });
       if (buildStartResult?.ok && buildStartResult.makeVariables && typeof buildStartResult.makeVariables === 'object') {
-        buildMakeVariables = buildStartResult.makeVariables;
+        buildOptions.makeVariables = buildStartResult.makeVariables;
+      }
+      if (buildStartResult?.ok && buildStartResult.env && typeof buildStartResult.env === 'object') {
+        buildOptions.env = buildStartResult.env;
+      }
+      if (buildStartResult?.ok && Array.isArray(buildStartResult.makeTargets)) {
+        buildOptions.makeTargets = buildStartResult.makeTargets;
+      }
+      if (buildStartResult?.ok && Object.prototype.hasOwnProperty.call(buildStartResult, 'skipClean')) {
+        buildOptions.skipClean = Boolean(buildStartResult.skipClean);
       }
     }
 
@@ -1278,9 +1376,7 @@ async function runBuildFull() {
           logger: createPluginLogger(builderPluginId),
         }).catch(() => {});
       }
-    }, {
-      makeVariables: buildMakeVariables,
-    });
+    }, buildOptions);
 
     if (builderPluginId) {
       if (result.success) {
@@ -1849,6 +1945,19 @@ ipcMain.handle('build:getEmulatorPlugin', async () => {
 
 ipcMain.handle('build:setEmulatorPlugin', async (_event, { id }) => {
   buildSystem.setEmulatorPlugin(id || null);
+  return { ok: true };
+});
+
+ipcMain.handle('plugins:getRoles', async () => {
+  return { ok: true, roles: buildSystem.getPluginRoles() };
+});
+
+ipcMain.handle('plugins:getRole', async (_event, { roleId }) => {
+  return { ok: true, id: buildSystem.getPluginRole(roleId), roleId };
+});
+
+ipcMain.handle('plugins:setRole', async (_event, { roleId, id }) => {
+  buildSystem.setPluginRole(roleId, id || null);
   return { ok: true };
 });
 

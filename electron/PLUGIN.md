@@ -1,7 +1,7 @@
 # MD Game Editor — プラグイン開発ガイド
 
 このドキュメントは、**MD Game Editor** 向けのカスタムプラグインを開発する方を対象としています。  
-プラグインシステム (Plugin Runtime v2.2) の仕様、マニフェスト定義、フック API、レンダラーモジュール、およびレンダラーからの呼び出し方を解説します。
+プラグインシステム (Plugin Runtime v2.4) の仕様、マニフェスト定義、フック API、レンダラーモジュール、およびレンダラーからの呼び出し方を解説します。
 
 ---
 
@@ -71,6 +71,22 @@ electron/plugins/
   "version": "1.0.0",          // 必須: semver 形式
   "types": ["build"],          // 必須: プラグインタイプ (配列)
   "hooks": ["onBuildStart"],   // 任意: 実装するフック名の一覧
+  "permissions": [              // 任意: 使用する host 権限の宣言 (v2.4)
+    "project.read",
+    "project.write",
+    "dialog.openFile",
+    "res.read",
+    "res.write",
+    "main.invokeHook",
+    "build.configure"
+  ],
+  "roles": [                    // 任意: 単一選択 role の宣言 (v2.4)
+    { "id": "builder", "label": "Build", "exclusive": true, "order": 10 }
+  ],
+  "mainApi": {                  // 任意: renderer から呼び出せる main hook/capability
+    "hooks": ["convertAudio"],
+    "capabilities": ["audio-convert"]
+  },
   "tab": { ... },              // 任意: タブ UI を追加する場合
   "renderer": {                 // 任意: renderer module を提供する場合
     "entry": "renderer.js",
@@ -92,6 +108,9 @@ electron/plugins/
 | `version` | `string` | ✅ | semver 形式 (例: `"1.0.0"`) |
 | `types` | `string[]` | ✅ | タイプ名の配列。複数タイプを持てる |
 | `hooks` | `string[]` | — | 実装するフック名を列挙する（宣言のみ。実装は `index.js`） |
+| `permissions` | `string[]` | — | 使用する host 権限の宣言。v2.4 では表示・レビュー用途で、sandbox 強制はしない |
+| `roles` | `Array<object|string>` | — | builder/testplay など、設定画面で単一選択する plugin role |
+| `mainApi` | `object` | — | renderer plugin から呼び出し可能な main process hook / capability の許可リスト |
 | `tab` | `object` | — | エディタにタブを追加する場合。[§9 参照](#9-タブ-ui-の追加-tab-オブジェクト) |
 | `renderer` | `object` | — | renderer process 側の UI/capability を提供する場合。[§10 参照](#10-renderer-module) |
 | `dependencies` | `string[]` | — | 依存プラグイン ID。[§8 参照](#8-依存関係の宣言) |
@@ -393,7 +412,7 @@ interface Logger {
 
 ## 10. Renderer Module
 
-Plugin Runtime v2.2 では、main process の `index.js` とは別に renderer process 用 ES module を提供できます。
+Plugin Runtime v2.4 では、main process の `index.js` とは別に renderer process 用 ES module を提供できます。
 本体 renderer はアプリシェル、ページ切替、IPC host API、プラグイン読込を担当し、Assets / Code / Converter などの機能固有 UI は renderer module が capability として登録します。
 
 ```jsonc
@@ -430,7 +449,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 | `logger` | Plugin Log / Build Log に出力する logger |
 | `registerCapability` | `capabilities` の実装を登録する関数 |
 
-> v2.2 以降、新規プラグインは `electron/renderer/renderer.js` や `electron/renderer/index.html` へ追記せず、`renderer.js` の `activatePlugin()` 内で `root` / `pageRoot` / `hostRoot` に DOM を構築してください。converter のようにページを持たないプラグインにも `hostRoot` が渡されるため、独自モーダルや非表示 UI を本体 HTML に事前定義する必要はありません。
+> v2.4 以降、新規プラグインは `electron/renderer/renderer.js` や `electron/renderer/index.html` へ追記せず、`renderer.js` の `activatePlugin()` 内で `root` / `pageRoot` / `hostRoot` に DOM を構築してください。converter のようにページを持たないプラグインにも `hostRoot` が渡されるため、独自モーダルや非表示 UI を本体 HTML に事前定義する必要はありません。
 
 ### Renderer Host API
 
@@ -470,10 +489,42 @@ export function activatePlugin({ plugin, hostRoot, api, registerCapability }) {
 | `api.capabilities.get(name)` | 有効な provider の capability 実装を取得する |
 | `api.capabilities.require(name, timeoutMs?)` | capability 登録を待つ。見つからない場合は `null` |
 | `api.capabilities.list()` | 現在有効な capability と provider plugin ID を列挙する |
+| `api.plugins.invokeHook(id, hook, payload)` | `mainApi.hooks` で許可された main process hook を呼び出す |
 | `api.events.emit(name, detail)` | renderer plugin 間の軽量イベントを発行する |
 | `api.events.on(name, handler)` | renderer plugin 間イベントを購読し、解除関数を返す |
 
 本体側に残すべきものは、プロジェクト内ファイル操作 IPC、ビルド/Test Play orchestration、plugin 読込、共通 shell UI です。新しいページ、ツール、converter、モーダル、プレビュー、plugin 間連携は plugin 側 renderer module と capability/event で実装してください。
+
+renderer から main process hook を呼ぶ場合は、`hooks` と `mainApi.hooks` の両方に hook 名を宣言してください。新規 plugin で本体 `main.js` / `preload.js` / `build-system.js` の個別追記が必要に見える場合は、まず Runtime v2.4 の汎用 API 不足として扱い、個別 plugin ID の分岐を本体へ追加しないでください。
+
+### Plugin Runtime v2.4 の追加 capability
+
+Asset 登録や converter 連携は本体 renderer へ追記せず、renderer capability として登録します。
+
+| capability | 用途 |
+|---|---|
+| `asset-type-provider` | 拡張子から候補 type、既定 subdir、既定 symbol、追加 UI 情報を返す |
+| `asset-import-handler` | import の優先度・処理可否・copy/変換方針を提供する |
+| `image-import-pipeline` | 画像 import 時の resize / quantize / Indexed PNG 化を提供する |
+
+新規 asset type や converter を追加するときは、`asset-manager` や converter plugin がこれらを登録します。本体 `renderer.js` に type 分岐を追加しないでください。
+
+### Plugin roles
+
+Build / Test Play のように「有効 plugin のうち 1 つだけを選ぶ」機能は `roles` で宣言します。
+
+```jsonc
+"roles": [
+  { "id": "builder", "label": "Build", "exclusive": true, "order": 10 },
+  { "id": "testplay", "label": "Test Play", "exclusive": true, "order": 20 }
+]
+```
+
+`build` タイプは `builder`、`emulator` タイプまたは `onTestPlay` hook は `testplay` role として後方互換で推定されます。プロジェクト設定では `pluginRoles` が標準で、旧 `builderPlugin` / `emulatorPlugin` も互換のため読み書きされます。
+
+### Deprecated compatibility wrappers
+
+`window.electronAPI.previewConvertAudio()` と `window.electronAPI.convertAndWriteAudioAsset()` は後方互換 wrapper として残っています。新規 renderer plugin は `api.plugins.invokeHook(plugin.id, "convertAudio", payload)` と `readTempFileAsDataUrl()` / `writeAssetFile()` を使ってください。
 
 ---
 
@@ -511,6 +562,10 @@ const plugins = await window.electronAPI.listPlugins();
 const assets = await window.electronAPI.getPluginRendererAssets('my-plugin');
 // => { ok: boolean, renderer?: object, rendererAssets?: object, error?: string }
 
+// 単一選択 role の現在値を取得/保存 (v2.4)
+const roles = await window.electronAPI.getPluginRoles();
+await window.electronAPI.setPluginRole('builder', 'my-build-plugin');
+
 // プラグインを有効/無効化
 const result = await window.electronAPI.setPluginEnabled('my-plugin', true);
 // => { ok: boolean, changed: Array<{id,enabled,reason}>, changedIds: string[], missingDependencies: string[] }
@@ -521,6 +576,9 @@ const result = await window.electronAPI.runPluginGenerator('my-plugin');
 
 // plugins フォルダを Explorer で開く
 await window.electronAPI.openPluginsFolder();
+
+// converter preview 用の一時ファイルを Data URL 化
+const preview = await window.electronAPI.readTempFileAsDataUrl(tempWavPath, { deleteAfter: true });
 ```
 
 ### `PluginInfo` の型
@@ -536,6 +594,18 @@ interface PluginInfo {
   tab: object | null;      // manifest.tab の値
   dependencies: string[];
   hooks: string[];
+  permissions: string[];
+  roles: Array<{
+    id: string;
+    label: string;
+    exclusive: boolean;
+    order: number;
+    inferred?: boolean;
+  }>;
+  mainApi: {
+    hooks: string[];
+    capabilities: string[];
+  };
   hasGenerator: boolean;   // generateSource / generateSourceAsync が存在するか
   renderer: {
     entry: string;

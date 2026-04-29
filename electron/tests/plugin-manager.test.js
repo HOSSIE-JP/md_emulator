@@ -2,13 +2,14 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { loadWithMockedElectron } = require('./helpers/mock-electron');
 
 function makeTempUserData() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'md-editor-plugin-test-'));
+  const root = path.join(__dirname, '..', 'node_modules', '.plugin-test-tmp');
+  fs.mkdirSync(root, { recursive: true });
+  return fs.mkdtempSync(path.join(root, 'md-editor-plugin-test-'));
 }
 
 function writePlugin(userData, id, manifest, files = {}) {
@@ -34,6 +35,8 @@ test('listPlugins reads user plugins and normalizes manifest fields', () => {
     types: ['editor', 'asset'],
     hooks: ['getTab', 'onActivate'],
     dependencies: ['beta', 'beta', 'gamma'],
+    permissions: ['project.read', 'project.read', 'res.write'],
+    roles: [{ id: 'custom-role', label: 'Custom Role', exclusive: true, order: 50 }],
     tab: { label: 'Alpha' },
   });
 
@@ -45,8 +48,25 @@ test('listPlugins reads user plugins and normalizes manifest fields', () => {
   assert.equal(alpha.pluginType, 'editor');
   assert.deepEqual(alpha.hooks, ['getTab', 'onActivate']);
   assert.deepEqual(alpha.dependencies, ['beta', 'gamma']);
+  assert.deepEqual(alpha.permissions, ['project.read', 'res.write']);
+  assert.deepEqual(alpha.roles, [{ id: 'custom-role', label: 'Custom Role', exclusive: true, order: 50, inferred: false }]);
   assert.equal(alpha.enabled, true);
   assert.equal(alpha.isUserPlugin, true);
+});
+
+test('listPlugins infers v2.4 roles from legacy plugin types and hooks', () => {
+  const userData = makeTempUserData();
+  writePlugin(userData, 'builder', { types: ['build'] });
+  writePlugin(userData, 'emulator', { types: ['emulator'], hooks: ['onTestPlay'] });
+
+  const pluginManager = loadWithMockedElectron(path.join(__dirname, '..', 'plugin-manager.js'), { userData });
+  const builder = pluginManager.listPlugins().find((plugin) => plugin.id === 'builder');
+  const emulator = pluginManager.listPlugins().find((plugin) => plugin.id === 'emulator');
+
+  assert.equal(builder.roles[0].id, 'builder');
+  assert.equal(builder.roles[0].inferred, true);
+  assert.equal(emulator.roles[0].id, 'testplay');
+  assert.equal(emulator.roles[0].inferred, true);
 });
 
 test('setEnabledWithDependencies enables dependencies and reports missing ones', () => {
@@ -153,4 +173,58 @@ test('user plugins override builtin renderer assets for the same id', () => {
   assert.equal(assetManager.hasRenderer, true);
   assert.match(new URL(assetManager.rendererAssets.scriptUrl).pathname, /user-renderer\.js$/);
   assert.equal(assetManager.name, 'asset-manager');
+  assert.deepEqual(assetManager.permissions, []);
+});
+
+test('renderer hook invocation requires manifest mainApi permission', async () => {
+  const userData = makeTempUserData();
+  writePlugin(userData, 'alpha', {
+    hooks: ['convertAudio', 'privateHook'],
+    mainApi: { hooks: ['convertAudio'], capabilities: ['audio-convert'] },
+  }, {
+    'index.js': `
+'use strict';
+module.exports = {
+  convertAudio(payload, context) {
+    return { ok: true, outputPath: payload.sourcePath, projectDir: context.projectDir };
+  },
+  privateHook() {
+    return { ok: true };
+  },
+};
+`,
+  });
+
+  const pluginManager = loadWithMockedElectron(path.join(__dirname, '..', 'plugin-manager.js'), { userData });
+  const alpha = pluginManager.listPlugins().find((plugin) => plugin.id === 'alpha');
+
+  assert.deepEqual(alpha.mainApi, { hooks: ['convertAudio'], capabilities: ['audio-convert'] });
+  assert.equal(pluginManager.canInvokeRendererHook(alpha, 'convertAudio'), true);
+  assert.equal(pluginManager.canInvokeRendererHook(alpha, 'privateHook'), false);
+
+  const allowed = await pluginManager.invokeRendererHook('alpha', 'convertAudio', { sourcePath: 'in.wav' }, { projectDir: 'project' });
+  assert.equal(allowed.ok, true);
+  assert.equal(allowed.outputPath, 'in.wav');
+  assert.equal(allowed.projectDir, 'project');
+
+  const denied = await pluginManager.invokeRendererHook('alpha', 'privateHook', {}, {});
+  assert.equal(denied.ok, false);
+  assert.match(denied.error, /not allowed/);
+});
+
+test('renderer hook invocation rejects disabled plugins', async () => {
+  const userData = makeTempUserData();
+  writePlugin(userData, 'alpha', {
+    hooks: ['convertAudio'],
+    mainApi: { hooks: ['convertAudio'] },
+  }, {
+    'index.js': "'use strict';\nmodule.exports = { convertAudio() { return { ok: true }; } };\n",
+  });
+
+  const pluginManager = loadWithMockedElectron(path.join(__dirname, '..', 'plugin-manager.js'), { userData });
+  pluginManager.setEnabled('alpha', false);
+
+  const result = await pluginManager.invokeRendererHook('alpha', 'convertAudio', {}, {});
+  assert.equal(result.ok, false);
+  assert.match(result.error, /not allowed/);
 });

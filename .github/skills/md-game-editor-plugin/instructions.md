@@ -60,6 +60,10 @@ Copilot がプラグインを生成するとき、以下の順序で作業する
   "version": "1.0.0",
   "types": ["build"],           // 必ず配列
   "hooks": ["onBuildStart", "onBuildEnd"],
+  "permissions": ["project.read", "project.write", "build.configure"],
+  "roles": [
+    { "id": "builder", "label": "Build", "exclusive": true, "order": 10 }
+  ],
   "renderer": {                  // UI/capability を提供する場合のみ
     "entry": "renderer.js",
     "styles": ["style.css"],
@@ -95,7 +99,7 @@ module.exports = { generateSource, onBuildStart };
 
 ### renderer.js を持つ場合
 
-Plugin Runtime v2.2 では、Assets / Code / Converter のような機能固有 UI を本体 `electron/renderer/renderer.js` に追加しない。
+Plugin Runtime v2.4 では、Assets / Code / Converter のような機能固有 UI を本体 `electron/renderer/renderer.js` に追加しない。
 プラグイン配下の `renderer.js` で capability を登録する。
 
 ```js
@@ -117,6 +121,11 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 `renderer.entry` と `renderer.styles` は plugin ディレクトリ内の相対パスに限定する。`../` や絶対パスで plugin 外へ出る指定は禁止。
 ページを持たない converter でも `hostRoot` が渡されるため、独自 modal や背景処理のために本体 HTML を変更しない。
 プラグイン同士の連携は `api.capabilities.get()` / `api.capabilities.require()` / `api.events.on()` / `api.events.emit()` を使い、本体側に個別 plugin ID の分岐を追加しない。
+renderer から main process hook を呼ぶ場合は `hooks` と `mainApi.hooks` の両方に宣言し、`api.plugins.invokeHook()` または `window.electronAPI.invokePluginHook()` を使う。
+asset type / import / image 変換は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として登録する。
+Build / Test Play など単一選択 plugin は `roles` で宣言し、project.json の標準保存先は `pluginRoles` とする。
+`permissions` は v2.4 では表示・レビュー用途の宣言で、sandbox 強制ではない。
+新規 plugin で本体 `main.js` / `preload.js` / `build-system.js` の個別追記が必要に見える場合は、まず Runtime v2.4 の汎用 API 不足として扱う。
 
 ### Step 4: 配置場所を案内する
 
@@ -251,4 +260,4 @@ TYPE   name   "ファイルパス"   [追加パラメータ]
 
 ---
 
-*Last Updated: 2026-04 / SGDK 2.11 / Plugin Runtime v2.2*
+*Last Updated: 2026-04 / SGDK 2.11 / Plugin Runtime v2.4*

@@ -11,6 +11,15 @@ import {
   inferTypeFromExtension,
   normalizeSymbolName,
 } from './asset-utils.mjs';
+import {
+  clearPluginRuntime as clearRuntimeState,
+  createPluginRuntime,
+  getRuntimeCapabilities,
+  getRuntimeCapability,
+  listRuntimeCapabilities,
+  registerRuntimeCapability,
+  waitForRuntimeCapability,
+} from './plugin-runtime.mjs';
 
 // ------------------------------------------------------------------ state --
 const state = {
@@ -665,19 +674,14 @@ const pluginState = {
   activeBuilderPlugin: null,
   /** 現在 Test Play 用に使用中のエミュレータープラグイン ID */
   activeEmulatorPlugin: null,
+  /** Plugin Runtime v2.4 role selections. */
+  activeRoles: {},
   /** サイドバー内プラグインアイコン順 (plugin.id の配列) */
   sidebarOrder: [],
   draggingSidebarPluginId: null,
 };
 
-const pluginRuntime = {
-  activations: new Map(),
-  capabilities: new Map(),
-  capabilityWaiters: new Map(),
-  hostRoots: [],
-  styleLinks: [],
-  eventTarget: new EventTarget(),
-};
+const pluginRuntime = createPluginRuntime();
 
 const SIDEBAR_PLUGIN_ORDER_KEY_PREFIX = 'md-editor.sidebarPluginOrder.v1';
 
@@ -686,6 +690,50 @@ function pluginSupportsType(plugin, type) {
   if (kinds.includes(type)) return true;
   if (plugin?.pluginType === type) return true;
   return false;
+}
+
+function pluginSupportsRole(plugin, roleId) {
+  const role = String(roleId || '').trim();
+  if (!role) return false;
+  const roles = Array.isArray(plugin?.roles) ? plugin.roles : [];
+  if (roles.some((entry) => entry?.id === role)) return true;
+  if (role === 'builder') return pluginSupportsType(plugin, 'build');
+  if (role === 'testplay') return pluginSupportsType(plugin, 'emulator');
+  return false;
+}
+
+function getRoleDefinitions() {
+  const byId = new Map();
+  pluginState.plugins.forEach((plugin) => {
+    (Array.isArray(plugin.roles) ? plugin.roles : []).forEach((role) => {
+      const id = String(role?.id || '').trim();
+      if (!id || byId.has(id)) return;
+      byId.set(id, {
+        id,
+        label: String(role.label || id),
+        exclusive: role.exclusive !== false,
+        order: Number.isFinite(Number(role.order)) ? Number(role.order) : 100,
+      });
+    });
+  });
+  if (!byId.has('builder') && pluginState.plugins.some((plugin) => pluginSupportsType(plugin, 'build'))) {
+    byId.set('builder', { id: 'builder', label: 'Build', exclusive: true, order: 10 });
+  }
+  if (!byId.has('testplay') && pluginState.plugins.some((plugin) => pluginSupportsType(plugin, 'emulator'))) {
+    byId.set('testplay', { id: 'testplay', label: 'Test Play', exclusive: true, order: 20 });
+  }
+  return Array.from(byId.values()).sort((a, b) => {
+    if (a.order !== b.order) return a.order - b.order;
+    return a.id.localeCompare(b.id, 'ja');
+  });
+}
+
+function getEnabledPluginsByRole(roleId) {
+  return pluginState.plugins.filter((p) => p.enabled && pluginSupportsRole(p, roleId));
+}
+
+function getActiveRolePlugin(roleId) {
+  return pluginState.activeRoles?.[roleId] || null;
 }
 
 function getPluginsByType(type) {
@@ -728,62 +776,50 @@ function createPluginLogger(plugin) {
 }
 
 function registerPluginCapability(plugin, name, implementation = {}) {
-  const capability = String(name || '').trim();
-  if (!capability) return;
-  const entries = pluginRuntime.capabilities.get(capability) || [];
-  entries.push({ pluginId: plugin.id, implementation });
-  pluginRuntime.capabilities.set(capability, entries);
-
-  const waiters = pluginRuntime.capabilityWaiters.get(capability) || [];
-  waiters.forEach((resolve) => resolve(implementation));
-  pluginRuntime.capabilityWaiters.delete(capability);
-
-  pluginRuntime.eventTarget.dispatchEvent(new CustomEvent('capability:registered', {
-    detail: { capability, pluginId: plugin.id, implementation },
-  }));
+  registerRuntimeCapability(pluginRuntime, plugin, name, implementation);
 }
 
 function getPluginCapability(name) {
-  const entries = pluginRuntime.capabilities.get(name) || [];
-  return entries.find((entry) => isPluginFeatureEnabled(entry.pluginId))?.implementation || null;
+  return getRuntimeCapability(pluginRuntime, name, isPluginFeatureEnabled);
+}
+
+function getPluginCapabilities(name) {
+  return getRuntimeCapabilities(pluginRuntime, name, isPluginFeatureEnabled);
 }
 
 function listPluginCapabilities() {
-  return Array.from(pluginRuntime.capabilities.entries()).map(([name, entries]) => ({
-    name,
-    providers: entries
-      .filter((entry) => isPluginFeatureEnabled(entry.pluginId))
-      .map((entry) => entry.pluginId),
-  })).filter((entry) => entry.providers.length > 0);
+  return listRuntimeCapabilities(pluginRuntime, isPluginFeatureEnabled);
+}
+
+function getAssetTypeInfo(file = {}) {
+  const providers = getPluginCapabilities('asset-type-provider');
+  for (const provider of providers) {
+    if (typeof provider?.getTypeInfo !== 'function') continue;
+    try {
+      const info = provider.getTypeInfo(file);
+      if (info && typeof info === 'object') return info;
+    } catch (err) {
+      appendLog('app', `asset-type-provider エラー: ${String(err?.message || err)}`, 'warn');
+    }
+  }
+  const initialType = inferTypeFromExtension(file.ext);
+  const isAudioInput = AUDIO_EXTS.includes(String(file.ext || '').toLowerCase());
+  const fileName = String(file.fileName || '');
+  return {
+    initialType,
+    allowedTypes: getAllowedAssetTypesForExtension(file.ext, TYPE_OPTIONS),
+    defaultSubdir: defaultSubDirForType(initialType),
+    defaultSymbol: normalizeSymbolName(fileName),
+    suggestedFileName: initialType === 'WAV' && isAudioInput
+      ? `${fileName.replace(/\.[^.]+$/, '')}.wav`
+      : fileName,
+    isImageInput: IMAGE_EXTS.includes(String(file.ext || '').toLowerCase()),
+    isAudioInput,
+  };
 }
 
 function waitForPluginCapability(name, timeoutMs = 3000) {
-  const capability = String(name || '').trim();
-  if (!capability) return Promise.resolve(null);
-  const current = getPluginCapability(capability);
-  if (current) return Promise.resolve(current);
-
-  return new Promise((resolve) => {
-    const waiters = pluginRuntime.capabilityWaiters.get(capability) || [];
-    const timer = window.setTimeout(() => {
-      const next = pluginRuntime.capabilityWaiters.get(capability) || [];
-      const remaining = next.filter((fn) => fn !== done);
-      if (remaining.length > 0) {
-        pluginRuntime.capabilityWaiters.set(capability, remaining);
-      } else {
-        pluginRuntime.capabilityWaiters.delete(capability);
-      }
-      resolve(null);
-    }, Math.max(0, Number(timeoutMs) || 0));
-
-    function done(implementation) {
-      window.clearTimeout(timer);
-      resolve(implementation || null);
-    }
-
-    waiters.push(done);
-    pluginRuntime.capabilityWaiters.set(capability, waiters);
-  });
+  return waitForRuntimeCapability(pluginRuntime, name, timeoutMs, getPluginCapability);
 }
 
 function getPluginDomId(plugin, suffix) {
@@ -891,8 +927,12 @@ function createPluginHostApi(plugin, roots = {}) {
     unmountElement: (element) => element?.remove?.(),
     capabilities: {
       get: getPluginCapability,
+      all: getPluginCapabilities,
       list: listPluginCapabilities,
       require: waitForPluginCapability,
+    },
+    plugins: {
+      invokeHook: (id, hook, payload) => window.electronAPI.invokePluginHook(id, hook, payload),
     },
     events: {
       emit: (eventName, detail) => {
@@ -913,23 +953,10 @@ function createPluginHostApi(plugin, roots = {}) {
 }
 
 function clearPluginRuntime() {
-  pluginRuntime.activations.forEach((activation) => {
-    try {
-      activation?.deactivate?.();
-    } catch (err) {
-      appendLog('app', `プラグイン renderer 停止失敗: ${String(err?.message || err)}`, 'warn');
-    }
+  clearRuntimeState(pluginRuntime, (err) => {
+    appendLog('app', `プラグイン renderer 停止失敗: ${String(err?.message || err)}`, 'warn');
   });
-  pluginRuntime.activations.clear();
-  pluginRuntime.capabilities.clear();
-  pluginRuntime.capabilityWaiters.forEach((waiters) => waiters.forEach((resolve) => resolve(null)));
-  pluginRuntime.capabilityWaiters.clear();
-  pluginRuntime.styleLinks.forEach((link) => link.remove());
-  pluginRuntime.styleLinks = [];
-  pluginRuntime.hostRoots.forEach((root) => root.remove());
-  pluginRuntime.hostRoots = [];
   document.querySelectorAll('.editor-page[data-plugin-page-owner]').forEach((page) => page.remove());
-  pluginRuntime.eventTarget = new EventTarget();
 }
 
 async function activatePluginRenderers() {
@@ -1183,13 +1210,14 @@ function applyPluginPageAvailability() {
 }
 
 function applyBuildAvailability() {
-  const builderPlugin = pluginState.activeBuilderPlugin
-    ? getPluginById(pluginState.activeBuilderPlugin)
+  const builderId = getActiveRolePlugin('builder') || pluginState.activeBuilderPlugin;
+  const builderPlugin = builderId
+    ? getPluginById(builderId)
     : null;
   const enabled = Boolean(
     builderPlugin
     && builderPlugin.enabled
-    && pluginSupportsType(builderPlugin, 'build'),
+    && pluginSupportsRole(builderPlugin, 'builder'),
   );
 
   if (el.btnBuild) {
@@ -1201,13 +1229,14 @@ function applyBuildAvailability() {
 }
 
 function applyTestPlayAvailability() {
-  const emulatorPlugin = pluginState.activeEmulatorPlugin
-    ? getPluginById(pluginState.activeEmulatorPlugin)
+  const emulatorId = getActiveRolePlugin('testplay') || pluginState.activeEmulatorPlugin;
+  const emulatorPlugin = emulatorId
+    ? getPluginById(emulatorId)
     : null;
   const enabled = Boolean(
     emulatorPlugin
     && emulatorPlugin.enabled
-    && pluginSupportsType(emulatorPlugin, 'emulator'),
+    && pluginSupportsRole(emulatorPlugin, 'testplay'),
   );
 
   if (el.btnTestPlay) {
@@ -1237,8 +1266,13 @@ function setPluginRoleAccordionOpen(open) {
 
 async function setActiveBuilderPlugin(id) {
   pluginState.activeBuilderPlugin = id || null;
+  pluginState.activeRoles = { ...(pluginState.activeRoles || {}), builder: id || null };
   try {
-    await window.electronAPI.setBuilderPlugin(id || null);
+    if (window.electronAPI.setPluginRole) {
+      await window.electronAPI.setPluginRole('builder', id || null);
+    } else {
+      await window.electronAPI.setBuilderPlugin(id || null);
+    }
   } catch (_) {}
   updateBuildButtonLabel();
   applyBuildAvailability();
@@ -1248,8 +1282,13 @@ async function setActiveBuilderPlugin(id) {
 
 async function setActiveEmulatorPlugin(id) {
   pluginState.activeEmulatorPlugin = id || null;
+  pluginState.activeRoles = { ...(pluginState.activeRoles || {}), testplay: id || null };
   try {
-    await window.electronAPI.setEmulatorPlugin(id || null);
+    if (window.electronAPI.setPluginRole) {
+      await window.electronAPI.setPluginRole('testplay', id || null);
+    } else {
+      await window.electronAPI.setEmulatorPlugin(id || null);
+    }
     setPluginRoleStatus('✓ Emulator プラグイン設定を保存しました', 'ok');
   } catch (err) {
     setPluginRoleStatus(`✕ Emulator プラグイン保存失敗: ${err?.message || err}`, 'err');
@@ -1261,7 +1300,7 @@ async function setActiveEmulatorPlugin(id) {
 
 function updateBuildButtonLabel() {
   if (!el.btnBuild) return;
-  const id = pluginState.activeBuilderPlugin;
+  const id = getActiveRolePlugin('builder') || pluginState.activeBuilderPlugin;
   if (id) {
     const p = pluginState.plugins.find((x) => x.id === id);
     el.btnBuild.title = `ビルダー: ${p ? p.name : id}`;
@@ -1284,19 +1323,28 @@ async function loadPlugins() {
 
   loadSidebarPluginOrder();
 
+  try {
+    const savedRoles = await window.electronAPI.getPluginRoles?.();
+    pluginState.activeRoles = (savedRoles?.roles && typeof savedRoles.roles === 'object') ? savedRoles.roles : {};
+  } catch (_) {
+    pluginState.activeRoles = {};
+  }
+
   // プロジェクトに保存されているビルダーを読み込む
   try {
     const saved = await window.electronAPI.getBuilderPlugin();
-    pluginState.activeBuilderPlugin = saved.id || null;
+    pluginState.activeBuilderPlugin = pluginState.activeRoles.builder || saved.id || null;
+    pluginState.activeRoles.builder = pluginState.activeBuilderPlugin;
   } catch (_) {
-    pluginState.activeBuilderPlugin = null;
+    pluginState.activeBuilderPlugin = pluginState.activeRoles.builder || null;
   }
 
   try {
     const saved = await window.electronAPI.getEmulatorPlugin();
-    pluginState.activeEmulatorPlugin = saved.id || null;
+    pluginState.activeEmulatorPlugin = pluginState.activeRoles.testplay || saved.id || null;
+    pluginState.activeRoles.testplay = pluginState.activeEmulatorPlugin;
   } catch (_) {
-    pluginState.activeEmulatorPlugin = null;
+    pluginState.activeEmulatorPlugin = pluginState.activeRoles.testplay || null;
   }
 
   // 未設定 & スライドショープラグインが有効なら自動でデフォルトに設定
@@ -1306,9 +1354,8 @@ async function loadPlugins() {
     );
     if (defaultBuild) {
       pluginState.activeBuilderPlugin = defaultBuild.id;
-      try {
-        await window.electronAPI.setBuilderPlugin(defaultBuild.id);
-      } catch (_) {}
+      pluginState.activeRoles.builder = defaultBuild.id;
+      try { await window.electronAPI.setPluginRole?.('builder', defaultBuild.id); } catch (_) {}
     }
   }
 
@@ -1319,23 +1366,24 @@ async function loadPlugins() {
     );
     if (defaultEmulator) {
       pluginState.activeEmulatorPlugin = defaultEmulator.id;
-      try {
-        await window.electronAPI.setEmulatorPlugin(defaultEmulator.id);
-      } catch (_) {}
+      pluginState.activeRoles.testplay = defaultEmulator.id;
+      try { await window.electronAPI.setPluginRole?.('testplay', defaultEmulator.id); } catch (_) {}
     }
   }
 
   // 非対応プラグインが設定されていた場合は解除
-  const buildIds = new Set(getEnabledPluginsByType('build').map((p) => p.id));
-  const emulatorIds = new Set(getEnabledPluginsByType('emulator').map((p) => p.id));
+  const buildIds = new Set(getEnabledPluginsByRole('builder').map((p) => p.id));
+  const emulatorIds = new Set(getEnabledPluginsByRole('testplay').map((p) => p.id));
 
   if (pluginState.activeBuilderPlugin && !buildIds.has(pluginState.activeBuilderPlugin)) {
     pluginState.activeBuilderPlugin = null;
-    try { await window.electronAPI.setBuilderPlugin(null); } catch (_) {}
+    pluginState.activeRoles.builder = null;
+    try { await window.electronAPI.setPluginRole?.('builder', null); } catch (_) {}
   }
   if (pluginState.activeEmulatorPlugin && !emulatorIds.has(pluginState.activeEmulatorPlugin)) {
     pluginState.activeEmulatorPlugin = null;
-    try { await window.electronAPI.setEmulatorPlugin(null); } catch (_) {}
+    pluginState.activeRoles.testplay = null;
+    try { await window.electronAPI.setPluginRole?.('testplay', null); } catch (_) {}
   }
 
   await activatePluginRenderers();
@@ -1353,37 +1401,57 @@ async function loadPlugins() {
 function renderPluginRoleSettings() {
   setPluginRoleAccordionOpen(state.pluginUi.roleAccordionOpen);
 
-  const buildPlugins = getEnabledPluginsByType('build');
-  const emulatorPlugins = Array.from(new Map(
-    getEnabledPluginsByType('emulator').map((p) => [p.id, p]),
-  ).values());
+  const body = el.pluginRoleBody;
+  if (!body) return;
 
-  if (el.pluginBuilderSelect) {
-    const options = ['<option value="">ビルドプラグインなし</option>'];
-    buildPlugins.forEach((p) => {
-      options.push(`<option value="${escHtml(p.id)}">${escHtml(p.name)}</option>`);
-    });
-    el.pluginBuilderSelect.innerHTML = options.join('');
-    el.pluginBuilderSelect.value = pluginState.activeBuilderPlugin || '';
-    el.pluginBuilderSelect.onchange = async () => {
-      const nextId = el.pluginBuilderSelect.value || null;
-      await setActiveBuilderPlugin(nextId);
-      setPluginRoleStatus('✓ Build プラグイン設定を保存しました', 'ok');
-    };
+  const roleDefinitions = getRoleDefinitions().filter((role) => role.exclusive !== false);
+  if (roleDefinitions.length === 0) {
+    body.innerHTML = '<p class="hint-text">単一選択 role を宣言しているプラグインはありません。</p>';
+    return;
   }
 
-  if (el.pluginEmulatorSelect) {
-    const options = ['<option value="">選択してください</option>'];
-    emulatorPlugins.forEach((p) => {
-      options.push(`<option value="${escHtml(p.id)}">${escHtml(p.name)}</option>`);
+  body.innerHTML = roleDefinitions.map((role) => {
+    const plugins = getEnabledPluginsByRole(role.id);
+    const activeId = getActiveRolePlugin(role.id) || '';
+    const options = [`<option value="">${role.id === 'builder' ? 'ビルドプラグインなし' : '選択してください'}</option>`];
+    plugins.forEach((p) => {
+      options.push(`<option value="${escHtml(p.id)}"${p.id === activeId ? ' selected' : ''}>${escHtml(p.name)}</option>`);
     });
-    el.pluginEmulatorSelect.innerHTML = options.join('');
-    el.pluginEmulatorSelect.value = pluginState.activeEmulatorPlugin || '';
-    el.pluginEmulatorSelect.onchange = async () => {
-      const nextId = el.pluginEmulatorSelect.value || null;
-      await setActiveEmulatorPlugin(nextId);
-    };
-  }
+    const hint = role.id === 'builder'
+      ? 'Build ボタン実行時のコード生成とビルドフックに使用します。'
+      : role.id === 'testplay'
+        ? 'Test Play ボタン実行時の起動フックに使用します。'
+        : `${role.label} role を提供するプラグインを選択します。`;
+    return `
+      <div class="plugin-role-card">
+        <h3>${escHtml(role.label)} プラグイン（単一選択）</h3>
+        <div class="plugin-role-row">
+          <select class="form-input plugin-role-select" data-role-id="${escHtml(role.id)}">${options.join('')}</select>
+        </div>
+        <p class="form-hint">${escHtml(hint)}</p>
+      </div>
+    `;
+  }).join('');
+
+  body.querySelectorAll('.plugin-role-select').forEach((select) => {
+    select.addEventListener('change', async () => {
+      const roleId = select.dataset.roleId || '';
+      const nextId = select.value || null;
+      pluginState.activeRoles = { ...(pluginState.activeRoles || {}), [roleId]: nextId };
+      if (roleId === 'builder') pluginState.activeBuilderPlugin = nextId;
+      if (roleId === 'testplay') pluginState.activeEmulatorPlugin = nextId;
+      try {
+        await window.electronAPI.setPluginRole?.(roleId, nextId);
+        setPluginRoleStatus(`✓ ${roleId} プラグイン設定を保存しました`, 'ok');
+      } catch (err) {
+        setPluginRoleStatus(`✕ ${roleId} プラグイン保存失敗: ${err?.message || err}`, 'err');
+      }
+      updateBuildButtonLabel();
+      applyBuildAvailability();
+      applyTestPlayAvailability();
+      renderPluginList();
+    });
+  });
 }
 
 function renderPluginList() {
@@ -1400,8 +1468,8 @@ function renderPluginList() {
 
   el.pluginList.innerHTML = '';
   visiblePlugins.forEach((plugin) => {
-    const isActiveBuilder = pluginState.activeBuilderPlugin === plugin.id;
-    const isActiveEmulator = pluginState.activeEmulatorPlugin === plugin.id;
+    const isActiveBuilder = (getActiveRolePlugin('builder') || pluginState.activeBuilderPlugin) === plugin.id;
+    const isActiveEmulator = (getActiveRolePlugin('testplay') || pluginState.activeEmulatorPlugin) === plugin.id;
     const card = document.createElement('div');
     card.className = `plugin-card${plugin.enabled ? '' : ' plugin-card-disabled'}${isActiveBuilder ? ' plugin-card-active-builder' : ''}`;
     card.dataset.id = plugin.id;
@@ -1410,6 +1478,13 @@ function renderPluginList() {
     const depText = dependencies.length > 0
       ? `依存: ${dependencies.join(', ')}`
       : '依存: なし';
+    const permissions = Array.isArray(plugin.permissions) ? plugin.permissions : [];
+    const permText = permissions.length > 0
+      ? `権限: ${permissions.join(', ')}`
+      : '権限: 未宣言';
+    const roleText = (Array.isArray(plugin.roles) && plugin.roles.length > 0)
+      ? `Role: ${plugin.roles.map((role) => role.label || role.id).join(', ')}`
+      : '';
 
     card.innerHTML = `
       <div class="plugin-card-header">
@@ -1428,6 +1503,8 @@ function renderPluginList() {
       </div>
       <p class="plugin-card-desc">${escHtml(plugin.description)}</p>
       <p class="plugin-card-deps">${escHtml(depText)}</p>
+      <p class="plugin-card-deps">${escHtml(permText)}</p>
+      ${roleText ? `<p class="plugin-card-deps">${escHtml(roleText)}</p>` : ''}
       <div class="plugin-card-actions">
         <span class="plugin-generate-result" id="plugin-result-${escHtml(plugin.id)}"></span>
       </div>
@@ -1461,6 +1538,12 @@ function renderPluginList() {
       if (!desired && pluginState.activeEmulatorPlugin === plugin.id) {
         await setActiveEmulatorPlugin(null);
       }
+      Object.entries(pluginState.activeRoles || {}).forEach(([roleId, activeId]) => {
+        if (!desired && activeId === plugin.id) {
+          pluginState.activeRoles[roleId] = null;
+          try { window.electronAPI.setPluginRole?.(roleId, null); } catch (_) {}
+        }
+      });
       await loadPlugins();
     });
 
@@ -2236,7 +2319,7 @@ async function runBuild(opts = {}) {
   }
 
   // ---- アクティブビルダープラグインが設定されており、かつ呼び出し元がプラグイン生成後でない場合 ----
-  const builderPluginId = pluginState.activeBuilderPlugin;
+  const builderPluginId = getActiveRolePlugin('builder') || pluginState.activeBuilderPlugin;
   if (builderPluginId && !opts._generatedByPlugin) {
     // プラグインで main.c を生成してから再度 runBuild を呼ぶ
     appendBuildLog(`[Plugin] ${builderPluginId}: コード生成中...`);
@@ -3247,9 +3330,11 @@ async function loadResDefinitions({ keepSelection = false } = {}) {
   renderAssetTable();
 }
 
-function populateAssetTypeOptions(selectedType, ext) {
+function populateAssetTypeOptions(selectedType, ext, providedAllowed = null) {
   if (!el.assetTypeInput) return;
-  const allowed = allowedTypesForExtension(ext);
+  const allowed = Array.isArray(providedAllowed) && providedAllowed.length > 0
+    ? providedAllowed
+    : allowedTypesForExtension(ext);
   el.assetTypeInput.innerHTML = '';
   TYPE_OPTIONS.filter((t) => allowed.includes(t)).forEach((type) => {
     const opt = document.createElement('option');
@@ -4516,6 +4601,14 @@ async function openResizeModal(dataUrl, imgWidth, imgHeight, options = {}) {
 }
 
 async function maybeConvertImageToIndexed16(sourcePath, options = {}) {
+  const pipeline = getPluginCapability('image-import-pipeline');
+  if (pipeline?.convertToIndexed16) {
+    return pipeline.convertToIndexed16({
+      sourcePath,
+      targetSize: options.targetSize || null,
+    });
+  }
+
   const resizeCapability = getPluginCapability('image-resize');
   if (!resizeCapability?.openResizeModal) {
     return {
@@ -4625,21 +4718,18 @@ async function openAssetModal() {
   if (!picked || picked.canceled) return;
 
   state.rescomp.pendingAssetPick = picked;
-  const initialType = inferTypeFromExtension(picked.ext);
+  const typeInfo = getAssetTypeInfo(picked);
+  const initialType = typeInfo.initialType || inferTypeFromExtension(picked.ext);
   if (el.assetSourcePathInput) el.assetSourcePathInput.value = picked.sourcePath;
   if (el.assetTargetFileNameInput) {
-    const isAudioInput = AUDIO_EXTS.includes((picked.ext || '').toLowerCase());
-    const suggestedFileName = (initialType === 'WAV' && isAudioInput)
-      ? `${picked.fileName.replace(/\.[^.]+$/, '')}.wav`
-      : picked.fileName;
-    el.assetTargetFileNameInput.value = suggestedFileName;
+    el.assetTargetFileNameInput.value = typeInfo.suggestedFileName || picked.fileName;
   }
   if (el.assetTargetSubdirInput) {
-    el.assetTargetSubdirInput.value = defaultSubDirForType(initialType);
+    el.assetTargetSubdirInput.value = typeInfo.defaultSubdir || defaultSubDirForType(initialType);
     delete el.assetTargetSubdirInput.dataset.userEdited;
   }
   if (el.assetSymbolNameInput) {
-    el.assetSymbolNameInput.value = normalizeSymbolName(picked.fileName);
+    el.assetSymbolNameInput.value = typeInfo.defaultSymbol || normalizeSymbolName(picked.fileName);
     delete el.assetSymbolNameInput.dataset.userEdited;
   }
   if (el.assetCommentInput) {
@@ -4647,7 +4737,7 @@ async function openAssetModal() {
   }
   if (el.assetResizeTargetWidth) el.assetResizeTargetWidth.value = '';
   if (el.assetResizeTargetHeight) el.assetResizeTargetHeight.value = '';
-  populateAssetTypeOptions(initialType, picked.ext);
+  populateAssetTypeOptions(initialType, picked.ext, typeInfo.allowedTypes);
   populateAssetResFileOptions();
   syncAssetModalForType();
   openModal(el.assetModal);
@@ -5163,7 +5253,8 @@ async function applyAudioConvertNormalizePreview() {
   if (el.btnAudioConvertNormalizeApply) el.btnAudioConvertNormalizeApply.disabled = true;
 
   try {
-    const result = await window.electronAPI.previewConvertAudio({
+    const previewConvertAudio = pending.previewConvertAudio || window.electronAPI.previewConvertAudio;
+    const result = await previewConvertAudio({
       sourcePath: pending.picked.sourcePath,
       options: {
         trimStartSec: null,
@@ -5278,7 +5369,8 @@ async function applyAudioConvertModal() {
   };
 
   if (el.audioConvertHint) el.audioConvertHint.textContent = '音声を変換しています...';
-  const copyResult = await window.electronAPI.convertAndWriteAudioAsset(payload);
+  const convertAndWriteAudioAsset = pending.convertAndWriteAudioAsset || window.electronAPI.convertAndWriteAudioAsset;
+  const copyResult = await convertAndWriteAudioAsset(payload);
   if (!copyResult?.ok) {
     if (el.audioConvertHint) el.audioConvertHint.textContent = `変換失敗: ${copyResult?.error || 'unknown'}`;
     return;

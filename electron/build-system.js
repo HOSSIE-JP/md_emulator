@@ -398,6 +398,31 @@ function normalizeMakeVariables(makeVariables = {}) {
   return result;
 }
 
+function normalizeBuildEnv(env = {}) {
+  const result = {};
+  const blockedNames = new Set(['PATH', 'NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE']);
+  Object.entries(env || {}).forEach(([key, value]) => {
+    const name = String(key || '').trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return;
+    if (blockedNames.has(name.toUpperCase())) return;
+    if (value == null) return;
+    const text = String(value);
+    if (/[\r\n]/.test(text)) return;
+    result[name] = text;
+  });
+  return result;
+}
+
+function normalizeMakeTargets(makeTargets) {
+  if (!Array.isArray(makeTargets) || makeTargets.length === 0) {
+    return ['release'];
+  }
+  const targets = makeTargets
+    .map((target) => String(target || '').trim())
+    .filter((target) => /^[A-Za-z0-9_-]+$/.test(target));
+  return targets.length > 0 ? Array.from(new Set(targets)) : ['release'];
+}
+
 // -------------------------------------------------------------- generation --
 
 /**
@@ -438,7 +463,7 @@ function generateProjectStructureOnly(config = {}) {
  * @param {string} sgdkPath     - SGDK のルートディレクトリ
  * @param {string} javaPath     - java 実行ファイルのパス（または 'java'）
  * @param {function} onLog      - (line: string, level: 'info'|'error') => void
- * @param {{ makeVariables?: Record<string,string> }} options
+ * @param {{ makeVariables?: Record<string,string>, env?: Record<string,string>, makeTargets?: string[], skipClean?: boolean }} options
  * @returns {Promise<{success, romPath, romSize, error}>}
  */
 function buildProject(sgdkPath, javaPath, onLog, options = {}) {
@@ -524,6 +549,7 @@ function buildProject(sgdkPath, javaPath, onLog, options = {}) {
       spawnEnv.JAVA_HOME = path.dirname(path.dirname(javaPath));
       spawnEnv.PATH = `${path.dirname(javaPath)}${path.delimiter}${spawnEnv.PATH}`;
     }
+    spawnEnv = { ...spawnEnv, ...normalizeBuildEnv(options.env) };
 
     if (isWin) {
       command = resolveMakeCommand(buildPaths.sgdkPath, true);
@@ -542,6 +568,9 @@ function buildProject(sgdkPath, javaPath, onLog, options = {}) {
     }
 
     const makeVariableArgs = normalizeMakeVariables(options.makeVariables);
+    const makeTargets = normalizeMakeTargets(options.makeTargets);
+    const cleanTargets = options.skipClean ? [] : ['clean'];
+    const targetsToRun = [...cleanTargets, ...makeTargets];
 
     function runMakeTarget(target, onExit) {
       const targetArgs = [...args, ...makeVariableArgs, target];
@@ -585,38 +614,52 @@ function buildProject(sgdkPath, javaPath, onLog, options = {}) {
       });
     }
 
-    runMakeTarget('clean', (cleanCode) => {
-      if (cleanCode !== 0) {
-        const msg = `CLEAN 失敗 (exit code: ${cleanCode})`;
-        log(msg, 'error');
-        resolve({ success: false, error: msg });
-        return;
-      }
-
-      runMakeTarget('release', (releaseCode) => {
-        if (releaseCode === 0) {
-          const romCandidates = [
-            path.join(outDir, 'rom.bin'),
-            path.join(buildPaths.projectDir, 'out', 'rom.bin'),
-          ];
-          const romPath = romCandidates.find((p) => fs.existsSync(p));
-          let romSize = null;
-          if (romPath) {
-            romSize = fs.statSync(romPath).size;
-            log(`ビルド成功! ROM: ${romPath} (${(romSize / 1024).toFixed(1)} KB)`);
-            resolve({ success: true, romPath, romSize });
-          } else {
-            const msg = 'ビルドは成功しましたが rom.bin が見つかりません';
-            log(msg, 'error');
-            resolve({ success: false, error: msg });
-          }
+    function finishBuild(exitCode) {
+      if (exitCode === 0) {
+        const romCandidates = [
+          path.join(outDir, 'rom.bin'),
+          path.join(buildPaths.projectDir, 'out', 'rom.bin'),
+        ];
+        const romPath = romCandidates.find((p) => fs.existsSync(p));
+        let romSize = null;
+        if (romPath) {
+          romSize = fs.statSync(romPath).size;
+          log(`ビルド成功! ROM: ${romPath} (${(romSize / 1024).toFixed(1)} KB)`);
+          resolve({ success: true, romPath, romSize });
         } else {
-          const msg = `ビルド失敗 (exit code: ${releaseCode})`;
+          const msg = 'ビルドは成功しましたが rom.bin が見つかりません';
           log(msg, 'error');
           resolve({ success: false, error: msg });
         }
+      } else {
+        const msg = `ビルド失敗 (exit code: ${exitCode})`;
+        log(msg, 'error');
+        resolve({ success: false, error: msg });
+      }
+    }
+
+    function runTargets(index = 0) {
+      const target = targetsToRun[index];
+      if (!target) {
+        finishBuild(0);
+        return;
+      }
+      runMakeTarget(target, (code) => {
+        if (code !== 0) {
+          const msg = `${target.toUpperCase()} 失敗 (exit code: ${code})`;
+          log(msg, 'error');
+          resolve({ success: false, error: msg });
+          return;
+        }
+        if (index === targetsToRun.length - 1) {
+          finishBuild(code);
+          return;
+        }
+        runTargets(index + 1);
       });
-    });
+    }
+
+    runTargets();
   });
 }
 
@@ -658,26 +701,54 @@ function saveProjectConfig(patch) {
   return merged;
 }
 
+function getPluginRoles() {
+  const cfg = loadProjectConfig();
+  return (cfg.pluginRoles && typeof cfg.pluginRoles === 'object') ? cfg.pluginRoles : {};
+}
+
+function getPluginRole(roleId) {
+  const role = String(roleId || '').trim();
+  if (!role) return null;
+  const cfg = loadProjectConfig();
+  const pluginRoles = (cfg.pluginRoles && typeof cfg.pluginRoles === 'object') ? cfg.pluginRoles : {};
+  if (pluginRoles[role]) return pluginRoles[role];
+  if (role === 'builder') return cfg.builderPlugin || null;
+  if (role === 'testplay') return cfg.emulatorPlugin || null;
+  return null;
+}
+
+function setPluginRole(roleId, id) {
+  const role = String(roleId || '').trim();
+  if (!role) return loadProjectConfig();
+  const cfg = loadProjectConfig();
+  const nextRoles = {
+    ...((cfg.pluginRoles && typeof cfg.pluginRoles === 'object') ? cfg.pluginRoles : {}),
+    [role]: id || null,
+  };
+  const patch = { pluginRoles: nextRoles };
+  if (role === 'builder') patch.builderPlugin = id || null;
+  if (role === 'testplay') patch.emulatorPlugin = id || null;
+  return saveProjectConfig(patch);
+}
+
 /** プロジェクト毎のビルダープラグイン ID を取得 (未設定なら null) */
 function getBuilderPlugin() {
-  const cfg = loadProjectConfig();
-  return cfg.builderPlugin || null;
+  return getPluginRole('builder');
 }
 
 /** プロジェクト毎のビルダープラグイン ID を保存 */
 function setBuilderPlugin(id) {
-  saveProjectConfig({ builderPlugin: id || null });
+  setPluginRole('builder', id || null);
 }
 
 /** プロジェクト毎のエミュレータープラグイン ID を取得 (未設定なら null) */
 function getEmulatorPlugin() {
-  const cfg = loadProjectConfig();
-  return cfg.emulatorPlugin || null;
+  return getPluginRole('testplay');
 }
 
 /** プロジェクト毎のエミュレータープラグイン ID を保存 */
 function setEmulatorPlugin(id) {
-  saveProjectConfig({ emulatorPlugin: id || null });
+  setPluginRole('testplay', id || null);
 }
 
 module.exports = {
@@ -698,6 +769,9 @@ module.exports = {
   getLastRomPath,
   loadProjectConfig,
   saveProjectConfig,
+  getPluginRoles,
+  getPluginRole,
+  setPluginRole,
   getBuilderPlugin,
   setBuilderPlugin,
   getEmulatorPlugin,
@@ -706,4 +780,6 @@ module.exports = {
   stripAnsi,
   sanitizeBuildLogLine,
   normalizeMakeVariables,
+  normalizeBuildEnv,
+  normalizeMakeTargets,
 };

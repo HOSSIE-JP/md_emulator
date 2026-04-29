@@ -71,10 +71,37 @@ test('project plugin selection is stored in project config', () => {
 
   assert.equal(buildSystem.getBuilderPlugin(), 'standard-builder');
   assert.equal(buildSystem.getEmulatorPlugin(), 'standard-emulator');
+  assert.equal(buildSystem.getPluginRole('builder'), 'standard-builder');
+  assert.equal(buildSystem.getPluginRole('testplay'), 'standard-emulator');
 
   const config = JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf-8'));
   assert.equal(config.builderPlugin, 'standard-builder');
   assert.equal(config.emulatorPlugin, 'standard-emulator');
+  assert.deepEqual(config.pluginRoles, {
+    builder: 'standard-builder',
+    testplay: 'standard-emulator',
+  });
+});
+
+test('pluginRoles take precedence while legacy fields remain readable', () => {
+  const userData = makeTempDir('md-editor-plugin-roles-test-');
+  const projectDir = path.join(makeTempDir('md-editor-plugin-roles-project-test-'), 'demo');
+  const buildSystem = loadBuildSystem(userData);
+
+  buildSystem.createProject(projectDir, { title: 'Demo' }, 'int main(void) { return 0; }\n');
+  buildSystem.saveProjectConfig({
+    builderPlugin: 'legacy-builder',
+    emulatorPlugin: 'legacy-emulator',
+    pluginRoles: { builder: 'role-builder' },
+  });
+
+  assert.equal(buildSystem.getBuilderPlugin(), 'role-builder');
+  assert.equal(buildSystem.getEmulatorPlugin(), 'legacy-emulator');
+
+  buildSystem.setPluginRole('testplay', 'role-emulator');
+  const config = JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf-8'));
+  assert.equal(config.pluginRoles.testplay, 'role-emulator');
+  assert.equal(config.emulatorPlugin, 'role-emulator');
 });
 
 test('buildProject fails fast when the toolchain path is missing', async () => {
@@ -109,4 +136,20 @@ test('make variables are normalized for command-line overrides', () => {
     MULTILINE: 'a\nb',
     EMPTY_OK: '',
   }), ['SRC_C=src/main.c', 'EMPTY_OK=']);
+});
+
+test('build env and make targets are normalized for plugin build options', () => {
+  const buildSystem = loadBuildSystem(makeTempDir('md-editor-build-options-test-'));
+
+  assert.deepEqual(buildSystem.normalizeBuildEnv({
+    SGDK_TRACE: '1',
+    'BAD-NAME': 'ignored',
+    PATH: 'ignored',
+    NODE_OPTIONS: '--require bad',
+    MULTILINE: 'a\nb',
+    EMPTY_OK: '',
+  }), { SGDK_TRACE: '1', EMPTY_OK: '' });
+
+  assert.deepEqual(buildSystem.normalizeMakeTargets(['release', 'tools-only', '../bad', 'release']), ['release', 'tools-only']);
+  assert.deepEqual(buildSystem.normalizeMakeTargets([]), ['release']);
 });
