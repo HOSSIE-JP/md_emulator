@@ -48,7 +48,7 @@ Copilot がプラグインを生成するとき、以下の順序で作業する
 
 1. `res/resources.res` を読んで全アセット（タイプ・名前・パス）を把握する
 2. `src/main.c` を読んでゲームロジックの構造を把握する
-3. `project.json` を読んで `builderPlugin` / `emulatorPlugin` フィールドを確認する
+3. `project.json` を読んで `pluginRoles.builder` / `pluginRoles.testplay` フィールドを確認する
 
 ### Step 2: manifest.json を作成する
 
@@ -126,6 +126,14 @@ asset type / import / image 変換は `asset-type-provider` / `asset-import-hand
 Build / Test Play など単一選択 plugin は `roles` で宣言し、project.json の標準保存先は `pluginRoles` とする。
 `permissions` は v2.4 では表示・レビュー用途の宣言で、sandbox 強制ではない。
 新規 plugin で本体 `main.js` / `preload.js` / `build-system.js` の個別追記が必要に見える場合は、まず Runtime v2.4 の汎用 API 不足として扱う。
+
+### Runtime v2.4 で必ず守る開発手順
+
+1. `manifest.json` に `types`、`permissions`、必要な `roles`、`hooks`、`renderer.capabilities` を宣言する
+2. Build / Test Play の単一選択 plugin は `roles` を宣言し、project 側は `project.json.pluginRoles` に保存する
+3. UI、modal、preview、converter 連携は plugin の `renderer.js` で実装し、本体 HTML / renderer / main / preload へ個別追記しない
+4. main process の処理が必要な場合は `hooks` と `mainApi.hooks` に同じ hook 名を宣言し、renderer から `api.plugins.invokeHook()` で呼ぶ
+5. asset 登録拡張は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として提供する
 
 ### Step 4: 配置場所を案内する
 
@@ -236,7 +244,7 @@ TYPE   name   "ファイルパス"   [追加パラメータ]
 
 ## project.json へのプラグイン登録
 
-プラグインを生成したら、`project.json` の `builderPlugin` を更新するよう案内する:
+プラグインを生成したら、`project.json` の `pluginRoles.builder` を更新するよう案内する:
 
 ```json
 {
@@ -244,8 +252,10 @@ TYPE   name   "ファイルパス"   [追加パラメータ]
   "author": "Your Name",
   "serial": "GM MYGAME-00",
   "region": "JPN",
-  "builderPlugin": "<新しいプラグインのid>",
-  "emulatorPlugin": "standard-emulator"
+  "pluginRoles": {
+    "builder": "<新しいプラグインのid>",
+    "testplay": "standard-emulator"
+  }
 }
 ```
 

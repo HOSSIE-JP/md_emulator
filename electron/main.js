@@ -285,47 +285,12 @@ async function invokePluginHookSafe(pluginId, hookName, payload, context = {}) {
   return result;
 }
 
-function getPluginMainCapability(plugin, capability) {
-  const capabilities = Array.isArray(plugin?.mainApi?.capabilities) ? plugin.mainApi.capabilities : [];
-  return capabilities.includes(capability);
-}
-
-function resolveAudioConverterPluginId(requestedPluginId) {
-  const requested = String(requestedPluginId || '').trim();
-  const plugins = pluginManager.listPlugins();
-  if (requested) return requested;
-  const byCapability = plugins.find((plugin) => (
-    plugin.enabled
-    && getPluginMainCapability(plugin, 'audio-convert')
-    && Array.isArray(plugin.mainApi?.hooks)
-    && plugin.mainApi.hooks.includes('convertAudio')
-  ));
-  if (byCapability) return byCapability.id;
-  const byHook = plugins.find((plugin) => (
-    plugin.enabled
-    && Array.isArray(plugin.mainApi?.hooks)
-    && plugin.mainApi.hooks.includes('convertAudio')
-  ));
-  return byHook?.id || '';
-}
-
 async function invokeRendererPluginHook(pluginId, hookName, payload) {
   const projectDir = buildSystem.getProjectDir();
   return pluginManager.invokeRendererHook(pluginId, hookName, payload || {}, {
     projectDir,
     assets: collectProjectAssets(projectDir),
     logger: createPluginLogger(pluginId),
-  });
-}
-
-async function invokeAudioConvertHook(payload = {}) {
-  const pluginId = resolveAudioConverterPluginId(payload.pluginId);
-  if (!pluginId) {
-    return { ok: false, error: 'audio converter plugin is not available' };
-  }
-  return invokeRendererPluginHook(pluginId, 'convertAudio', {
-    sourcePath: payload?.sourcePath,
-    options: payload?.options || {},
   });
 }
 
@@ -351,18 +316,14 @@ function pluginSupportsRole(plugin, roleId) {
   const role = String(roleId || '').trim();
   if (!role) return false;
   const roles = Array.isArray(plugin?.roles) ? plugin.roles : [];
-  if (roles.some((entry) => entry?.id === role)) return true;
-  const types = Array.isArray(plugin?.pluginTypes) ? plugin.pluginTypes : [];
-  if (role === 'builder') return types.includes('build');
-  if (role === 'testplay') return types.includes('emulator');
-  return false;
+  return roles.some((entry) => entry?.id === role);
 }
 
-function resolvePluginForRole(roleId, fallbackType) {
+function resolvePluginForRole(roleId) {
   let pluginId = buildSystem.getPluginRole(roleId);
   if (!pluginId) {
     const fallback = pluginManager.listPlugins().find(
-      (p) => p.enabled && pluginSupportsRole(p, roleId) && (!fallbackType || p.pluginTypes?.includes(fallbackType)),
+      (p) => p.enabled && pluginSupportsRole(p, roleId),
     );
     if (fallback) {
       pluginId = fallback.id;
@@ -973,69 +934,6 @@ ipcMain.handle('res:writeAssetFile', async (_event, payload) => {
     return { ok: true, ...result };
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
-  }
-});
-
-ipcMain.handle('res:previewConvertAudio', async (_event, payload) => {
-  let outPath = '';
-  try {
-    const convertResult = await invokeAudioConvertHook(payload || {});
-
-    if (!convertResult?.ok) {
-      return { ok: false, error: convertResult?.error || 'audio preview conversion failed' };
-    }
-
-    outPath = String(convertResult?.result?.outputPath || convertResult?.outputPath || '');
-    if (!outPath || !fs.existsSync(outPath)) {
-      return { ok: false, error: 'audio converter did not produce output file' };
-    }
-
-    const data = fs.readFileSync(outPath);
-    const dataUrl = `data:audio/wav;base64,${data.toString('base64')}`;
-    return { ok: true, dataUrl };
-  } catch (err) {
-    return { ok: false, error: String(err?.message || err) };
-  } finally {
-    try {
-      if (outPath && fs.existsSync(outPath)) fs.unlinkSync(outPath);
-    } catch (_) {}
-  }
-});
-
-ipcMain.handle('res:convertAndWriteAudioAsset', async (_event, payload) => {
-  let convertedPath = '';
-  try {
-    const projectDir = buildSystem.getProjectDir();
-    const convertResult = await invokeAudioConvertHook(payload || {});
-
-    if (!convertResult?.ok) {
-      return { ok: false, error: convertResult?.error || 'audio conversion failed' };
-    }
-
-    convertedPath = String(convertResult?.result?.outputPath || convertResult?.outputPath || '');
-    if (!convertedPath || !fs.existsSync(convertedPath)) {
-      return { ok: false, error: 'audio converter did not produce output file' };
-    }
-
-    const writeResult = rescompManager.writeAssetIntoRes(projectDir, {
-      sourcePath: convertedPath,
-      targetSubdir: payload?.targetSubdir,
-      targetFileName: payload?.targetFileName,
-      dataUrl: '',
-    });
-    return {
-      ok: true,
-      ...writeResult,
-      warning: convertResult?.result?.warning || convertResult?.warning || '',
-    };
-  } catch (err) {
-    return { ok: false, error: String(err?.message || err) };
-  } finally {
-    try {
-      if (convertedPath && convertedPath !== String(payload?.sourcePath || '') && fs.existsSync(convertedPath)) {
-        fs.unlinkSync(convertedPath);
-      }
-    } catch (_) {}
   }
 });
 
@@ -1928,24 +1826,6 @@ ipcMain.handle('build:getRomPath', async () => {
 
 ipcMain.handle('build:getProjectConfig', async () => {
   return buildSystem.loadProjectConfig();
-});
-
-ipcMain.handle('build:getBuilderPlugin', async () => {
-  return { id: buildSystem.getBuilderPlugin() };
-});
-
-ipcMain.handle('build:setBuilderPlugin', async (_event, { id }) => {
-  buildSystem.setBuilderPlugin(id || null);
-  return { ok: true };
-});
-
-ipcMain.handle('build:getEmulatorPlugin', async () => {
-  return { id: buildSystem.getEmulatorPlugin() };
-});
-
-ipcMain.handle('build:setEmulatorPlugin', async (_event, { id }) => {
-  buildSystem.setEmulatorPlugin(id || null);
-  return { ok: true };
 });
 
 ipcMain.handle('plugins:getRoles', async () => {

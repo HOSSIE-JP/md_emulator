@@ -14,13 +14,13 @@ export function activatePlugin({ plugin, api, logger, registerCapability }) {
     };
   }
 
-  async function previewConvertAudio(payload) {
+  async function previewAudioDataUrl(payload) {
     const converted = await convertAudio(payload);
     if (!converted?.ok) return converted;
     return api.electronAPI.readTempFileAsDataUrl(converted.outputPath, { deleteAfter: true });
   }
 
-  async function convertAndWriteAudioAsset(payload) {
+  async function convertAndWriteAsset(payload) {
     let convertedPath = '';
     try {
       const converted = await convertAudio(payload);
@@ -46,8 +46,8 @@ export function activatePlugin({ plugin, api, logger, registerCapability }) {
   registerCapability('audio-convert-ui', {
     openAudioConvertModal: (pending) => api.openAudioConvertModal({
       ...pending,
-      previewConvertAudio,
-      convertAndWriteAudioAsset,
+      previewAudioDataUrl,
+      convertAndWriteAsset,
     }),
   });
 

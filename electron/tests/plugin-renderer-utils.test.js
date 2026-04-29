@@ -36,6 +36,8 @@ test('audio-converter declares renderer-invokable main hook capability', () => {
   assert.deepEqual(manifest.mainApi.capabilities, ['audio-convert']);
   assert.match(rendererSource, /invokeHook\(plugin\.id,\s*['"]convertAudio['"]/);
   assert.match(rendererSource, /readTempFileAsDataUrl/);
+  assert.doesNotMatch(rendererSource, /previewConvertAudio/);
+  assert.doesNotMatch(rendererSource, /convertAndWriteAudioAsset/);
   assert.doesNotMatch(rendererSource, /pluginId:\s*['"]audio-converter['"]/);
 });
 

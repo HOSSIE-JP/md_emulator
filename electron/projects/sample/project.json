@@ -4,6 +4,8 @@
   "serial": "GM 00000000-00",
   "region": "JUE",
   "generatedAt": "2026-04-29T00:30:24.531Z",
-  "builderPlugin": "slideshow",
-  "emulatorPlugin": "standard-emulator"
+  "pluginRoles": {
+    "builder": "slideshow",
+    "testplay": "standard-emulator"
+  }
 }

@@ -49,24 +49,26 @@ test('listPlugins reads user plugins and normalizes manifest fields', () => {
   assert.deepEqual(alpha.hooks, ['getTab', 'onActivate']);
   assert.deepEqual(alpha.dependencies, ['beta', 'gamma']);
   assert.deepEqual(alpha.permissions, ['project.read', 'res.write']);
-  assert.deepEqual(alpha.roles, [{ id: 'custom-role', label: 'Custom Role', exclusive: true, order: 50, inferred: false }]);
+  assert.deepEqual(alpha.roles, [{ id: 'custom-role', label: 'Custom Role', exclusive: true, order: 50 }]);
   assert.equal(alpha.enabled, true);
   assert.equal(alpha.isUserPlugin, true);
 });
 
-test('listPlugins infers v2.4 roles from legacy plugin types and hooks', () => {
+test('listPlugins uses only declared v2.4 roles', () => {
   const userData = makeTempUserData();
   writePlugin(userData, 'builder', { types: ['build'] });
-  writePlugin(userData, 'emulator', { types: ['emulator'], hooks: ['onTestPlay'] });
+  writePlugin(userData, 'emulator', {
+    types: ['emulator'],
+    hooks: ['onTestPlay'],
+    roles: [{ id: 'testplay', label: 'Test Play', exclusive: true, order: 20 }],
+  });
 
   const pluginManager = loadWithMockedElectron(path.join(__dirname, '..', 'plugin-manager.js'), { userData });
   const builder = pluginManager.listPlugins().find((plugin) => plugin.id === 'builder');
   const emulator = pluginManager.listPlugins().find((plugin) => plugin.id === 'emulator');
 
-  assert.equal(builder.roles[0].id, 'builder');
-  assert.equal(builder.roles[0].inferred, true);
+  assert.deepEqual(builder.roles, []);
   assert.equal(emulator.roles[0].id, 'testplay');
-  assert.equal(emulator.roles[0].inferred, true);
 });
 
 test('setEnabledWithDependencies enables dependencies and reports missing ones', () => {

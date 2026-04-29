@@ -8,14 +8,14 @@
  *   electron/plugins/<id>/manifest.json
  *   electron/plugins/<id>/index.js
  *
- * manifest v2 (後方互換あり):
+ * manifest v2.4:
  *   {
  *     "id": "plugin-id",
  *     "name": "Plugin Name",
  *     "description": "...",
  *     "version": "1.0.0",
- *     "type": "build",                // 旧式: 単一タイプ
- *     "types": ["build", "logger"], // 新式: 複数タイプ
+ *     "types": ["build", "logger"],
+ *     "roles": [{ "id": "builder", "label": "Build", "exclusive": true }],
  *     "hooks": ["onBuildStart", "onBuildLog", "onBuildEnd"]
  *   }
  */
@@ -61,9 +61,6 @@ function writeState(s) {
 function normalizePluginTypes(manifest) {
   if (Array.isArray(manifest.types) && manifest.types.length > 0) {
     return manifest.types.map((t) => String(t || '').trim()).filter(Boolean);
-  }
-  if (manifest.type) {
-    return [String(manifest.type).trim()].filter(Boolean);
   }
   return ['unknown'];
 }
@@ -113,11 +110,11 @@ function normalizePermissions(manifest) {
   ));
 }
 
-function normalizeRoles(manifest, pluginTypes, hooks) {
+function normalizeRoles(manifest) {
   const roles = [];
   const seen = new Set();
 
-  const addRole = (role, inferred = false) => {
+  const addRole = (role) => {
     if (!role) return;
     const id = String(typeof role === 'string' ? role : role.id || '').trim();
     if (!id || seen.has(id)) return;
@@ -133,19 +130,11 @@ function normalizeRoles(manifest, pluginTypes, hooks) {
         ? Boolean(role.exclusive)
         : true,
       order: Number.isFinite(order) ? order : (id === 'builder' ? 10 : id === 'testplay' ? 20 : 100),
-      inferred,
     });
   };
 
   if (Array.isArray(manifest.roles)) {
-    manifest.roles.forEach((role) => addRole(role, false));
-  }
-
-  if (pluginTypes.includes('build')) {
-    addRole({ id: 'builder', label: 'Build', exclusive: true, order: 10 }, true);
-  }
-  if (pluginTypes.includes('emulator') || hooks.includes('onTestPlay')) {
-    addRole({ id: 'testplay', label: 'Test Play', exclusive: true, order: 20 }, true);
+    manifest.roles.forEach((role) => addRole(role));
   }
 
   return roles.sort((a, b) => {
@@ -261,7 +250,7 @@ function listPlugins() {
       const hooks = normalizeHooks(manifest);
       const rendererInfo = normalizeRenderer(manifest, pluginDir);
       const mainApi = normalizeMainApi(manifest);
-      const roles = normalizeRoles(manifest, pluginTypes, hooks);
+      const roles = normalizeRoles(manifest);
 
       return {
         id,

@@ -200,7 +200,7 @@ function ensureProjectStructure(projectDir, config = {}, options = {}) {
         existing = {};
       }
     }
-    const merged = Object.assign({}, existing, meta);
+    const merged = normalizeProjectConfigForSave(Object.assign({}, existing, meta));
     fs.writeFileSync(cfgPath, JSON.stringify(merged, null, 2), 'utf-8');
   }
 
@@ -691,12 +691,19 @@ function loadProjectConfig() {
   return loadProjectConfigFromDir(getProjectDir());
 }
 
+function normalizeProjectConfigForSave(config = {}) {
+  const next = { ...(config || {}) };
+  delete next.builderPlugin;
+  delete next.emulatorPlugin;
+  return next;
+}
+
 function saveProjectConfig(patch) {
   const projectDir = getProjectDir();
   ensureDirSync(projectDir);
   const cfgPath = path.join(projectDir, 'project.json');
   const current = loadProjectConfig();
-  const merged = Object.assign({}, current, patch);
+  const merged = normalizeProjectConfigForSave(Object.assign({}, current, patch));
   fs.writeFileSync(cfgPath, JSON.stringify(merged, null, 2), 'utf-8');
   return merged;
 }
@@ -711,10 +718,7 @@ function getPluginRole(roleId) {
   if (!role) return null;
   const cfg = loadProjectConfig();
   const pluginRoles = (cfg.pluginRoles && typeof cfg.pluginRoles === 'object') ? cfg.pluginRoles : {};
-  if (pluginRoles[role]) return pluginRoles[role];
-  if (role === 'builder') return cfg.builderPlugin || null;
-  if (role === 'testplay') return cfg.emulatorPlugin || null;
-  return null;
+  return pluginRoles[role] || null;
 }
 
 function setPluginRole(roleId, id) {
@@ -725,30 +729,7 @@ function setPluginRole(roleId, id) {
     ...((cfg.pluginRoles && typeof cfg.pluginRoles === 'object') ? cfg.pluginRoles : {}),
     [role]: id || null,
   };
-  const patch = { pluginRoles: nextRoles };
-  if (role === 'builder') patch.builderPlugin = id || null;
-  if (role === 'testplay') patch.emulatorPlugin = id || null;
-  return saveProjectConfig(patch);
-}
-
-/** プロジェクト毎のビルダープラグイン ID を取得 (未設定なら null) */
-function getBuilderPlugin() {
-  return getPluginRole('builder');
-}
-
-/** プロジェクト毎のビルダープラグイン ID を保存 */
-function setBuilderPlugin(id) {
-  setPluginRole('builder', id || null);
-}
-
-/** プロジェクト毎のエミュレータープラグイン ID を取得 (未設定なら null) */
-function getEmulatorPlugin() {
-  return getPluginRole('testplay');
-}
-
-/** プロジェクト毎のエミュレータープラグイン ID を保存 */
-function setEmulatorPlugin(id) {
-  setPluginRole('testplay', id || null);
+  return saveProjectConfig({ pluginRoles: nextRoles });
 }
 
 module.exports = {
@@ -769,13 +750,10 @@ module.exports = {
   getLastRomPath,
   loadProjectConfig,
   saveProjectConfig,
+  normalizeProjectConfigForSave,
   getPluginRoles,
   getPluginRole,
   setPluginRole,
-  getBuilderPlugin,
-  setBuilderPlugin,
-  getEmulatorPlugin,
-  setEmulatorPlugin,
   getSampleSourceCode,
   stripAnsi,
   sanitizeBuildLogLine,

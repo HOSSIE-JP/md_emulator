@@ -696,10 +696,7 @@ function pluginSupportsRole(plugin, roleId) {
   const role = String(roleId || '').trim();
   if (!role) return false;
   const roles = Array.isArray(plugin?.roles) ? plugin.roles : [];
-  if (roles.some((entry) => entry?.id === role)) return true;
-  if (role === 'builder') return pluginSupportsType(plugin, 'build');
-  if (role === 'testplay') return pluginSupportsType(plugin, 'emulator');
-  return false;
+  return roles.some((entry) => entry?.id === role);
 }
 
 function getRoleDefinitions() {
@@ -716,12 +713,6 @@ function getRoleDefinitions() {
       });
     });
   });
-  if (!byId.has('builder') && pluginState.plugins.some((plugin) => pluginSupportsType(plugin, 'build'))) {
-    byId.set('builder', { id: 'builder', label: 'Build', exclusive: true, order: 10 });
-  }
-  if (!byId.has('testplay') && pluginState.plugins.some((plugin) => pluginSupportsType(plugin, 'emulator'))) {
-    byId.set('testplay', { id: 'testplay', label: 'Test Play', exclusive: true, order: 20 });
-  }
   return Array.from(byId.values()).sort((a, b) => {
     if (a.order !== b.order) return a.order - b.order;
     return a.id.localeCompare(b.id, 'ja');
@@ -1268,11 +1259,7 @@ async function setActiveBuilderPlugin(id) {
   pluginState.activeBuilderPlugin = id || null;
   pluginState.activeRoles = { ...(pluginState.activeRoles || {}), builder: id || null };
   try {
-    if (window.electronAPI.setPluginRole) {
-      await window.electronAPI.setPluginRole('builder', id || null);
-    } else {
-      await window.electronAPI.setBuilderPlugin(id || null);
-    }
+    await window.electronAPI.setPluginRole('builder', id || null);
   } catch (_) {}
   updateBuildButtonLabel();
   applyBuildAvailability();
@@ -1284,11 +1271,7 @@ async function setActiveEmulatorPlugin(id) {
   pluginState.activeEmulatorPlugin = id || null;
   pluginState.activeRoles = { ...(pluginState.activeRoles || {}), testplay: id || null };
   try {
-    if (window.electronAPI.setPluginRole) {
-      await window.electronAPI.setPluginRole('testplay', id || null);
-    } else {
-      await window.electronAPI.setEmulatorPlugin(id || null);
-    }
+    await window.electronAPI.setPluginRole('testplay', id || null);
     setPluginRoleStatus('✓ Emulator プラグイン設定を保存しました', 'ok');
   } catch (err) {
     setPluginRoleStatus(`✕ Emulator プラグイン保存失敗: ${err?.message || err}`, 'err');
@@ -1330,22 +1313,8 @@ async function loadPlugins() {
     pluginState.activeRoles = {};
   }
 
-  // プロジェクトに保存されているビルダーを読み込む
-  try {
-    const saved = await window.electronAPI.getBuilderPlugin();
-    pluginState.activeBuilderPlugin = pluginState.activeRoles.builder || saved.id || null;
-    pluginState.activeRoles.builder = pluginState.activeBuilderPlugin;
-  } catch (_) {
-    pluginState.activeBuilderPlugin = pluginState.activeRoles.builder || null;
-  }
-
-  try {
-    const saved = await window.electronAPI.getEmulatorPlugin();
-    pluginState.activeEmulatorPlugin = pluginState.activeRoles.testplay || saved.id || null;
-    pluginState.activeRoles.testplay = pluginState.activeEmulatorPlugin;
-  } catch (_) {
-    pluginState.activeEmulatorPlugin = pluginState.activeRoles.testplay || null;
-  }
+  pluginState.activeBuilderPlugin = pluginState.activeRoles.builder || null;
+  pluginState.activeEmulatorPlugin = pluginState.activeRoles.testplay || null;
 
   // 未設定 & スライドショープラグインが有効なら自動でデフォルトに設定
   if (!pluginState.activeBuilderPlugin) {
@@ -1355,7 +1324,7 @@ async function loadPlugins() {
     if (defaultBuild) {
       pluginState.activeBuilderPlugin = defaultBuild.id;
       pluginState.activeRoles.builder = defaultBuild.id;
-      try { await window.electronAPI.setPluginRole?.('builder', defaultBuild.id); } catch (_) {}
+      try { await window.electronAPI.setPluginRole('builder', defaultBuild.id); } catch (_) {}
     }
   }
 
@@ -1367,7 +1336,7 @@ async function loadPlugins() {
     if (defaultEmulator) {
       pluginState.activeEmulatorPlugin = defaultEmulator.id;
       pluginState.activeRoles.testplay = defaultEmulator.id;
-      try { await window.electronAPI.setPluginRole?.('testplay', defaultEmulator.id); } catch (_) {}
+      try { await window.electronAPI.setPluginRole('testplay', defaultEmulator.id); } catch (_) {}
     }
   }
 
@@ -1378,12 +1347,12 @@ async function loadPlugins() {
   if (pluginState.activeBuilderPlugin && !buildIds.has(pluginState.activeBuilderPlugin)) {
     pluginState.activeBuilderPlugin = null;
     pluginState.activeRoles.builder = null;
-    try { await window.electronAPI.setPluginRole?.('builder', null); } catch (_) {}
+    try { await window.electronAPI.setPluginRole('builder', null); } catch (_) {}
   }
   if (pluginState.activeEmulatorPlugin && !emulatorIds.has(pluginState.activeEmulatorPlugin)) {
     pluginState.activeEmulatorPlugin = null;
     pluginState.activeRoles.testplay = null;
-    try { await window.electronAPI.setPluginRole?.('testplay', null); } catch (_) {}
+    try { await window.electronAPI.setPluginRole('testplay', null); } catch (_) {}
   }
 
   await activatePluginRenderers();
@@ -1441,7 +1410,7 @@ function renderPluginRoleSettings() {
       if (roleId === 'builder') pluginState.activeBuilderPlugin = nextId;
       if (roleId === 'testplay') pluginState.activeEmulatorPlugin = nextId;
       try {
-        await window.electronAPI.setPluginRole?.(roleId, nextId);
+        await window.electronAPI.setPluginRole(roleId, nextId);
         setPluginRoleStatus(`✓ ${roleId} プラグイン設定を保存しました`, 'ok');
       } catch (err) {
         setPluginRoleStatus(`✕ ${roleId} プラグイン保存失敗: ${err?.message || err}`, 'err');
@@ -1541,7 +1510,7 @@ function renderPluginList() {
       Object.entries(pluginState.activeRoles || {}).forEach(([roleId, activeId]) => {
         if (!desired && activeId === plugin.id) {
           pluginState.activeRoles[roleId] = null;
-          try { window.electronAPI.setPluginRole?.(roleId, null); } catch (_) {}
+          try { window.electronAPI.setPluginRole(roleId, null); } catch (_) {}
         }
       });
       await loadPlugins();
@@ -5253,8 +5222,7 @@ async function applyAudioConvertNormalizePreview() {
   if (el.btnAudioConvertNormalizeApply) el.btnAudioConvertNormalizeApply.disabled = true;
 
   try {
-    const previewConvertAudio = pending.previewConvertAudio || window.electronAPI.previewConvertAudio;
-    const result = await previewConvertAudio({
+    const result = await pending.previewAudioDataUrl({
       sourcePath: pending.picked.sourcePath,
       options: {
         trimStartSec: null,
@@ -5369,8 +5337,7 @@ async function applyAudioConvertModal() {
   };
 
   if (el.audioConvertHint) el.audioConvertHint.textContent = '音声を変換しています...';
-  const convertAndWriteAudioAsset = pending.convertAndWriteAudioAsset || window.electronAPI.convertAndWriteAudioAsset;
-  const copyResult = await convertAndWriteAudioAsset(payload);
+  const copyResult = await pending.convertAndWriteAsset(payload);
   if (!copyResult?.ok) {
     if (el.audioConvertHint) el.audioConvertHint.textContent = `変換失敗: ${copyResult?.error || 'unknown'}`;
     return;

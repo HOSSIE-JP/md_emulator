@@ -12,7 +12,6 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.equal(typeof api.openRomDialog, 'function');
   assert.equal(typeof api.generateProject, 'function');
   assert.equal(typeof api.listResDefinitions, 'function');
-  assert.equal(typeof api.convertAndWriteAudioAsset, 'function');
   assert.equal(typeof api.pickFile, 'function');
   assert.equal(typeof api.readTempFileAsDataUrl, 'function');
   assert.equal(typeof api.listPlugins, 'function');
@@ -23,7 +22,6 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.equal(typeof api.exportHtml, 'function');
 
   await api.readRomFile('game.bin');
-  await api.setBuilderPlugin('standard-builder');
   await api.pickFile({ title: 'Pick' });
   await api.readTempFileAsDataUrl('tmp.wav', { deleteAfter: true });
   await api.setPluginRole('builder', 'slideshow');
@@ -31,8 +29,7 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   await api.invokePluginHook('audio-converter', 'convertAudio', { sourcePath: 'in.wav' });
   await api.createCodeEntry({ path: 'src/new.c', type: 'file' });
 
-  assert.deepEqual(invocations.slice(-7), [
-    { channel: 'build:setBuilderPlugin', args: [{ id: 'standard-builder' }] },
+  assert.deepEqual(invocations.slice(-6), [
     { channel: 'dialog:pickFile', args: [{ title: 'Pick' }] },
     { channel: 'res:readTempFileAsDataUrl', args: ['tmp.wav', { deleteAfter: true }] },
     { channel: 'plugins:setRole', args: [{ roleId: 'builder', id: 'slideshow' }] },

@@ -66,42 +66,36 @@ test('project plugin selection is stored in project config', () => {
   const buildSystem = loadBuildSystem(userData);
 
   buildSystem.createProject(projectDir, { title: 'Demo' }, 'int main(void) { return 0; }\n');
-  buildSystem.setBuilderPlugin('standard-builder');
-  buildSystem.setEmulatorPlugin('standard-emulator');
+  buildSystem.setPluginRole('builder', 'standard-builder');
+  buildSystem.setPluginRole('testplay', 'standard-emulator');
 
-  assert.equal(buildSystem.getBuilderPlugin(), 'standard-builder');
-  assert.equal(buildSystem.getEmulatorPlugin(), 'standard-emulator');
   assert.equal(buildSystem.getPluginRole('builder'), 'standard-builder');
   assert.equal(buildSystem.getPluginRole('testplay'), 'standard-emulator');
 
   const config = JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf-8'));
-  assert.equal(config.builderPlugin, 'standard-builder');
-  assert.equal(config.emulatorPlugin, 'standard-emulator');
   assert.deepEqual(config.pluginRoles, {
     builder: 'standard-builder',
     testplay: 'standard-emulator',
   });
+  assert.equal(Object.prototype.hasOwnProperty.call(config, 'builderPlugin'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(config, 'emulatorPlugin'), false);
 });
 
-test('pluginRoles take precedence while legacy fields remain readable', () => {
+test('pluginRoles are the only plugin role storage', () => {
   const userData = makeTempDir('md-editor-plugin-roles-test-');
   const projectDir = path.join(makeTempDir('md-editor-plugin-roles-project-test-'), 'demo');
   const buildSystem = loadBuildSystem(userData);
 
   buildSystem.createProject(projectDir, { title: 'Demo' }, 'int main(void) { return 0; }\n');
-  buildSystem.saveProjectConfig({
-    builderPlugin: 'legacy-builder',
-    emulatorPlugin: 'legacy-emulator',
-    pluginRoles: { builder: 'role-builder' },
-  });
+  buildSystem.saveProjectConfig({ pluginRoles: { builder: 'role-builder' } });
 
-  assert.equal(buildSystem.getBuilderPlugin(), 'role-builder');
-  assert.equal(buildSystem.getEmulatorPlugin(), 'legacy-emulator');
+  assert.equal(buildSystem.getPluginRole('builder'), 'role-builder');
+  assert.equal(buildSystem.getPluginRole('testplay'), null);
 
   buildSystem.setPluginRole('testplay', 'role-emulator');
   const config = JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf-8'));
   assert.equal(config.pluginRoles.testplay, 'role-emulator');
-  assert.equal(config.emulatorPlugin, 'role-emulator');
+  assert.equal(Object.prototype.hasOwnProperty.call(config, 'emulatorPlugin'), false);
 });
 
 test('buildProject fails fast when the toolchain path is missing', async () => {
