@@ -56,6 +56,21 @@ test('asset-manager declares v2.4 asset provider capabilities', () => {
   assert.ok(manifest.renderer.capabilities.includes('image-import-pipeline'));
   assert.match(rendererSource, /registerCapability\(['"]asset-type-provider['"]/);
   assert.match(rendererSource, /registerCapability\(['"]image-import-pipeline['"]/);
+  assert.match(rendererSource, /paletteSlots\s*=\s*unique\s*\+\s*\(hasTransparent\s*\?\s*1\s*:\s*0\)/);
+  assert.match(rendererSource, /originalIndexed\s*=\s*extractIndexedSourcePalette\(read\.dataUrl\)/);
+  assert.match(rendererSource, /originalIndexed\.format === 'bmp'/);
+  assert.match(rendererSource, /extractIndexedBmpPalette\(dataUrl\)/);
+  assert.match(rendererSource, /encodeBmpSourceAsIndexedPng\(originalIndexed\)/);
+  assert.match(rendererSource, /targetExtension:\s*['"]\.png['"]/);
+  assert.match(rendererSource, /targetMatchesSource\s*=/);
+  assert.match(rendererSource, /convertedDataUrl:\s*bmpDataUrl/);
+  assert.match(rendererSource, /resizeResult\.skipped/);
+  assert.match(rendererSource, /extractIndexedPngPalette\(workingDataUrl\)/);
+  assert.match(rendererSource, /encodeImageDataWithIndexedPalette\(imageData,\s*preserveIndexed\)/);
+  assert.match(rendererSource, /ensureIndexedTransparentIndexUsed\(savedDataUrl,\s*extractIndexedPngPalette\(savedDataUrl\)\)/);
+  assert.match(rendererSource, /indices\[indices\.length - 1\]\s*=\s*0/);
+  assert.match(rendererSource, /savedDataUrl\s*=\s*workingDataUrl/);
+  assert.match(rendererSource, /convertedDataUrl:\s*savedDataUrl/);
 });
 
 test('image-quantize utility functions snap and index colors', async () => {

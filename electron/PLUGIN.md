@@ -845,6 +845,39 @@ module.exports = { onBuildEnd };
 
 `window.prompt()` / `alert()` は Electron の埋め込み renderer で期待通り動かないことがあるため、plugin UI では `api.createModal()` を使います。
 
+### 画像 import pipeline と保存形式
+
+画像アセットを登録する plugin は、変換結果の `dataUrl` だけでなく保存形式も明示してください。`image-import-pipeline.convertToIndexed16()` のような capability が `{ convertedDataUrl, targetExtension }` を返す場合、呼び出し側は `targetFileName` の拡張子を `targetExtension` に合わせます。これを怠ると、中身は BMP なのにファイル名が `.png`、またはその逆になり、preview / ResComp / palette 表示のどこかで原因が分かりにくい不具合になります。
+
+```js
+const converted = await imagePipeline.convertToIndexed16({ sourcePath, targetSize });
+const ext = converted.targetExtension || '.png';
+const copyResult = await api.electronAPI.writeAssetFile({
+  sourcePath,
+  targetSubdir: 'gfx',
+  targetFileName: `${symbol}${ext}`,
+  dataUrl: converted.convertedDataUrl || '',
+});
+```
+
+変換を行わず元ファイルをそのままコピーしたい場合は、`convertedDataUrl: ''` を返します。`writeAssetFile()` は `dataUrl` が空なら `sourcePath` をコピーします。一方、PNG などに変換済みのバイナリを保存したい場合は必ず `convertedDataUrl` を渡します。
+
+標準アセット登録画面とゲーム固有エディタの登録 UI の両方が同じ `image-import-pipeline` を使う可能性があります。片方だけ直すと、もう片方に古い PNG 変換や拡張子固定の経路が残ります。画像 import の仕様を変えたら、標準登録経路と plugin 固有登録経路の両方で `convertedDataUrl` / `targetExtension` / `targetFileName` の扱いを確認してください。
+
+### BMP / PNG palette の扱い
+
+SGDK / ResComp 向け画像では、単に canvas へ描いて `canvas.toDataURL('image/png')` すると indexed palette が失われ、実際に使われている色だけで RGBA PNG へ再構成されます。未使用 palette、特に BMP の palette index 0 を保持したい場合、この経路を通してはいけません。
+
+安全な方針:
+
+- indexed PNG は `PLTE` / `tRNS` / `IDAT` を直接読んで palette と index を扱う
+- indexed BMP は BMP ヘッダー、カラーテーブル、ピクセル index を直接読む
+- BMP を PNG 化する場合は、BMP の index 0 を PNG palette index 0 に固定する
+- 8bit BMP のようにカラーテーブルが256色でも、実使用 index が16色以内なら、使用 index だけを16色以内に remap して indexed PNG として保存できる
+- 変換後に palette preview を見るだけでなく、保存されたファイルを再読込して `PLTE` / BMP カラーテーブルを確認する
+
+リサイズやクリッピングを実施した場合は canvas 経由を避けられないことがあります。その場合でも、元画像が indexed PNG / BMP なら元 palette を参照 palette として保持し、最終的に自前の indexed PNG encoder で保存してください。`imageDataToIndexedPng()` のように実ピクセルから palette を作り直す関数は、未使用 palette を落とすため「最適化してよい画像」にだけ使います。
+
 ### resources.res の重複検査
 
 同じ alias を複数行に登録すると、ResComp 後の assembler で次のようなエラーになります。

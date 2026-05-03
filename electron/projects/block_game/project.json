@@ -1,0 +1,11 @@
+{
+  "title": "SAMPLE",
+  "author": "AUTHOR",
+  "serial": "GM 00000000-00",
+  "region": "JUE",
+  "generatedAt": "2026-05-03T13:20:29.296Z",
+  "pluginRoles": {
+    "builder": "block-game-builder",
+    "testplay": "standard-emulator"
+  }
+}

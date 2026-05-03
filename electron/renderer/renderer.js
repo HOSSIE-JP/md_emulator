@@ -4640,6 +4640,7 @@ async function maybeConvertImageToIndexed16(sourcePath, options = {}) {
     return {
       canceled: false,
       convertedDataUrl: savedDataUrl,
+      targetExtension: '.png',
       originalDataUrl: read.dataUrl,
       warning,
     };
@@ -4669,6 +4670,7 @@ async function maybeConvertImageToIndexed16(sourcePath, options = {}) {
   return {
     canceled: false,
     convertedDataUrl: quantized.dataUrl,
+    targetExtension: '.png',
     originalDataUrl: read.dataUrl,
     warning: `${warning ? `${warning} / ` : ''}減色変換を適用: ${unique} colors -> 16 colors`,
   };
@@ -5373,7 +5375,7 @@ async function submitAssetModal() {
   const targetSubdir = el.assetTargetSubdirInput?.value.trim() || defaultSubDirForType(normalizedType);
   const inputFileName = el.assetTargetFileNameInput?.value.trim() || picked.fileName;
   if (!inputFileName) return;
-  const targetFileName = (normalizedType === 'WAV' && AUDIO_EXTS.includes((picked.ext || '').toLowerCase()))
+  let targetFileName = (normalizedType === 'WAV' && AUDIO_EXTS.includes((picked.ext || '').toLowerCase()))
     ? (String(inputFileName).toLowerCase().endsWith('.wav') ? inputFileName : `${inputFileName.replace(/\.[^.]+$/, '')}.wav`)
     : inputFileName;
 
@@ -5414,6 +5416,9 @@ async function submitAssetModal() {
       return;
     }
     convertedDataUrl = converted.convertedDataUrl || '';
+    if (converted.targetExtension) {
+      targetFileName = `${targetFileName.replace(/\.[^.]+$/, '')}${converted.targetExtension}`;
+    }
     warning = converted.warning || '';
   }
 

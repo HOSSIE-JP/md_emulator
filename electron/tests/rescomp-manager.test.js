@@ -62,6 +62,19 @@ test('parseResContent parses WAV with omitted out_rate correctly', () => {
   assert.equal(parsed.entries[1].far, 'FALSE');
 });
 
+test('entryToResLine writes XGM2 WAV rate settings', () => {
+  const line = rescomp.entryToResLine({
+    type: 'WAV',
+    name: 'bgm_stage',
+    sourcePath: 'bgm/stage.wav',
+    driver: 'XGM2',
+    outRate: '6650',
+    far: 'TRUE',
+  });
+
+  assert.equal(line, 'WAV bgm_stage bgm/stage.wav XGM2 6650 TRUE');
+});
+
 test('listResDefinitions creates a default resources.res when none exists', () => {
   const projectDir = makeProject();
   const result = rescomp.listResDefinitions(projectDir);

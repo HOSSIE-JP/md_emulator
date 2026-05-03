@@ -133,6 +133,20 @@ VSCode タスクからも起動できます:
 
 Assets ページ上部の `res ディレクトリを開く` ボタンで、現在のプロジェクトの `res/` をエクスプローラーで直接開けます。
 
+### プラグイン開発時の注意
+
+アセット登録やゲーム固有エディタを plugin として追加する場合は、詳細仕様を [`PLUGIN.md`](PLUGIN.md) に集約しています。特に画像 import では、標準 Assets 画面と plugin 固有 UI の両方が同じ converter capability を使うため、片方だけに変換・保存処理を実装しないでください。
+
+画像変換 pipeline は `convertedDataUrl` だけでなく、保存拡張子を表す `targetExtension` も返す設計にすると安全です。BMP を PNG 化する場合は canvas の `toDataURL()` だけに頼ると indexed palette が失われるため、BMP のカラーテーブルとピクセル index、PNG の `PLTE` / `tRNS` を直接扱う実装にしてください。palette index 0 を透明色やシステム上の特別色として扱うゲームでは、保存後のファイルを再読込して palette 0 が維持されていることを確認します。
+
+plugin を変更した後は、少なくとも以下を確認します。
+
+```powershell
+node --check plugins\<plugin-id>\renderer.js
+node --check plugins\<plugin-id>\index.js
+npm test
+```
+
 ---
 
 ## パッケージング (配布ビルド)
