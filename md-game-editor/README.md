@@ -41,7 +41,7 @@ md-game-editor/
 ├── scripts/
 │   ├── copy-pkg.js          # frontend/pkg → md-game-editor/pkg コピー
 │   └── prepare-dist.js      # パッケージ前ビルド (WASM + md-api バイナリ)
-├── sample/                  # サンプルゲームソース (main.c 等)
+├── projects/                # 同梱サンプルプロジェクト
 ├── pkg/                     # 実行時 WASM アセット (自動生成)
 └── bin/                     # 同梱バイナリ (自動生成): md-api.exe 等
 ```
@@ -337,7 +337,7 @@ contextBridge.exposeInMainWorld('myFeatureAPI', {
 
 ### 4. サンプル ROM の差し替え
 
-`md-game-editor/sample/src/main.c` を編集するか、`md-game-editor/sample/` の内容を差し替えます。  
+`md-game-editor/projects/sample_slideshow/src/main.c` を編集するか、`md-game-editor/projects/` 配下のサンプルプロジェクトを差し替えます。  
 ビルドコマンドは `build-system.js` の `buildRom()` が制御しています。
 
 ### 5. 画面レイアウトの変更

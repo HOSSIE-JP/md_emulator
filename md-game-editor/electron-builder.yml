@@ -17,8 +17,13 @@ extraResources:
     to: plugins
     filter:
       - "**/*"
-  - from: projects/sample
-    to: projects/sample
+  - from: projects/sample_block_game
+    to: projects/sample_block_game
+    filter:
+      - "**/*"
+      - "!out/**"
+  - from: projects/sample_slideshow
+    to: projects/sample_slideshow
     filter:
       - "**/*"
       - "!out/**"

@@ -95,6 +95,38 @@ test('createProject can persist an initial builder role', () => {
   assert.deepEqual(config.pluginRoles, { builder: 'slideshow' });
 });
 
+test('default bundled project points at sample slideshow project', () => {
+  const userData = makeTempDir('md-editor-default-project-test-');
+  const buildSystem = loadBuildSystem(userData);
+
+  assert.equal(path.basename(buildSystem.getDefaultProjectDir()), 'sample_slideshow');
+});
+
+test('project startup state requires selection on first run or missing saved project', () => {
+  const userData = makeTempDir('md-editor-startup-project-test-');
+  const buildSystem = loadBuildSystem(userData);
+
+  let startup = buildSystem.getProjectStartupState();
+  assert.equal(startup.hasSavedProject, false);
+  assert.equal(startup.savedProjectExists, false);
+  assert.equal(startup.requiresProjectSelection, true);
+
+  const missingProject = path.join(makeTempDir('md-editor-missing-project-root-'), 'deleted');
+  buildSystem.setProjectDir(missingProject);
+  startup = buildSystem.getProjectStartupState();
+  assert.equal(startup.hasSavedProject, true);
+  assert.equal(startup.savedProjectDir, path.resolve(missingProject));
+  assert.equal(startup.savedProjectExists, false);
+  assert.equal(startup.requiresProjectSelection, true);
+
+  const existingProject = path.join(makeTempDir('md-editor-existing-project-root-'), 'demo');
+  fs.mkdirSync(existingProject, { recursive: true });
+  buildSystem.setProjectDir(existingProject);
+  startup = buildSystem.getProjectStartupState();
+  assert.equal(startup.savedProjectExists, true);
+  assert.equal(startup.requiresProjectSelection, false);
+});
+
 test('pluginRoles are the only plugin role storage', () => {
   const userData = makeTempDir('md-editor-plugin-roles-test-');
   const projectDir = path.join(makeTempDir('md-editor-plugin-roles-project-test-'), 'demo');

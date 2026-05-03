@@ -12,6 +12,9 @@ const { spawn } = require('child_process');
 const { app } = require('electron');
 const setupManager = require('./setup-manager');
 
+const DEFAULT_PROJECT_NAME = 'sample_slideshow';
+const LEGACY_SAMPLE_PROJECT_NAME = 'sample';
+
 function getProjectsRootDir() {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'projects');
@@ -24,7 +27,7 @@ function getLegacySampleProjectDir() {
 }
 
 function getDefaultProjectDir() {
-  return path.join(getProjectsRootDir(), 'sample');
+  return path.join(getProjectsRootDir(), DEFAULT_PROJECT_NAME);
 }
 
 function getStatePath() {
@@ -41,6 +44,21 @@ function readEditorState() {
   } catch (_err) {
     return {};
   }
+}
+
+function getProjectStartupState() {
+  const state = readEditorState();
+  const savedProjectDir = state.currentProjectDir ? path.resolve(state.currentProjectDir) : '';
+  const hasSavedProject = Boolean(savedProjectDir);
+  const savedProjectExists = hasSavedProject && fs.existsSync(savedProjectDir);
+  return {
+    hasSavedProject,
+    savedProjectDir,
+    savedProjectExists,
+    requiresProjectSelection: !savedProjectExists,
+    defaultProjectDir: getDefaultProjectDir(),
+    projectsRootDir: ensureProjectsRootDir(),
+  };
 }
 
 function writeEditorState(nextState) {
@@ -145,9 +163,13 @@ const ROMHeader rom_header = {
 }
 
 function getSampleSourcePath() {
-  const currentRootSample = path.join(getProjectsRootDir(), 'sample', 'src', 'main.c');
+  const currentRootSample = path.join(getProjectsRootDir(), DEFAULT_PROJECT_NAME, 'src', 'main.c');
   if (fs.existsSync(currentRootSample)) {
     return currentRootSample;
+  }
+  const legacyRootSample = path.join(getProjectsRootDir(), LEGACY_SAMPLE_PROJECT_NAME, 'src', 'main.c');
+  if (fs.existsSync(legacyRootSample)) {
+    return legacyRootSample;
   }
   return path.join(getLegacySampleProjectDir(), 'src', 'main.c');
 }
@@ -746,6 +768,7 @@ function setPluginRole(roleId, id) {
 
 module.exports = {
   getDefaultProjectDir,
+  getProjectStartupState,
   getProjectDir,
   setProjectDir,
   getProjectInfo,

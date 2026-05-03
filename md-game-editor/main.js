@@ -2047,6 +2047,14 @@ ipcMain.handle('project:getCurrent', async () => {
   }
 });
 
+ipcMain.handle('project:getStartupState', async () => {
+  try {
+    return { ok: true, ...buildSystem.getProjectStartupState() };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 ipcMain.handle('project:list', async () => {
   try {
     return { ok: true, ...buildSystem.listProjects() };
@@ -2090,6 +2098,11 @@ ipcMain.handle('project:createNew', async (_event, payload) => {
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
   }
+});
+
+ipcMain.handle('app:quit', async () => {
+  app.quit();
+  return { ok: true };
 });
 
 app.whenReady().then(() => {

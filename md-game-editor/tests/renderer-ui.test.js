@@ -67,6 +67,20 @@ test('startup selects the first sidebar plugin and project creation exposes buil
   assert.match(renderer, /payload\.config\.pluginRoles\s*=\s*\{\s*builder:\s*selectedBuilder\s*\}/);
 });
 
+test('startup requires project selection and quits when canceled', () => {
+  const renderer = readRendererFile('renderer.js');
+
+  assert.match(renderer, /async function ensureStartupProjectSelection\(\)/);
+  assert.match(renderer, /window\.electronAPI\.getProjectStartupState\?\.\(\)/);
+  assert.match(renderer, /state\.startup\.projectSelectionRequired = requiresSelection/);
+  assert.match(renderer, /const waitingForProject = await ensureStartupProjectSelection\(\)/);
+  assert.match(renderer, /if \(waitingForProject\) \{[\s\S]*return;/);
+  assert.match(renderer, /function cancelRequiredProjectSelection\(\)/);
+  assert.match(renderer, /window\.electronAPI\.quitApp\?\.\(\)/);
+  assert.match(renderer, /if \(cancelRequiredProjectSelection\(\)\) return;[\s\S]*closeModal\(el\.projectPickerModal\)/);
+  assert.match(renderer, /if \(cancelRequiredProjectSelection\(\)\) return;[\s\S]*closeModal\(el\.projectModal\)/);
+});
+
 test('plugin role selectors list installed role plugins regardless of enabled state', () => {
   const renderer = readRendererFile('renderer.js');
 

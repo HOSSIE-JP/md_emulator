@@ -82,6 +82,8 @@ const state = {
   },
   startup: {
     selectedDefaultSidebarPage: false,
+    projectSelectionRequired: false,
+    projectSelected: false,
   },
 };
 
@@ -2228,6 +2230,16 @@ function closeModal(modalEl) {
   modalEl.setAttribute('aria-hidden', 'true');
 }
 
+function quitApp() {
+  window.electronAPI.quitApp?.().catch?.(() => {});
+}
+
+function cancelRequiredProjectSelection() {
+  if (!state.startup.projectSelectionRequired || state.startup.projectSelected) return false;
+  quitApp();
+  return true;
+}
+
 function getModalPanel(modalEl) {
   return modalEl?.querySelector('.app-panel') || null;
 }
@@ -2259,6 +2271,14 @@ async function refreshProjectList() {
   state.project.projectsRootDir = result.projectsRootDir || '';
   state.project.availableProjects = Array.isArray(result.projects) ? result.projects : [];
   return result;
+}
+
+async function loadPluginCatalogForProjectCreation() {
+  try {
+    pluginState.plugins = await window.electronAPI.listPlugins();
+  } catch (_) {
+    pluginState.plugins = [];
+  }
 }
 
 function renderProjectPicker() {
@@ -2295,6 +2315,8 @@ function renderProjectPicker() {
         if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `プロジェクトを開けませんでした: ${result?.error || 'unknown'}`;
         return;
       }
+      state.startup.projectSelected = true;
+      state.startup.projectSelectionRequired = false;
       appendLog('app', `プロジェクトを開きました: ${result.projectDir || project.projectDir || project.projectName}`);
       closeModal(el.projectPickerModal);
       await loadProjectConfig();
@@ -2324,6 +2346,9 @@ function renderProjectPicker() {
 
 async function openProjectPicker() {
   try {
+    if (state.startup.projectSelectionRequired) {
+      await loadPluginCatalogForProjectCreation();
+    }
     await refreshProjectList();
     renderProjectPicker();
     openModal(el.projectPickerModal);
@@ -2332,6 +2357,23 @@ async function openProjectPicker() {
       el.settingsSavedMsg.textContent = `プロジェクト一覧取得失敗: ${err?.message || err}`;
     }
   }
+}
+
+async function ensureStartupProjectSelection() {
+  const result = await window.electronAPI.getProjectStartupState?.();
+  const requiresSelection = !result?.ok || Boolean(result.requiresProjectSelection);
+  state.startup.projectSelectionRequired = requiresSelection;
+  state.startup.projectSelected = !requiresSelection;
+  if (!requiresSelection) return false;
+
+  if (result?.hasSavedProject && !result.savedProjectExists) {
+    appendLog('app', `前回開いていたプロジェクトが見つかりません: ${result.savedProjectDir}`, 'warn');
+  } else {
+    appendLog('app', '初回起動のためプロジェクト選択が必要です。');
+  }
+
+  await openProjectPicker();
+  return true;
 }
 
 async function openCurrentProjectDirectory() {
@@ -6029,6 +6071,8 @@ async function submitProjectModal() {
     }
     return;
   }
+  state.startup.projectSelected = true;
+  state.startup.projectSelectionRequired = false;
   closeModal(el.projectModal);
   await loadProjectConfig();
   await loadResDefinitions({ keepSelection: false });
@@ -6403,15 +6447,28 @@ function bindEvents() {
     el.assetSymbolNameInput.dataset.userEdited = '1';
   });
 
-  el.btnProjectModalClose?.addEventListener('click', () => closeModal(el.projectModal));
-  el.btnProjectModalCancel?.addEventListener('click', () => closeModal(el.projectModal));
+  el.btnProjectModalClose?.addEventListener('click', () => {
+    if (cancelRequiredProjectSelection()) return;
+    closeModal(el.projectModal);
+  });
+  el.btnProjectModalCancel?.addEventListener('click', () => {
+    if (cancelRequiredProjectSelection()) return;
+    closeModal(el.projectModal);
+  });
   el.btnProjectModalCreate?.addEventListener('click', submitProjectModal);
-  el.btnProjectPickerClose?.addEventListener('click', () => closeModal(el.projectPickerModal));
-  el.btnProjectPickerCancel?.addEventListener('click', () => closeModal(el.projectPickerModal));
+  el.btnProjectPickerClose?.addEventListener('click', () => {
+    if (cancelRequiredProjectSelection()) return;
+    closeModal(el.projectPickerModal);
+  });
+  el.btnProjectPickerCancel?.addEventListener('click', () => {
+    if (cancelRequiredProjectSelection()) return;
+    closeModal(el.projectPickerModal);
+  });
 
   document.querySelectorAll('[data-modal-close]').forEach((node) => {
     node.addEventListener('click', () => {
       const modalId = node.getAttribute('data-modal-close');
+      if ((modalId === 'projectModal' || modalId === 'projectPickerModal') && cancelRequiredProjectSelection()) return;
       closeModal($(modalId));
     });
   });
@@ -6628,6 +6685,7 @@ function bindEvents() {
       }
       if (el.projectPickerModal?.classList.contains('open')) {
         e.preventDefault();
+        if (cancelRequiredProjectSelection()) return;
         closeModal(el.projectPickerModal);
         return;
       }
@@ -6638,6 +6696,7 @@ function bindEvents() {
       }
       if (el.projectModal?.classList.contains('open')) {
         e.preventDefault();
+        if (cancelRequiredProjectSelection()) return;
         closeModal(el.projectModal);
         return;
       }
@@ -6667,6 +6726,11 @@ async function bootstrap() {
   setPreviewPanelOpen(true);
   setAccordionOpen('params', true);
   setAccordionOpen('preview', true);
+  const waitingForProject = await ensureStartupProjectSelection();
+  if (waitingForProject) {
+    renderLogPanel();
+    return;
+  }
   await loadProjectConfig();
   await refreshProjectList();
   await loadResDefinitions({ keepSelection: false });

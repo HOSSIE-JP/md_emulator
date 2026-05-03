@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteTempFile: (sourcePath) => ipcRenderer.invoke('res:deleteTempFile', sourcePath),
   writeAssetFile: (payload) => ipcRenderer.invoke('res:writeAssetFile', payload),
   getCurrentProject: () => ipcRenderer.invoke('project:getCurrent'),
+  getProjectStartupState: () => ipcRenderer.invoke('project:getStartupState'),
   listProjects: () => ipcRenderer.invoke('project:list'),
   openExistingProject: (payload) => ipcRenderer.invoke('project:openExisting', payload),
   createNewProject: (payload) => ipcRenderer.invoke('project:createNew', payload),
@@ -89,4 +90,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // --- エクスポート ---
   exportRom: () => ipcRenderer.invoke('export:rom'),
   exportHtml: () => ipcRenderer.invoke('export:html'),
+  quitApp: () => ipcRenderer.invoke('app:quit'),
 });
