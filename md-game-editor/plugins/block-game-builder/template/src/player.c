@@ -8,6 +8,8 @@
 /* 繧ｰ繝ｭ繝ｼ繝舌Ν螟画焚螳夂ｾｩ */
 Paddle paddles[MAX_PLAYERS];
 
+#define PADDLE_FAST_BUTTONS (BUTTON_A | BUTTON_B | BUTTON_C)
+
 /* ===================================================================
  * 蛻晄悄蛹・
  * =================================================================== */
@@ -34,10 +36,12 @@ void playerUpdate(u16 joy1, u16 joy2)
     /* --- Player 1 --- */
     if (paddles[0].active)
     {
+        fix16 speed = (joy1 & PADDLE_FAST_BUTTONS) ? (PADDLE_SPEED * 2) : PADDLE_SPEED;
+
         if (joy1 & BUTTON_LEFT)
-            paddles[0].x -= PADDLE_SPEED;
+            paddles[0].x -= speed;
         if (joy1 & BUTTON_RIGHT)
-            paddles[0].x += PADDLE_SPEED;
+            paddles[0].x += speed;
 
         /* 逕ｻ髱｢遶ｯ繧ｯ繝ｩ繝ｳ繝・*/
         if (paddles[0].x < FIX16(0))
@@ -49,10 +53,12 @@ void playerUpdate(u16 joy1, u16 joy2)
     /* --- Player 2 --- */
     if (paddles[1].active && num_players >= 2)
     {
+        fix16 speed = (joy2 & PADDLE_FAST_BUTTONS) ? (PADDLE_SPEED * 2) : PADDLE_SPEED;
+
         if (joy2 & BUTTON_LEFT)
-            paddles[1].x -= PADDLE_SPEED;
+            paddles[1].x -= speed;
         if (joy2 & BUTTON_RIGHT)
-            paddles[1].x += PADDLE_SPEED;
+            paddles[1].x += speed;
 
         /* 逕ｻ髱｢遶ｯ繧ｯ繝ｩ繝ｳ繝・*/
         if (paddles[1].x < FIX16(0))

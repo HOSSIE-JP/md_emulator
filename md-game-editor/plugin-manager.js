@@ -2,11 +2,11 @@
 
 /**
  * plugin-manager.js
- * electron/plugins/ フォルダのプラグインを管理する（Main プロセス専用）。
+ * md-game-editor/plugins/ フォルダのプラグインを管理する（Main プロセス専用）。
  *
  * プラグイン構成:
- *   electron/plugins/<id>/manifest.json
- *   electron/plugins/<id>/index.js
+ *   md-game-editor/plugins/<id>/manifest.json
+ *   md-game-editor/plugins/<id>/index.js
  *
  * manifest v2.4:
  *   {
@@ -358,6 +358,33 @@ function setEnabledWithDependencies(id, enabled) {
     changed.push({ id: targetId, enabled: nextEnabled, reason });
   };
 
+  const buildDependentsMap = () => {
+    const dependentsMap = new Map();
+    plugins.forEach((plugin) => {
+      (plugin.dependencies || []).forEach((depId) => {
+        const current = dependentsMap.get(depId) || [];
+        current.push(plugin.id);
+        dependentsMap.set(depId, current);
+      });
+    });
+    return dependentsMap;
+  };
+
+  const disableWithDependents = (targetId, reasonForRoot) => {
+    const dependentsMap = buildDependentsMap();
+    const stack = [targetId];
+    const visited = new Set();
+    while (stack.length > 0) {
+      const currentId = stack.pop();
+      if (visited.has(currentId)) continue;
+      visited.add(currentId);
+
+      setStateEnabled(currentId, false, currentId === targetId ? reasonForRoot : `depends-on:${targetId}`);
+      const dependents = dependentsMap.get(currentId) || [];
+      dependents.forEach((dependerId) => stack.push(dependerId));
+    }
+  };
+
   if (enabled) {
     const stack = [pluginId];
     const visited = new Set();
@@ -383,31 +410,12 @@ function setEnabledWithDependencies(id, enabled) {
       plugins.forEach((plugin) => {
         if (plugin.id === pluginId) return;
         if (pluginSupportsExclusiveRole(plugin, roleId)) {
-          setStateEnabled(plugin.id, false, `exclusive-role:${roleId}`);
+          disableWithDependents(plugin.id, `exclusive-role:${roleId}`);
         }
       });
     });
   } else {
-    const dependentsMap = new Map();
-    plugins.forEach((plugin) => {
-      (plugin.dependencies || []).forEach((depId) => {
-        const current = dependentsMap.get(depId) || [];
-        current.push(plugin.id);
-        dependentsMap.set(depId, current);
-      });
-    });
-
-    const stack = [pluginId];
-    const visited = new Set();
-    while (stack.length > 0) {
-      const currentId = stack.pop();
-      if (visited.has(currentId)) continue;
-      visited.add(currentId);
-
-      setStateEnabled(currentId, false, currentId === pluginId ? 'self' : `depends-on:${pluginId}`);
-      const dependents = dependentsMap.get(currentId) || [];
-      dependents.forEach((dependerId) => stack.push(dependerId));
-    }
+    disableWithDependents(pluginId, 'self');
   }
 
   writeState(state);

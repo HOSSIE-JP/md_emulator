@@ -24,7 +24,7 @@ const appBuildMeta = readAppBuildMeta();
 // ── Portable mode detection ────────────────────────────────────────────────
 // Must run before any app.getPath() call (including those inside require'd modules).
 // Packaged: place a file named "portable" next to the .exe / .app to activate.
-// Dev:      place a file named ".portable" in the electron/ source directory.
+// Dev:      place a file named ".portable" in the md-game-editor/ source directory.
 (function applyPortableMode() {
   let markerExists = false;
   let dataDir;

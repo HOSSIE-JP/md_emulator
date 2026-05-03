@@ -109,6 +109,31 @@ test('setEnabledWithDependencies disables peers for exclusive roles', () => {
   assert.equal(result.changed.find((entry) => entry.id === 'builder-a').reason, 'exclusive-role:builder');
 });
 
+test('setEnabledWithDependencies disables dependents of exclusive role peers', () => {
+  const userData = makeTempUserData();
+  writePlugin(userData, 'builder-a', {
+    roles: [{ id: 'builder', label: 'Build', exclusive: true, order: 10 }],
+    dependencies: ['stage-editor'],
+  });
+  writePlugin(userData, 'stage-editor', {
+    dependencies: ['builder-a'],
+  });
+  writePlugin(userData, 'builder-b', {
+    roles: [{ id: 'builder', label: 'Build', exclusive: true, order: 10 }],
+  });
+
+  const pluginManager = loadWithMockedElectron(path.join(__dirname, '..', 'plugin-manager.js'), { userData });
+  const result = pluginManager.setEnabledWithDependencies('builder-b', true);
+  const state = JSON.parse(fs.readFileSync(path.join(userData, 'plugins-state.json'), 'utf-8'));
+
+  assert.equal(result.ok, true);
+  assert.equal(state['builder-a'].enabled, false);
+  assert.equal(state['stage-editor'].enabled, false);
+  assert.equal(state['builder-b']?.enabled ?? true, true);
+  assert.equal(result.changed.find((entry) => entry.id === 'builder-a').reason, 'exclusive-role:builder');
+  assert.equal(result.changed.find((entry) => entry.id === 'stage-editor').reason, 'depends-on:builder-a');
+});
+
 test('setExclusiveRoleSelection enables the selected plugin and disables role peers', () => {
   const userData = makeTempUserData();
   writePlugin(userData, 'emu-a', {

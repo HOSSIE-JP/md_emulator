@@ -102,5 +102,7 @@ test('project plugin roles restore exclusive plugin enabled state in main proces
   assert.equal(result.ok, true);
   assert.equal(result.synced[0].roleId, 'builder');
   assert.equal(result.synced[0].pluginId, 'block-game-builder');
+  assert.notEqual(pluginState['block-game-builder']?.enabled, false);
+  assert.notEqual(pluginState['block-stage-editor']?.enabled, false);
   assert.equal(pluginState.slideshow.enabled, false);
 });

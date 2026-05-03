@@ -115,10 +115,14 @@ test('block-game-builder generator syncs the template and returns main source', 
   assert.equal(fs.existsSync(path.join(projectDir, 'src', 'score.c')), true);
   {
     const mainSource = result.sourceCode;
+    const playerSource = fs.readFileSync(path.join(projectDir, 'src', 'player.c'), 'utf-8');
     const uiSource = fs.readFileSync(path.join(projectDir, 'src', 'ui.c'), 'utf-8');
     const powerupSource = fs.readFileSync(path.join(projectDir, 'src', 'powerup.c'), 'utf-8');
     assert.doesNotMatch(mainSource, /VDP_updateSprites\(SPR_TOTAL, DMA\)/);
     assert.match(mainSource, /VDP_updateSprites\(SPR_TOTAL, DMA_QUEUE\)/);
+    assert.match(playerSource, /#define PADDLE_FAST_BUTTONS \(BUTTON_A \| BUTTON_B \| BUTTON_C\)/);
+    assert.match(playerSource, /\(joy1 & PADDLE_FAST_BUTTONS\) \? \(PADDLE_SPEED \* 2\) : PADDLE_SPEED/);
+    assert.match(playerSource, /\(joy2 & PADDLE_FAST_BUTTONS\) \? \(PADDLE_SPEED \* 2\) : PADDLE_SPEED/);
     assert.doesNotMatch(uiSource, /VDP_updateSprites\(SPR_(?:TOTAL|TEXT_PANEL_COUNT), DMA\)/);
     assert.match(powerupSource, /barrier_draw_state != \(u8\)barrier_visible/);
   }

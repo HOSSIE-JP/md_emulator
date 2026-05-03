@@ -221,7 +221,7 @@ cargo test -p md-cpu-z80
 
 ## 9) Electron デスクトップ版（土台）を試す
 
-このリポジトリには、既存の `frontend/` と分離した Electron アプリ土台を `electron/` 配下に用意しています。
+このリポジトリには、既存の `frontend/` と分離した Electron アプリ土台を `md-game-editor/` 配下に用意しています。
 
 ### 前提
 
@@ -231,7 +231,7 @@ cargo test -p md-cpu-z80
 ### 初回セットアップ
 
 ```bash
-cd electron
+cd md-game-editor
 npm install
 ```
 
@@ -270,13 +270,13 @@ Electron 版には Plugin Runtime v2 の土台が入りました。
 ### 開発起動
 
 ```bash
-cd electron
+cd md-game-editor
 npm start
 ```
 
 `npm start` は以下を順に実行します。
 
-1. `npm run copy-pkg` で `frontend/pkg/` と `frontend/md-emulator.js` を `electron/` 配下へコピー
+1. `npm run copy-pkg` で `frontend/pkg/` と `frontend/md-emulator.js` を `md-game-editor/` 配下へコピー
 2. Electron アプリを起動
 
 ### 使い方
@@ -288,12 +288,12 @@ npm start
 ### 配布ビルド
 
 ```bash
-cd electron
+cd md-game-editor
 npm run build:mac
 npm run build:win
 ```
 
-出力先は `electron/dist/` です。
+出力先は `md-game-editor/dist/` です。
 cargo test -p md-vdp
 cargo test -p md-apu
 cargo test -p md-core --lib

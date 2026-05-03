@@ -7,7 +7,7 @@
 
 ## Electron Desktop IPC (Plugin Runtime v2, draft)
 
-この章は Electron デスクトップ版 (`electron/main.js` と `electron/preload.js`) の IPC API を示します。
+この章は Electron デスクトップ版 (`md-game-editor/main.js` と `md-game-editor/preload.js`) の IPC API を示します。
 Renderer からは `window.electronAPI` 経由で呼び出します。
 
 ### Build / Plugin 設定

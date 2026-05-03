@@ -6,7 +6,7 @@ applyTo: "**"
 
 > **自律アップデート指示**
 > このファイルはユーザーが MD Game Editor 向けプラグインを生成させるためにプロジェクトに配置する指示書です。
-> - MD Game Editor の `electron/PLUGIN.md` や `electron/plugin-manager.js` が変更されたとき、この指示書の該当部分を更新すること
+> - MD Game Editor の `md-game-editor/PLUGIN.md` や `md-game-editor/plugin-manager.js` が変更されたとき、この指示書の該当部分を更新すること
 > - SGDK の `main()` シグネチャや API が変更されたとき、「SGDK コード規約」セクションを更新すること
 > - プラグインシステムのフック仕様が追加・変更されたとき、「フック早見表」を更新すること
 > - 更新後は末尾の「Last Updated」を書き換えること
@@ -99,7 +99,7 @@ module.exports = { generateSource, onBuildStart };
 
 ### renderer.js を持つ場合
 
-Plugin Runtime v2.4 では、Assets / Code / Converter のような機能固有 UI を本体 `electron/renderer/renderer.js` に追加しない。
+Plugin Runtime v2.4 では、Assets / Code / Converter のような機能固有 UI を本体 `md-game-editor/renderer/renderer.js` に追加しない。
 プラグイン配下の `renderer.js` で capability を登録する。
 
 ```js
@@ -124,6 +124,7 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 renderer から main process hook を呼ぶ場合は `hooks` と `mainApi.hooks` の両方に宣言し、`api.plugins.invokeHook()` または `window.electronAPI.invokePluginHook()` を使う。
 asset type / import / image 変換は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として登録する。
 Build / Test Play など単一選択 plugin は `roles` で宣言し、project.json の標準保存先は `pluginRoles` とする。
+単一選択 role で競合 plugin が無効化される場合、その plugin に依存する plugin も同時に無効化される。
 `permissions` は v2.4 では表示・レビュー用途の宣言で、sandbox 強制ではない。
 新規 plugin で本体 `main.js` / `preload.js` / `build-system.js` の個別追記が必要に見える場合は、まず Runtime v2.4 の汎用 API 不足として扱う。
 
@@ -139,7 +140,7 @@ Build / Test Play など単一選択 plugin は `roles` で宣言し、project.j
 
 生成したプラグインフォルダを以下のどちらかに配置するようユーザーに案内する:
 
-- **開発時** → MD Game Editor リポジトリの `electron/plugins/<plugin-id>/`
+- **開発時** → MD Game Editor リポジトリの `md-game-editor/plugins/<plugin-id>/`
 - **パッケージ済みアプリ** → `<userData>/plugins/<plugin-id>/`  
   （Settings > Plugins 画面の「📂 フォルダを開く」から開ける）
 

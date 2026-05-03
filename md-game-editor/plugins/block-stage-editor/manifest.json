@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "types": ["editor"],
   "permissions": ["project.read", "project.write", "res.read", "res.write", "dialog.openFile"],
-  "dependencies": ["image-resize-converter", "image-quantize-converter", "audio-converter"],
+  "dependencies": ["image-resize-converter", "image-quantize-converter", "audio-converter", "block-game-builder"],
   "hooks": [
     "getTab",
     "onActivate",

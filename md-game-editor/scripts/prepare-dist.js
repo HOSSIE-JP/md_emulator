@@ -2,8 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const electronRoot = path.resolve(__dirname, '..');
-const repoRoot = path.resolve(electronRoot, '..');
+const appRoot = path.resolve(__dirname, '..');
+const repoRoot = path.resolve(appRoot, '..');
 
 function runOrThrow(command, args, options) {
   const result = spawnSync(command, args, {
@@ -27,15 +27,15 @@ function copyFile(src, dest) {
 
 function prepareFrontendAssets() {
   console.log('Preparing frontend WASM assets...');
-  runOrThrow(process.execPath, [path.join(electronRoot, 'scripts', 'copy-pkg.js')], {
-    cwd: electronRoot,
+  runOrThrow(process.execPath, [path.join(appRoot, 'scripts', 'copy-pkg.js')], {
+    cwd: appRoot,
   });
 }
 
 function prepareMdApiBinary() {
   const isWin = process.platform === 'win32';
   const sourceBin = path.join(repoRoot, 'target', 'release', isWin ? 'md-api.exe' : 'md-api');
-  const destBin = path.join(electronRoot, 'bin', isWin ? 'md-api.exe' : 'md-api');
+  const destBin = path.join(appRoot, 'bin', isWin ? 'md-api.exe' : 'md-api');
 
   if (!fs.existsSync(sourceBin)) {
     console.log('md-api release binary not found. Building md-api (release)...');
@@ -56,13 +56,13 @@ function prepareMdApiBinary() {
 }
 
 function injectBuildMeta() {
-  runOrThrow(process.execPath, [path.join(electronRoot, 'scripts', 'inject-build-meta.js')], {
-    cwd: electronRoot,
+  runOrThrow(process.execPath, [path.join(appRoot, 'scripts', 'inject-build-meta.js')], {
+    cwd: appRoot,
   });
 }
 
 function main() {
-  console.log('=== Prepare Electron Distribution Assets ===');
+  console.log('=== Prepare MD Game Editor Distribution Assets ===');
   injectBuildMeta();
   prepareFrontendAssets();
   prepareMdApiBinary();

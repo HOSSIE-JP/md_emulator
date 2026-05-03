@@ -1,17 +1,17 @@
 const fs = require('fs');
 const path = require('path');
 
-const electronRoot = path.resolve(__dirname, '..');
-const repoRoot = path.resolve(electronRoot, '..');
+const appRoot = path.resolve(__dirname, '..');
+const repoRoot = path.resolve(appRoot, '..');
 
 const fromPkg = path.join(repoRoot, 'frontend', 'pkg');
-const toPkg = path.join(electronRoot, 'pkg');
+const toPkg = path.join(appRoot, 'pkg');
 const fromWrapper = path.join(repoRoot, 'frontend', 'md-emulator.js');
 const fromTypes = path.join(repoRoot, 'frontend', 'md-emulator.d.ts');
-const toWrapper = path.join(electronRoot, 'md-emulator.js');
-const toTypes = path.join(electronRoot, 'md-emulator.d.ts');
+const toWrapper = path.join(appRoot, 'md-emulator.js');
+const toTypes = path.join(appRoot, 'md-emulator.d.ts');
 const fromPlayer = path.join(repoRoot, 'frontend', 'wasm-player.js');
-const toPlayer = path.join(electronRoot, 'wasm-player.js');
+const toPlayer = path.join(appRoot, 'wasm-player.js');
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -51,7 +51,7 @@ function main() {
     copyRecursive(fromPlayer, toPlayer);
   }
 
-  console.log('Copied frontend WASM assets into electron directory.');
+  console.log('Copied frontend WASM assets into md-game-editor directory.');
 }
 
 main();

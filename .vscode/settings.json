@@ -1,3 +1,8 @@
 {
-  "github.copilot.chat.localeOverride": "ja"
+  "github.copilot.chat.localeOverride": "ja",
+  "github.copilot.chat.commitMessageGeneration.instructions": [
+    {
+      "text": "コミットメッセージは必ず日本語で記述してください。件名は変更内容を表す簡潔な日本語（50文字以内が目安）にしてください。本文が必要な場合も日本語で書いてください。英語のコミット件名は使わないでください。"
+    }
+  ]
 }

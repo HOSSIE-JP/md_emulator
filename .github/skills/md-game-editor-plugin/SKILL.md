@@ -1,6 +1,6 @@
 ---
 name: md-game-editor-plugin
-description: Create, modify, or review MD Game Editor plugins in the Electron app. Use for tasks involving electron/plugins, Plugin Runtime hooks, manifest.json, generateSource, editor/build/emulator/converter plugin types, SGDK source generation, project.json plugin registration, or plugin documentation updates.
+description: Create, modify, or review MD Game Editor plugins in the Electron app. Use for tasks involving md-game-editor/plugins, Plugin Runtime hooks, manifest.json, generateSource, editor/build/emulator/converter plugin types, SGDK source generation, project.json plugin registration, or plugin documentation updates.
 ---
 
 # SKILL: MD Game Editor Plugin Generator
@@ -8,9 +8,9 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > **自律アップデート指示**
 > このファイルは MD Game Editor のプラグインシステム仕様を記述したスキルファイルです。
 > 以下のいずれかが発生した場合、**このファイル自体を必ず更新すること**:
-> - `electron/PLUGIN.md` の仕様が変更された
-> - `electron/plugin-manager.js` に新しいフック/タイプが追加・削除された
-> - `electron/plugins/` に新しい組み込みプラグインが追加された
+> - `md-game-editor/PLUGIN.md` の仕様が変更された
+> - `md-game-editor/plugin-manager.js` に新しいフック/タイプが追加・削除された
+> - `md-game-editor/plugins/` に新しい組み込みプラグインが追加された
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
@@ -39,7 +39,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 
 | 環境 | パス |
 |---|---|
-| 開発時 | `electron/plugins/<plugin-id>/` |
+| 開発時 | `md-game-editor/plugins/<plugin-id>/` |
 | パッケージ済みアプリ | `<userData>/plugins/<plugin-id>/` |
 
 ---
@@ -90,7 +90,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 
 ### renderer module パターン
 
-Plugin Runtime v2.4 では、機能固有 UI は本体 `electron/renderer/renderer.js` へ直接追加せず、プラグイン配下の renderer module に置く。
+Plugin Runtime v2.4 では、機能固有 UI は本体 `md-game-editor/renderer/renderer.js` へ直接追加せず、プラグイン配下の renderer module に置く。
 
 ```js
 export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, registerCapability }) {
@@ -112,6 +112,7 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 - renderer から main process hook を呼ぶ場合は `hooks` と `mainApi.hooks` の両方に宣言し、`api.plugins.invokeHook()` または `window.electronAPI.invokePluginHook()` を使う
 - asset type / import / image 変換は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として登録する
 - Build / Test Play など単一選択 plugin は `roles` で宣言し、project.json の標準保存先は `pluginRoles` とする
+- 単一選択 role で競合 plugin が無効化される場合、その plugin に依存する plugin も同時に無効化される
 - `permissions` は v2.4 では表示・レビュー用途の宣言で、sandbox 強制ではない
 - 新規 plugin で本体 `main.js` / `preload.js` / `build-system.js` の個別追記が必要に見える場合は、まず Runtime v2.4 の汎用 API 不足として扱う
 

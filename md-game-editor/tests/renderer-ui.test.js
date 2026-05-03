@@ -60,8 +60,20 @@ test('startup selects the first sidebar plugin and project creation exposes buil
   assert.match(renderer, /selectedDefaultSidebarPage:\s*false/);
   assert.match(renderer, /switchPage\(getFirstSidebarPluginPageId\(\)\s*\|\|\s*getFirstVisiblePageId\(\)\)/);
   assert.match(renderer, /function populateProjectBuilderSelect\(\)/);
+  assert.match(renderer, /function getPluginsByRole\(roleId\)/);
+  assert.match(renderer, /return getPluginsByRole\('builder'\)/);
+  assert.doesNotMatch(renderer, /function getInstalledBuilderPlugins\(\)\s*\{[\s\S]*?plugin\.enabled && pluginSupportsRole\(plugin,\s*'builder'\)/);
   assert.match(renderer, /空のプロジェクト/);
   assert.match(renderer, /payload\.config\.pluginRoles\s*=\s*\{\s*builder:\s*selectedBuilder\s*\}/);
+});
+
+test('plugin role selectors list installed role plugins regardless of enabled state', () => {
+  const renderer = readRendererFile('renderer.js');
+
+  assert.match(renderer, /const plugins = getPluginsByRole\(role\.id\)/);
+  assert.match(renderer, /const buildIds = new Set\(getPluginsByRole\('builder'\)\.map\(\(p\) => p\.id\)\)/);
+  assert.match(renderer, /const suffix = p\.enabled \? '' : '（無効: 選択時に有効化）'/);
+  assert.doesNotMatch(renderer, /const plugins = getEnabledPluginsByRole\(role\.id\)/);
 });
 
 test('project settings save through IPC before build structure generation', () => {

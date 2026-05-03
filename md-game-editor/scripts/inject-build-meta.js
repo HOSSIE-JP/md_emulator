@@ -3,7 +3,7 @@
 /**
  * inject-build-meta.js
  *
- * ビルド番号（タイムスタンプ）を electron/build-meta.json に書き出す。
+ * ビルド番号（タイムスタンプ）を md-game-editor/build-meta.json に書き出す。
  * `npm start` および `prepare:dist` から呼び出される。
  *
  * 生成フォーマット: YYYYMMDD.HHmmss (例: 20260427.143022)
@@ -12,8 +12,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const electronRoot = path.resolve(__dirname, '..');
-const outPath = path.join(electronRoot, 'build-meta.json');
+const appRoot = path.resolve(__dirname, '..');
+const outPath = path.join(appRoot, 'build-meta.json');
 
 function zeroPad(n, len = 2) {
   return String(n).padStart(len, '0');

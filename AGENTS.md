@@ -20,7 +20,7 @@
 - MD Game Editor プラグイン関連の作業では、次を読んでください。
   - `.github/skills/md-game-editor-plugin/SKILL.md`
   - `.github/skills/md-game-editor-plugin/instructions.md`
-  - `electron/PLUGIN.md`
+  - `md-game-editor/PLUGIN.md`
 - エミュレータのデバッグや診断作業では、次を読んでください。
   - `.github/skills/md-emulator-debug/SKILL.md`
 - Mega Drive エミュレータのアーキテクチャやコア実装では、次を読んで
@@ -45,7 +45,7 @@
   外へのパストラバーサルを拒否してください。
 - 生成済みファイルやサンプルプロジェクトを編集する場合は、関係のない
   ユーザー変更を保持してください。
-- `electron/renderer/renderer.js` は単一スクリプトとして読み込まれるため、
+- `md-game-editor/renderer/renderer.js` は単一スクリプトとして読み込まれるため、
   既存のグローバル関数名（例: `clamp`）を再定義しないこと。重複宣言は
   起動時 `Uncaught SyntaxError: Identifier '...' has already been declared` を
   引き起こし、プラグイン読込前にエディタ全体が操作不能になる。

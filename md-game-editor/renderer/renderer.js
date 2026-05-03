@@ -780,6 +780,10 @@ function getEnabledPluginsByRole(roleId) {
   return pluginState.plugins.filter((p) => p.enabled && pluginSupportsRole(p, roleId));
 }
 
+function getPluginsByRole(roleId) {
+  return pluginState.plugins.filter((p) => pluginSupportsRole(p, roleId));
+}
+
 function getActiveRolePlugin(roleId) {
   return pluginState.activeRoles?.[roleId] || null;
 }
@@ -1446,8 +1450,8 @@ async function loadPlugins() {
   }
 
   // 非対応プラグインが設定されていた場合は解除
-  const buildIds = new Set(getEnabledPluginsByRole('builder').map((p) => p.id));
-  const emulatorIds = new Set(getEnabledPluginsByRole('testplay').map((p) => p.id));
+  const buildIds = new Set(getPluginsByRole('builder').map((p) => p.id));
+  const emulatorIds = new Set(getPluginsByRole('testplay').map((p) => p.id));
 
   if (pluginState.activeBuilderPlugin && !buildIds.has(pluginState.activeBuilderPlugin)) {
     pluginState.activeBuilderPlugin = null;
@@ -1490,11 +1494,12 @@ function renderPluginRoleSettings() {
   }
 
   body.innerHTML = roleDefinitions.map((role) => {
-    const plugins = getEnabledPluginsByRole(role.id);
+    const plugins = getPluginsByRole(role.id);
     const activeId = getActiveRolePlugin(role.id) || '';
     const options = [`<option value="">${role.id === 'builder' ? 'ビルドプラグインなし' : '選択してください'}</option>`];
     plugins.forEach((p) => {
-      options.push(`<option value="${escHtml(p.id)}"${p.id === activeId ? ' selected' : ''}>${escHtml(p.name)}</option>`);
+      const suffix = p.enabled ? '' : '（無効: 選択時に有効化）';
+      options.push(`<option value="${escHtml(p.id)}"${p.id === activeId ? ' selected' : ''}>${escHtml(`${p.name}${suffix}`)}</option>`);
     });
     const hint = role.id === 'builder'
       ? 'Build ボタン実行時のコード生成とビルドフックに使用します。'
@@ -1538,7 +1543,7 @@ function renderPluginList() {
   if (!el.pluginList) return;
   const visiblePlugins = getFilteredPlugins();
   if (pluginState.plugins.length === 0) {
-    el.pluginList.innerHTML = '<p class="hint-text">electron/plugins/ フォルダにプラグインが見つかりません。</p>';
+    el.pluginList.innerHTML = '<p class="hint-text">md-game-editor/plugins/ フォルダにプラグインが見つかりません。</p>';
     return;
   }
   if (visiblePlugins.length === 0) {
@@ -5983,8 +5988,7 @@ function openProjectModal() {
 }
 
 function getInstalledBuilderPlugins() {
-  return pluginState.plugins
-    .filter((plugin) => plugin.enabled && pluginSupportsRole(plugin, 'builder'))
+  return getPluginsByRole('builder')
     .sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), 'ja'));
 }
 
@@ -5993,7 +5997,8 @@ function populateProjectBuilderSelect() {
   const builders = getInstalledBuilderPlugins();
   const options = ['<option value="">空のプロジェクト</option>'];
   builders.forEach((plugin) => {
-    options.push(`<option value="${escHtml(plugin.id)}">${escHtml(plugin.name)}</option>`);
+    const suffix = plugin.enabled ? '' : '（無効: 作成時に有効化）';
+    options.push(`<option value="${escHtml(plugin.id)}">${escHtml(`${plugin.name}${suffix}`)}</option>`);
   });
   el.projectBuilderSelect.innerHTML = options.join('');
 }
