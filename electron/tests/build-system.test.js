@@ -81,6 +81,20 @@ test('project plugin selection is stored in project config', () => {
   assert.equal(Object.prototype.hasOwnProperty.call(config, 'emulatorPlugin'), false);
 });
 
+test('createProject can persist an initial builder role', () => {
+  const userData = makeTempDir('md-editor-create-builder-role-test-');
+  const projectDir = path.join(makeTempDir('md-editor-create-builder-role-project-test-'), 'demo');
+  const buildSystem = loadBuildSystem(userData);
+
+  buildSystem.createProject(projectDir, {
+    title: 'Demo',
+    pluginRoles: { builder: 'slideshow' },
+  }, 'int main(void) { return 0; }\n');
+
+  const config = JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf-8'));
+  assert.deepEqual(config.pluginRoles, { builder: 'slideshow' });
+});
+
 test('pluginRoles are the only plugin role storage', () => {
   const userData = makeTempDir('md-editor-plugin-roles-test-');
   const projectDir = path.join(makeTempDir('md-editor-plugin-roles-project-test-'), 'demo');
@@ -96,6 +110,38 @@ test('pluginRoles are the only plugin role storage', () => {
   const config = JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf-8'));
   assert.equal(config.pluginRoles.testplay, 'role-emulator');
   assert.equal(Object.prototype.hasOwnProperty.call(config, 'emulatorPlugin'), false);
+});
+
+test('saveProjectConfig persists project settings and rewrites the ROM header', () => {
+  const userData = makeTempDir('md-editor-save-config-header-test-');
+  const projectDir = path.join(makeTempDir('md-editor-save-config-header-project-test-'), 'demo');
+  const buildSystem = loadBuildSystem(userData);
+
+  buildSystem.createProject(projectDir, {
+    title: 'Before Title',
+    author: 'OLD',
+    serial: 'GM OLD-01',
+    region: 'U',
+  }, 'int main(void) { return 0; }\n');
+
+  const saved = buildSystem.saveProjectConfig({
+    title: 'Saved Header',
+    author: 'NEWAUTHOR',
+    serial: 'GM SAVE-02',
+    region: 'JUE',
+  });
+
+  assert.equal(saved.title, 'Saved Header');
+  const config = JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf-8'));
+  assert.equal(config.title, 'Saved Header');
+  assert.equal(config.serial, 'GM SAVE-02');
+
+  const header = fs.readFileSync(path.join(projectDir, 'src', 'boot', 'rom_head.c'), 'utf-8');
+  assert.match(header, /"Saved Header\s+"/);
+  assert.match(header, /"GM SAVE-02\s+"/);
+  assert.match(header, /"JUE\s+"/);
+  assert.doesNotMatch(header, /Before Title/);
+  assert.doesNotMatch(header, /GM OLD-01/);
 });
 
 test('buildProject fails fast when the toolchain path is missing', async () => {

@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openPathInExplorer: (targetPath, options) => ipcRenderer.invoke('fs:openPathInExplorer', targetPath, options || {}),
   saveRomAs: (sourcePath) => ipcRenderer.invoke('fs:saveRomAs', sourcePath),
   getProjectConfig: () => ipcRenderer.invoke('build:getProjectConfig'),
+  saveProjectConfig: (patch) => ipcRenderer.invoke('build:saveProjectConfig', patch || {}),
   getCurrentSource: () => ipcRenderer.invoke('build:getCurrentSource'),
   generateSample: () => ipcRenderer.invoke('build:getSampleCode'),
   onBuildLog: (callback) => {
@@ -48,6 +49,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMenuOpenAbout: (callback) => {
     ipcRenderer.on('menu:openAbout', (_event) => callback());
   },
+  openLogWindow: (snapshot) => ipcRenderer.invoke('log:openWindow', snapshot || {}),
+  syncLogWindow: (snapshot) => ipcRenderer.invoke('log:syncWindow', snapshot || {}),
+  appendLogWindowEntry: (entry) => ipcRenderer.invoke('log:appendEntry', entry || {}),
   listResDefinitions: () => ipcRenderer.invoke('res:listDefinitions'),
   createResFile: (relativePath) => ipcRenderer.invoke('res:createFile', relativePath),
   addResEntry: (payload) => ipcRenderer.invoke('res:addEntry', payload),

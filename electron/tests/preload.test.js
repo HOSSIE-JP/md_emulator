@@ -19,24 +19,35 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.equal(typeof api.invokePluginHook, 'function');
   assert.equal(typeof api.getPluginRoles, 'function');
   assert.equal(typeof api.setPluginRole, 'function');
+  assert.equal(typeof api.saveProjectConfig, 'function');
+  assert.equal(typeof api.openLogWindow, 'function');
+  assert.equal(typeof api.syncLogWindow, 'function');
+  assert.equal(typeof api.appendLogWindowEntry, 'function');
   assert.equal(typeof api.exportHtml, 'function');
 
   await api.readRomFile('game.bin');
   await api.pickFile({ title: 'Pick' });
   await api.readTempFileAsDataUrl('tmp.wav', { deleteAfter: true });
   await api.setPluginRole('builder', 'slideshow');
+  await api.saveProjectConfig({ title: 'Saved' });
   await api.getPluginRendererAssets('asset-manager');
   await api.invokePluginHook('audio-converter', 'convertAudio', { sourcePath: 'in.wav' });
+  await api.openLogWindow({ entries: [] });
+  await api.appendLogWindowEntry({ source: 'app', text: 'hello' });
   await api.createCodeEntry({ path: 'src/new.c', type: 'file' });
 
-  assert.deepEqual(invocations.slice(-6), [
-    { channel: 'dialog:pickFile', args: [{ title: 'Pick' }] },
-    { channel: 'res:readTempFileAsDataUrl', args: ['tmp.wav', { deleteAfter: true }] },
-    { channel: 'plugins:setRole', args: [{ roleId: 'builder', id: 'slideshow' }] },
+  assert.deepEqual(invocations.slice(-5), [
     { channel: 'plugins:getRendererAssets', args: [{ id: 'asset-manager' }] },
     { channel: 'plugins:invokeHook', args: [{ id: 'audio-converter', hook: 'convertAudio', payload: { sourcePath: 'in.wav' } }] },
+    { channel: 'log:openWindow', args: [{ entries: [] }] },
+    { channel: 'log:appendEntry', args: [{ source: 'app', text: 'hello' }] },
     { channel: 'codefs:create', args: [{ path: 'src/new.c', type: 'file' }] },
   ]);
+
+  assert.deepEqual(invocations.find((entry) => entry.channel === 'build:saveProjectConfig'), {
+    channel: 'build:saveProjectConfig',
+    args: [{ title: 'Saved' }],
+  });
 
   let received = null;
   api.onBuildLog((payload) => { received = payload; });

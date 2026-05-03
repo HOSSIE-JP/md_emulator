@@ -258,6 +258,7 @@ typedef struct {
     const u8 (*powerups)[GRID_COLS];
     const u8 *bgm;
     u32 bgm_len;
+    bool bgm_half_rate;
     const Image *background_image; /* ステージ背景画像（NULLの場合は単色背景） */
     const Image *clear_image;  /* ステージクリア画像（NULLの場合はテキストのみ） */
 } StageInfo;
@@ -372,7 +373,7 @@ void gfxDrawBackground(const Image *background_image);
 
 /* --- snd.c --- */
 void sndInit(void);
-void sndPlayBGM(const u8 *bgm, u32 len);
+void sndPlayBGM(const u8 *bgm, u32 len, bool half_rate);
 void sndStopBGM(void);
 void sndSetBGMVolume(u8 volume);
 void sndPlaySE(u8 se_id);

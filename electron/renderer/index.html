@@ -41,8 +41,8 @@
     <div class="topbar-left">
       <span class="app-logo">🎮</span>
       <span class="app-name">MD Game Editor</span>
-      <span class="project-name" id="projectName">MY GAME</span>
-      <span class="project-path-chip" id="projectDirLabel">sample</span>
+      <button class="project-name" id="projectName" type="button" title="プロジェクトを切り替え">MY GAME</button>
+      <button class="project-path-chip" id="projectDirLabel" type="button" title="プロジェクトフォルダを開く">sample</button>
     </div>
     <div class="topbar-actions">
       <button class="action-btn build-btn" id="btnBuild">
@@ -282,11 +282,11 @@
         </section>
         <section class="plugin-role-settings" id="pluginRoleSettings">
           <div class="plugin-role-card plugin-role-card-accordion plugin-role-card-group">
-            <button class="accordion-header" id="btnPluginRoleAccordion" type="button" aria-expanded="true">
+            <button class="accordion-header" id="btnPluginRoleAccordion" type="button" aria-expanded="false">
               <span class="accordion-title">Build / Emulator プラグイン（単一選択）</span>
               <svg class="icon accordion-chevron"><use href="#icon-chevron-up"></use></svg>
             </button>
-            <div class="accordion-body" id="pluginRoleBody">
+            <div class="accordion-body is-collapsed" id="pluginRoleBody">
               <div class="plugin-role-card">
                 <h3>Build プラグイン（単一選択）</h3>
                 <div class="plugin-role-row">
@@ -316,46 +316,54 @@
         <div class="page-header">
           <h2>プロジェクト設定</h2>
         </div>
-        <div class="settings-form">
-          <div class="form-group">
-            <label class="form-label">現在のプロジェクト</label>
-            <input type="text" class="form-input form-input-mono" id="currentProjectDir" readonly />
-            <div class="form-actions-inline">
-              <button class="btn-sm" id="btnOpenProjectDir" type="button">プロジェクトフォルダを開く</button>
-              <button class="btn-sm" id="btnSettingsProjectPicker" type="button">プロジェクト選択</button>
+        <div class="settings-form project-settings-grid">
+          <section class="settings-column">
+            <h3 class="settings-column-title">プロジェクト</h3>
+            <div class="form-group">
+              <label class="form-label">現在のプロジェクト</label>
+              <input type="text" class="form-input form-input-mono" id="currentProjectDir" readonly />
+              <div class="form-actions-inline">
+                <button class="btn-sm" id="btnOpenProjectDir" type="button">プロジェクトフォルダを開く</button>
+                <button class="btn-sm" id="btnSettingsProjectPicker" type="button">プロジェクト選択</button>
+              </div>
             </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">タイトル</label>
-            <input type="text" class="form-input" id="settingTitle" value="MY GAME" maxlength="48" />
-            <p class="form-hint">Mega Drive ROM ヘッダの Domestic/International Name（ASCII、最大 48 文字）</p>
-            <p class="form-error" id="settingTitleError"></p>
-          </div>
-          <div class="form-group">
-            <label class="form-label">作者名</label>
-            <input type="text" class="form-input" id="settingAuthor" value="AUTHOR" maxlength="16" />
-            <p class="form-error" id="settingAuthorError"></p>
-          </div>
-          <div class="form-group">
-            <label class="form-label">シリアルナンバー</label>
-            <input type="text" class="form-input form-input-mono" id="settingSerial" value="GM 00000000-00" maxlength="14" />
-            <p class="form-hint">例: GM 00000000-00（ASCII、14 文字固定）</p>
-            <p class="form-error" id="settingSerialError"></p>
-          </div>
-          <div class="form-group">
-            <label class="form-label">出力 ROM パス</label>
-            <input type="text" class="form-input form-input-mono" id="settingOutputPath" readonly />
-            <p class="form-hint">ビルド後に <code>out/rom.bin</code> へ出力されます</p>
+            <div class="form-group">
+              <label class="form-label">タイトル</label>
+              <input type="text" class="form-input" id="settingTitle" value="MY GAME" maxlength="48" />
+              <p class="form-hint">Mega Drive ROM ヘッダの Domestic/International Name（ASCII、最大 48 文字）</p>
+              <p class="form-error" id="settingTitleError"></p>
+            </div>
+            <div class="form-group">
+              <label class="form-label">作者名</label>
+              <input type="text" class="form-input" id="settingAuthor" value="AUTHOR" maxlength="16" />
+              <p class="form-error" id="settingAuthorError"></p>
+            </div>
+            <div class="form-group">
+              <label class="form-label">シリアルナンバー</label>
+              <input type="text" class="form-input form-input-mono" id="settingSerial" value="GM 00000000-00" maxlength="14" />
+              <p class="form-hint">例: GM 00000000-00（ASCII、14 文字固定）</p>
+              <p class="form-error" id="settingSerialError"></p>
+            </div>
+          </section>
+
+          <section class="settings-column export-settings-column">
+            <h3 class="settings-column-title">エクスポート設定</h3>
+            <div class="form-group">
+              <label class="form-label">出力 ROM パス</label>
+              <input type="text" class="form-input form-input-mono" id="settingOutputPath" readonly />
+              <p class="form-hint">ビルド後に <code>out/rom.bin</code> へ出力されます</p>
+            </div>
             <div class="form-actions-inline">
               <button class="btn-sm" id="btnOpenOutputFolder" type="button">出力フォルダを開く</button>
               <button class="btn-sm" id="btnDownloadRom" type="button" disabled>ROM を保存</button>
             </div>
-          </div>
-          <div class="form-actions">
+          </section>
+
+          <div class="form-actions settings-grid-actions">
             <button class="btn-primary" id="btnSaveSettings">プロジェクト設定を保存</button>
             <button class="btn-sm" id="btnOpenSetup" type="button">初期設定</button>
           </div>
-          <div class="form-saved" id="settingsSavedMsg"></div>
+          <div class="form-saved settings-grid-status" id="settingsSavedMsg"></div>
         </div>
       </section>
 
@@ -375,6 +383,7 @@
         <button class="icon-btn-flat" id="btnCopyLog" title="ログをコピー">
           <svg class="icon"><use href="#icon-copy"></use></svg>
         </button>
+        <button class="icon-btn-flat" id="btnPopoutLog" title="ログを別ウィンドウで開く">□</button>
         <button class="icon-btn-flat" id="btnClearLog" title="クリア">✕</button>
         <button class="icon-btn-flat" id="btnToggleLog" title="展開/折り畳み">
           <svg class="icon"><use href="#icon-chevron-up"></use></svg>
@@ -596,6 +605,11 @@
             <label class="form-label">シリアル</label>
             <input type="text" class="form-input form-input-mono" id="projectSerialInput" maxlength="14" />
           </div>
+          <div class="form-group app-grid-span-2">
+            <label class="form-label">ゲームタイプ</label>
+            <select class="form-input" id="projectBuilderSelect"></select>
+            <p class="form-hint">インストール済みの Build プラグインを選択します。未選択の場合は空のプロジェクトを作成します。</p>
+          </div>
         </div>
         <p class="form-hint">作成先は projects フォルダ配下です。</p>
         <div class="form-actions-inline modal-actions-end">
@@ -692,10 +706,12 @@
             </label>
           </div>
           <div class="form-group">
-            <label class="checkbox-row">
-              <input id="quantizeDitheringEnabled" type="checkbox" checked />
-              <span>ディザリングを有効にする</span>
-            </label>
+            <label class="form-label">ディザリング</label>
+            <select id="quantizeDitherMode" class="form-input">
+              <option value="none">Disabled</option>
+              <option value="fast" selected>Fast</option>
+              <option value="slow">Slow</option>
+            </select>
           </div>
           <div class="form-group">
             <label class="form-label">ディザリングウェイト</label>
@@ -712,6 +728,16 @@
               <option value="vertical4">vertical4</option>
               <option value="vertical2">vertical2</option>
             </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">明るさ</label>
+            <input id="quantizeBrightness" class="form-input" type="range" min="-96" max="96" step="4" value="0" />
+            <div class="hint-text" id="quantizeBrightnessLabel">0</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">彩度</label>
+            <input id="quantizeSaturation" class="form-input" type="range" min="0.25" max="1.75" step="0.05" value="1" />
+            <div class="hint-text" id="quantizeSaturationLabel">1.00</div>
           </div>
           <div class="form-group">
             <label class="form-label">参照パレット（16色画像アセット）</label>
@@ -739,6 +765,7 @@
           <div class="quantize-preview-panel">
             <h3>変換後</h3>
             <canvas id="quantizeAfterCanvas"></canvas>
+            <div id="quantizeResultPalette" class="quantize-result-palette" aria-label="変換後パレット"></div>
           </div>
         </div>
       </div>

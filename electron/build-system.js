@@ -190,6 +190,9 @@ function ensureProjectStructure(projectDir, config = {}, options = {}) {
     region: config.region || 'JUE',
     generatedAt: new Date().toISOString(),
   };
+  if (config.pluginRoles && typeof config.pluginRoles === 'object') {
+    meta.pluginRoles = { ...config.pluginRoles };
+  }
   const cfgPath = path.join(projectDir, 'project.json');
   if (options.overwriteConfig || !fs.existsSync(cfgPath)) {
     let existing = {};
@@ -691,6 +694,14 @@ function loadProjectConfig() {
   return loadProjectConfigFromDir(getProjectDir());
 }
 
+function writeProjectRomHeader(projectDir, config = {}) {
+  const resolved = path.resolve(projectDir);
+  ensureDirSync(path.join(resolved, 'src', 'boot'));
+  const romHeadPath = path.join(resolved, 'src', 'boot', 'rom_head.c');
+  fs.writeFileSync(romHeadPath, buildRomHeaderSource(config), 'utf-8');
+  return romHeadPath;
+}
+
 function normalizeProjectConfigForSave(config = {}) {
   const next = { ...(config || {}) };
   delete next.builderPlugin;
@@ -705,6 +716,7 @@ function saveProjectConfig(patch) {
   const current = loadProjectConfig();
   const merged = normalizeProjectConfigForSave(Object.assign({}, current, patch));
   fs.writeFileSync(cfgPath, JSON.stringify(merged, null, 2), 'utf-8');
+  writeProjectRomHeader(projectDir, merged);
   return merged;
 }
 
@@ -750,6 +762,7 @@ module.exports = {
   getLastRomPath,
   loadProjectConfig,
   saveProjectConfig,
+  writeProjectRomHeader,
   normalizeProjectConfigForSave,
   getPluginRoles,
   getPluginRole,

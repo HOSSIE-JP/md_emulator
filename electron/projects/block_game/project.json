@@ -1,9 +1,9 @@
 {
-  "title": "SAMPLE",
-  "author": "AUTHOR",
-  "serial": "GM 00000000-00",
+  "title": "SEXY BLOCK BREAKER",
+  "author": "HOSSIE",
+  "serial": "GM 00000000-01",
   "region": "JUE",
-  "generatedAt": "2026-05-03T13:20:29.296Z",
+  "generatedAt": "2026-05-03T15:04:30.927Z",
   "pluginRoles": {
     "builder": "block-game-builder",
     "testplay": "standard-emulator"

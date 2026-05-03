@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Log - MD Game Editor</title>
+  <style>
+    :root {
+      --bg: #0b0f16;
+      --panel: #101722;
+      --border: #233044;
+      --text: #dce7f3;
+      --muted: #8b98aa;
+      --info: #79b8ff;
+      --warn: #e6b85c;
+      --error: #ff7b72;
+      --debug: #8b98aa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      color: var(--text);
+      font: 12px/1.45 Consolas, "Cascadia Mono", monospace;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 9px 12px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    h1 {
+      margin: 0;
+      font: 600 13px/1.2 "Segoe UI", sans-serif;
+    }
+    #count { color: var(--muted); font-family: "Segoe UI", sans-serif; }
+    #log {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 10px 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .line {
+      display: grid;
+      grid-template-columns: 68px 128px 1fr;
+      gap: 8px;
+      padding: 1px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.025);
+    }
+    .time, .source { color: var(--muted); }
+    .line.warn .text { color: var(--warn); }
+    .line.error .text { color: var(--error); }
+    .line.debug .text { color: var(--debug); }
+    .line.info .source { color: var(--info); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MD Game Editor Log</h1>
+    <span id="count">0 lines</span>
+  </header>
+  <main id="log"></main>
+  <script>
+    const log = document.getElementById('log');
+    const count = document.getElementById('count');
+    let entries = [];
+
+    function esc(value) {
+      return String(value || '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[ch]);
+    }
+
+    function formatTime(timestamp) {
+      const date = new Date(Number(timestamp) || Date.now());
+      return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
+    }
+
+    function lineHtml(entry) {
+      const level = String(entry.level || 'info').toLowerCase();
+      return `<div class="line ${esc(level)}"><span class="time">${formatTime(entry.timestamp)}</span><span class="source">${esc(entry.source || 'app')}</span><span class="text">${esc(entry.text || '')}</span></div>`;
+    }
+
+    function render() {
+      log.innerHTML = entries.map(lineHtml).join('');
+      count.textContent = `${entries.length} lines`;
+      log.scrollTop = log.scrollHeight;
+    }
+
+    window.logViewerAPI.onSnapshot((payload) => {
+      entries = Array.isArray(payload?.entries) ? payload.entries : [];
+      render();
+    });
+
+    window.logViewerAPI.onEntry((entry) => {
+      entries.push(entry || {});
+      if (entries.length > 4000) entries.splice(0, entries.length - 4000);
+      log.insertAdjacentHTML('beforeend', lineHtml(entry || {}));
+      count.textContent = `${entries.length} lines`;
+      log.scrollTop = log.scrollHeight;
+    });
+  </script>
+</body>
+</html>

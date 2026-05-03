@@ -82,7 +82,7 @@ static void hideAllSprites(void)
     {
         VDP_setSpriteFull(i, -128, -128, SPRITE_SIZE(1, 1), 0, (i < SPR_TOTAL - 1) ? i + 1 : 0);
     }
-    VDP_updateSprites(SPR_TOTAL, DMA);
+    VDP_updateSprites(SPR_TOTAL, DMA_QUEUE);
     VDP_setHilightShadow(FALSE);
 }
 
@@ -116,7 +116,7 @@ static void drawTextPanelShadow(s16 x, s16 y, u8 cols, u8 rows)
         }
     }
 
-    VDP_updateSprites(SPR_TEXT_PANEL_COUNT, DMA);
+    VDP_updateSprites(SPR_TEXT_PANEL_COUNT, DMA_QUEUE);
 }
 
 /* ===================================================================

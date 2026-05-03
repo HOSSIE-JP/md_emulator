@@ -14,9 +14,14 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     root.dataset.pluginOwner = plugin.id;
   }
 
+  const reloadButton = mountReloadButton({ root, api, logger });
+
   registerCapability('asset-manager', {
     pluginId: plugin.id,
     root,
+    buildPreviewPalette({ dataUrl, fallbackColors, maxColors } = {}) {
+      return buildPreviewPaletteFromDataUrl(dataUrl, fallbackColors, { maxColors });
+    },
   });
 
   registerCapability('asset-type-provider', {
@@ -226,11 +231,42 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   logger.debug('asset-manager renderer activated');
   return {
     deactivate() {
+      reloadButton?.remove();
       if (root?.dataset.pluginOwner === plugin.id) {
         delete root.dataset.pluginOwner;
       }
     },
   };
+}
+
+function mountReloadButton({ root, api, logger }) {
+  const actions = root?.querySelector?.('.asset-list-header-actions');
+  if (!actions || actions.querySelector('[data-asset-manager-reload]')) return null;
+
+  const button = document.createElement('button');
+  button.className = 'icon-btn';
+  button.type = 'button';
+  button.title = 'リソースを再読み込み';
+  button.setAttribute('aria-label', 'リソースを再読み込み');
+  button.dataset.assetManagerReload = 'true';
+  button.textContent = '↻';
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const result = await api.assets?.reloadResources?.({ keepSelection: true });
+      if (!result?.ok) {
+        logger.warn(`リソース再読み込み失敗: ${result?.error || 'unknown'}`);
+      }
+    } catch (err) {
+      logger.warn(`リソース再読み込み失敗: ${String(err?.message || err)}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  const addButton = actions.querySelector('#btnAddAsset');
+  actions.insertBefore(button, addButton || null);
+  return button;
 }
 
 function dataUrlBytes(dataUrl) {
@@ -252,6 +288,43 @@ function extractIndexedSourcePalette(dataUrl) {
   const bmp = extractIndexedBmpPalette(dataUrl);
   if (bmp.colors.length) return { ...bmp, format: 'bmp' };
   return { colors: [], transparentIndex: -1, format: '' };
+}
+
+export function buildPreviewPaletteFromDataUrl(dataUrl, fallbackColors = [], options = {}) {
+  const maxColors = Math.max(1, Math.min(256, Number(options.maxColors) || 16));
+  const source = extractIndexedSourcePalette(dataUrl);
+  const slots = [];
+
+  if (source.colors.length > 0) {
+    source.colors.slice(0, maxColors).forEach((color, index) => {
+      slots.push({
+        r: color.r,
+        g: color.g,
+        b: color.b,
+        transparent: index === source.transparentIndex,
+      });
+    });
+    if (source.transparentIndex >= maxColors && source.transparentIndex < source.colors.length) {
+      const color = source.colors[source.transparentIndex];
+      slots[maxColors - 1] = { r: color.r, g: color.g, b: color.b, transparent: true };
+    }
+  } else {
+    const fallback = Array.isArray(fallbackColors) ? fallbackColors : [];
+    fallback.slice(0, maxColors).forEach((color) => {
+      slots.push({
+        r: Number(color?.r) || 0,
+        g: Number(color?.g) || 0,
+        b: Number(color?.b) || 0,
+        transparent: Boolean(color?.transparent),
+      });
+    });
+  }
+
+  while (slots.length < maxColors) {
+    slots.push({ r: 0, g: 0, b: 0, transparent: false, empty: true });
+  }
+
+  return slots.slice(0, maxColors);
 }
 
 function readU32Be(bytes, offset) {

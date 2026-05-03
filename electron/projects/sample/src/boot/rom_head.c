@@ -9,10 +9,10 @@ const ROMHeader rom_header = {
 #else
     "SEGA MEGA DRIVE ",
 #endif
-    "(C)AUTHOR       ",
-    "SAMPLE                                          ",
-    "SAMPLE                                          ",
-    "GM 00000000-00",
+    "(C)HOSSIE       ",
+    "SLIDE SHOW GAME                                 ",
+    "SLIDE SHOW GAME                                 ",
+    "GM 00000000-01",
     0x000,
     "JD              ",
     0x00000000,
@@ -28,6 +28,6 @@ const ROMHeader rom_header = {
     0x00200000,
     0x0020FFFF,
     "            ",
-    "SAMPLE                           PROGRAM",
+    "SLIDE SHOW GAME                  PROGRAM",
     "JUE             "
 };

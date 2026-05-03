@@ -157,13 +157,13 @@ void sndSetBGMVolume(u8 volume)
 }
 
 /** BGM 再生開始 */
-void sndPlayBGM(const u8 *bgm, u32 len)
+void sndPlayBGM(const u8 *bgm, u32 len, bool half_rate)
 {
     if (!bgm) return;
 #ifdef RES_BGM_0
     #ifdef BGM_IS_PCM
-    /* WAV (PCM) BGM: チャンネル1でループ再生 (13.3 KHz) */
-    XGM2_playPCMEx(bgm, len, SOUND_PCM_CH1, 15, TRUE, TRUE);
+    /* WAV (PCM) BGM: チャンネル1でループ再生 */
+    XGM2_playPCMEx(bgm, len, SOUND_PCM_CH1, 15, half_rate, TRUE);
     #else
     /* VGM (XGM2) BGM: XGM2ミュージックとして再生 */
     XGM2_play(bgm);
@@ -172,6 +172,7 @@ void sndPlayBGM(const u8 *bgm, u32 len)
     #endif
 #endif
     (void)len;
+    (void)half_rate;
 }
 
 /** BGM 停止 */

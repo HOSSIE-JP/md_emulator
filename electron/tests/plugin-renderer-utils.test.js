@@ -71,6 +71,68 @@ test('asset-manager declares v2.4 asset provider capabilities', () => {
   assert.match(rendererSource, /indices\[indices\.length - 1\]\s*=\s*0/);
   assert.match(rendererSource, /savedDataUrl\s*=\s*workingDataUrl/);
   assert.match(rendererSource, /convertedDataUrl:\s*savedDataUrl/);
+  assert.match(rendererSource, /mountReloadButton\(\{ root,\s*api,\s*logger \}\)/);
+  assert.match(rendererSource, /reloadResources\?\.\(\{ keepSelection:\s*true \}\)/);
+  assert.match(rendererSource, /buildPreviewPaletteFromDataUrl/);
+});
+
+function makePngChunk(type, data) {
+  const chunk = Buffer.alloc(12 + data.length);
+  chunk.writeUInt32BE(data.length, 0);
+  chunk.write(type, 4, 4, 'ascii');
+  data.copy(chunk, 8);
+  return chunk;
+}
+
+function makeIndexedPngDataUrl({ palette, transparentIndex }) {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(1, 0);
+  ihdr.writeUInt32BE(1, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 3;
+  const plte = Buffer.from(palette.flatMap((color) => [color.r, color.g, color.b]));
+  const trns = Buffer.alloc(transparentIndex + 1, 255);
+  trns[transparentIndex] = 0;
+  const bytes = Buffer.concat([
+    signature,
+    makePngChunk('IHDR', ihdr),
+    makePngChunk('PLTE', plte),
+    makePngChunk('tRNS', trns),
+    makePngChunk('IEND', Buffer.alloc(0)),
+  ]);
+  return `data:image/png;base64,${bytes.toString('base64')}`;
+}
+
+test('asset-manager preview palette exposes exactly 16 slots including transparency', async () => {
+  const renderer = await importPluginModule('asset-manager', 'renderer.js');
+  const dataUrl = makeIndexedPngDataUrl({
+    transparentIndex: 2,
+    palette: [
+      { r: 0, g: 0, b: 0 },
+      { r: 252, g: 0, b: 0 },
+      { r: 0, g: 252, b: 0 },
+    ],
+  });
+
+  const palette = renderer.buildPreviewPaletteFromDataUrl(dataUrl, [], { maxColors: 16 });
+  assert.equal(palette.length, 16);
+  assert.equal(palette[2].transparent, true);
+  assert.equal(palette[2].g, 252);
+  assert.equal(palette[15].empty, true);
+});
+
+test('asset preview renderer uses asset-manager palette helper and 16 swatches', () => {
+  const rendererSource = fs.readFileSync(
+    path.join(__dirname, '..', 'renderer', 'renderer.js'),
+    'utf-8',
+  );
+
+  assert.match(rendererSource, /assets:\s*\{/);
+  assert.match(rendererSource, /reloadResources:\s*async/);
+  assert.match(rendererSource, /getPluginCapability\(['"]asset-manager['"]\)\?\.buildPreviewPalette/);
+  assert.match(rendererSource, /extractDisplayPalette\(imageData,\s*16\)/);
+  assert.match(rendererSource, /renderPaletteSwatches\(el\.inlinePalette,\s*colors\)/);
 });
 
 test('image-quantize utility functions snap and index colors', async () => {

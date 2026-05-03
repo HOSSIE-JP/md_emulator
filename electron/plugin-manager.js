@@ -143,6 +143,20 @@ function normalizeRoles(manifest) {
   });
 }
 
+function pluginSupportsExclusiveRole(plugin, roleId) {
+  const role = String(roleId || '').trim();
+  if (!role) return false;
+  const roles = Array.isArray(plugin?.roles) ? plugin.roles : [];
+  return roles.some((entry) => entry?.id === role && entry.exclusive !== false);
+}
+
+function getExclusiveRoleIds(plugin) {
+  const roles = Array.isArray(plugin?.roles) ? plugin.roles : [];
+  return roles
+    .filter((entry) => entry?.id && entry.exclusive !== false)
+    .map((entry) => String(entry.id));
+}
+
 function resolvePluginFile(pluginDir, relativePath) {
   const value = String(relativePath || '').trim();
   if (!value || path.isAbsolute(value)) return null;
@@ -364,6 +378,15 @@ function setEnabledWithDependencies(id, enabled) {
         }
       });
     }
+
+    getExclusiveRoleIds(pluginMap.get(pluginId)).forEach((roleId) => {
+      plugins.forEach((plugin) => {
+        if (plugin.id === pluginId) return;
+        if (pluginSupportsExclusiveRole(plugin, roleId)) {
+          setStateEnabled(plugin.id, false, `exclusive-role:${roleId}`);
+        }
+      });
+    });
   } else {
     const dependentsMap = new Map();
     plugins.forEach((plugin) => {
@@ -394,6 +417,28 @@ function setEnabledWithDependencies(id, enabled) {
     changedIds: changed.map((entry) => entry.id),
     missingDependencies: Array.from(new Set(missingDependencies)),
   };
+}
+
+function setExclusiveRoleSelection(roleId, id) {
+  const role = String(roleId || '').trim();
+  const pluginId = String(id || '').trim();
+  if (!role) {
+    return { ok: false, error: 'role id is empty', changed: [], changedIds: [] };
+  }
+  if (!pluginId) {
+    return { ok: true, changed: [], changedIds: [], missingDependencies: [] };
+  }
+
+  const plugins = listPlugins();
+  const selected = plugins.find((plugin) => plugin.id === pluginId);
+  if (!selected) {
+    return { ok: false, error: `plugin not found: ${pluginId}`, changed: [], changedIds: [] };
+  }
+  if (!pluginSupportsExclusiveRole(selected, role)) {
+    return { ok: false, error: `plugin ${pluginId} does not support exclusive role: ${role}`, changed: [], changedIds: [] };
+  }
+
+  return setEnabledWithDependencies(pluginId, true);
 }
 
 // ── ジェネレータ実行 ────────────────────────────────────────────────────────
@@ -470,6 +515,7 @@ module.exports = {
   getRendererAssets,
   setEnabled,
   setEnabledWithDependencies,
+  setExclusiveRoleSelection,
   canInvokeRendererHook,
   runGenerator,
   invokeHook,

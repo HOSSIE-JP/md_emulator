@@ -54,17 +54,69 @@ let debugWindow = null;
 let setupWindow = null;
 let testPlayWindow = null;
 let testPlaySettingsWindow = null;
+let logWindow = null;
 let apiServerProcess = null;
 let apiServerPort = null;
+let latestLogSnapshot = { entries: [] };
+
+const MAIN_WINDOW_DEFAULT_BOUNDS = { width: 1280, height: 860 };
+const MAIN_WINDOW_MIN_BOUNDS = { width: 960, height: 640 };
+const WINDOW_STATE_FILE = 'window-state.json';
 
 function getRepoRoot() {
   return path.resolve(__dirname, '..');
 }
 
+function getWindowStatePath() {
+  return path.join(app.getPath('userData'), WINDOW_STATE_FILE);
+}
+
+function normalizeWindowBounds(bounds = {}) {
+  const width = Math.max(
+    MAIN_WINDOW_MIN_BOUNDS.width,
+    Math.min(3840, Math.round(Number(bounds.width) || MAIN_WINDOW_DEFAULT_BOUNDS.width)),
+  );
+  const height = Math.max(
+    MAIN_WINDOW_MIN_BOUNDS.height,
+    Math.min(2160, Math.round(Number(bounds.height) || MAIN_WINDOW_DEFAULT_BOUNDS.height)),
+  );
+  return { width, height };
+}
+
+function readMainWindowBounds() {
+  try {
+    const statePath = getWindowStatePath();
+    if (!fs.existsSync(statePath)) {
+      return { ...MAIN_WINDOW_DEFAULT_BOUNDS };
+    }
+    const parsed = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+    return normalizeWindowBounds(parsed?.mainWindow || parsed || {});
+  } catch (_) {
+    return { ...MAIN_WINDOW_DEFAULT_BOUNDS };
+  }
+}
+
+function saveMainWindowBounds(win) {
+  if (!win || win.isDestroyed?.()) return false;
+  try {
+    const bounds = typeof win.getNormalBounds === 'function'
+      ? win.getNormalBounds()
+      : win.getBounds();
+    const statePath = getWindowStatePath();
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    fs.writeFileSync(statePath, JSON.stringify({
+      mainWindow: normalizeWindowBounds(bounds),
+    }, null, 2), 'utf-8');
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 function createWindow() {
+  const bounds = readMainWindowBounds();
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 860,
+    ...bounds,
     backgroundColor: '#101217',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -75,6 +127,10 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  mainWindow.on('close', () => {
+    saveMainWindowBounds(mainWindow);
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -177,6 +233,63 @@ function sendToRenderer(channel, payload) {
     return;
   }
   mainWindow.webContents.send(channel, payload);
+}
+
+function sendToLogWindow(channel, payload) {
+  if (!logWindow || logWindow.isDestroyed()) {
+    return;
+  }
+  logWindow.webContents.send(channel, payload);
+}
+
+function normalizeLogEntry(entry = {}) {
+  return {
+    source: String(entry.source || 'app'),
+    text: String(entry.text || ''),
+    level: String(entry.level || 'info'),
+    timestamp: Number(entry.timestamp) || Date.now(),
+  };
+}
+
+function normalizeLogSnapshot(snapshot = {}) {
+  const entries = Array.isArray(snapshot.entries)
+    ? snapshot.entries.map(normalizeLogEntry).slice(-4000)
+    : [];
+  return { entries };
+}
+
+function openLogWindow(snapshot = latestLogSnapshot) {
+  latestLogSnapshot = normalizeLogSnapshot(snapshot);
+
+  if (logWindow && !logWindow.isDestroyed()) {
+    logWindow.focus();
+    sendToLogWindow('log:snapshot', latestLogSnapshot);
+    return { ok: true, reused: true };
+  }
+
+  logWindow = new BrowserWindow({
+    width: 920,
+    height: 560,
+    title: 'Log - MD Game Editor',
+    backgroundColor: '#0b0f16',
+    webPreferences: {
+      preload: path.join(__dirname, 'log-viewer-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  logWindow.webContents.on('did-finish-load', () => {
+    sendToLogWindow('log:snapshot', latestLogSnapshot);
+  });
+
+  logWindow.loadFile(path.join(__dirname, 'renderer', 'log-viewer.html'));
+  logWindow.on('closed', () => {
+    logWindow = null;
+  });
+
+  return { ok: true, reused: false };
 }
 
 function sendToSetupWindow(channel, payload) {
@@ -331,6 +444,32 @@ function resolvePluginForRole(roleId) {
     }
   }
   return pluginId || '';
+}
+
+function syncProjectPluginRoleState() {
+  const roles = buildSystem.getPluginRoles();
+  const synced = [];
+  const failed = [];
+
+  Object.entries(roles || {}).forEach(([roleId, pluginId]) => {
+    if (!roleId || !pluginId) return;
+    const result = pluginManager.setExclusiveRoleSelection(roleId, pluginId);
+    if (result?.ok) {
+      synced.push({
+        roleId,
+        pluginId,
+        changedIds: Array.isArray(result.changedIds) ? result.changedIds : [],
+      });
+    } else {
+      failed.push({
+        roleId,
+        pluginId,
+        error: result?.error || 'plugin role sync failed',
+      });
+    }
+  });
+
+  return { ok: failed.length === 0, synced, failed };
 }
 
 function getCodeRoot() {
@@ -1820,12 +1959,40 @@ ipcMain.handle('export:html', async () => {
   return handleExportHtml();
 });
 
+ipcMain.handle('log:openWindow', async (_event, snapshot) => {
+  return openLogWindow(snapshot || {});
+});
+
+ipcMain.handle('log:syncWindow', async (_event, snapshot) => {
+  latestLogSnapshot = normalizeLogSnapshot(snapshot || {});
+  sendToLogWindow('log:snapshot', latestLogSnapshot);
+  return { ok: true };
+});
+
+ipcMain.handle('log:appendEntry', async (_event, entry) => {
+  const normalized = normalizeLogEntry(entry || {});
+  latestLogSnapshot.entries.push(normalized);
+  if (latestLogSnapshot.entries.length > 4000) {
+    latestLogSnapshot.entries.splice(0, latestLogSnapshot.entries.length - 4000);
+  }
+  sendToLogWindow('log:entry', normalized);
+  return { ok: true };
+});
+
 ipcMain.handle('build:getRomPath', async () => {
   return buildSystem.getLastRomPath();
 });
 
 ipcMain.handle('build:getProjectConfig', async () => {
   return buildSystem.loadProjectConfig();
+});
+
+ipcMain.handle('build:saveProjectConfig', async (_event, patch) => {
+  try {
+    return { ok: true, config: buildSystem.saveProjectConfig(patch || {}) };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
 });
 
 ipcMain.handle('plugins:getRoles', async () => {
@@ -1837,8 +2004,12 @@ ipcMain.handle('plugins:getRole', async (_event, { roleId }) => {
 });
 
 ipcMain.handle('plugins:setRole', async (_event, { roleId, id }) => {
+  const syncResult = pluginManager.setExclusiveRoleSelection(roleId, id || null);
+  if (!syncResult?.ok) {
+    return { ok: false, error: syncResult?.error || 'plugin role selection failed' };
+  }
   buildSystem.setPluginRole(roleId, id || null);
-  return { ok: true };
+  return syncResult;
 });
 
 ipcMain.handle('build:getCurrentSource', async () => {
@@ -1891,7 +2062,8 @@ ipcMain.handle('project:openExisting', async (_event, payload) => {
       return { ok: false, error: 'project name is empty' };
     }
     const info = buildSystem.openProjectByName(projectName);
-    return { ok: true, ...info };
+    const pluginRoleSync = syncProjectPluginRoleState();
+    return { ok: true, ...info, pluginRoleSync };
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
   }
@@ -1905,6 +2077,7 @@ ipcMain.handle('project:createNew', async (_event, payload) => {
     }
 
     const created = buildSystem.createProjectInRoot(projectName, payload?.config || {}, payload?.sourceCode || null);
+    const pluginRoleSync = syncProjectPluginRoleState();
     return {
       ok: true,
       projectDir: created.projectDir,
@@ -1912,6 +2085,7 @@ ipcMain.handle('project:createNew', async (_event, payload) => {
       title: payload?.config?.title || payload?.projectName,
       defaultProjectDir: buildSystem.getDefaultProjectDir(),
       projectsRootDir: buildSystem.getProjectsRootDir(),
+      pluginRoleSync,
     };
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
@@ -1935,5 +2109,18 @@ app.on('window-all-closed', () => {
     debugWindow.close();
     debugWindow = null;
   }
+  if (logWindow && !logWindow.isDestroyed()) {
+    logWindow.close();
+    logWindow = null;
+  }
   app.quit();
 });
+
+module.exports.__test = {
+  normalizeWindowBounds,
+  readMainWindowBounds,
+  saveMainWindowBounds,
+  normalizeLogEntry,
+  normalizeLogSnapshot,
+  syncProjectPluginRoleState,
+};

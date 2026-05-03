@@ -130,7 +130,7 @@ static void hideGameSprites(void)
     {
         VDP_setSpriteFull(i, -128, -128, SPRITE_SIZE(1, 1), 0, (i < SPR_TOTAL - 1) ? i + 1 : 0);
     }
-    VDP_updateSprites(SPR_TOTAL, DMA);
+    VDP_updateSprites(SPR_TOTAL, DMA_QUEUE);
     VDP_setHilightShadow(FALSE);
 }
 
@@ -232,7 +232,7 @@ static s8 submitScoreOnce(void)
 static void playTitleBGM(void)
 {
 #ifdef RES_BGM_TITLE_SCREEN
-    sndPlayBGM(RES_BGM_TITLE_SCREEN, sizeof(RES_BGM_TITLE_SCREEN));
+    sndPlayBGM(RES_BGM_TITLE_SCREEN, sizeof(RES_BGM_TITLE_SCREEN), RES_BGM_TITLE_SCREEN_HALF_RATE);
 #else
     sndStopBGM();
 #endif
@@ -241,7 +241,7 @@ static void playTitleBGM(void)
 static void playHighScoreBGM(void)
 {
 #ifdef RES_BGM_HIGH_SCORE_SCREEN
-    sndPlayBGM(RES_BGM_HIGH_SCORE_SCREEN, sizeof(RES_BGM_HIGH_SCORE_SCREEN));
+    sndPlayBGM(RES_BGM_HIGH_SCORE_SCREEN, sizeof(RES_BGM_HIGH_SCORE_SCREEN), RES_BGM_HIGH_SCORE_SCREEN_HALF_RATE);
 #else
     sndStopBGM();
 #endif
@@ -250,7 +250,7 @@ static void playHighScoreBGM(void)
 static void playGameClearBGM(void)
 {
 #ifdef RES_BGM_GAME_CLEAR_SCREEN
-    sndPlayBGM(RES_BGM_GAME_CLEAR_SCREEN, sizeof(RES_BGM_GAME_CLEAR_SCREEN));
+    sndPlayBGM(RES_BGM_GAME_CLEAR_SCREEN, sizeof(RES_BGM_GAME_CLEAR_SCREEN), RES_BGM_GAME_CLEAR_SCREEN_HALF_RATE);
 #else
     sndStopBGM();
 #endif
@@ -261,7 +261,7 @@ static void playCurrentStageBGM(void)
     const StageInfo *stage = &stage_table[current_stage];
 
     if (stage->bgm && stage->bgm_len > 0)
-        sndPlayBGM(stage->bgm, stage->bgm_len);
+        sndPlayBGM(stage->bgm, stage->bgm_len, stage->bgm_half_rate);
     else
         sndStopBGM();
 }
@@ -928,7 +928,7 @@ int main(bool hard_reset)
             uiUpdate();
 
             /* スプライトチェーン終端 */
-            VDP_updateSprites(SPR_TOTAL, DMA);
+            VDP_updateSprites(SPR_TOTAL, DMA_QUEUE);
         }
 
         /* 前フレーム入力保存 */

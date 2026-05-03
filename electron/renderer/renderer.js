@@ -78,7 +78,10 @@ const state = {
     type: 'all',
   },
   pluginUi: {
-    roleAccordionOpen: true,
+    roleAccordionOpen: false,
+  },
+  startup: {
+    selectedDefaultSidebarPage: false,
   },
 };
 
@@ -212,6 +215,7 @@ const quantizeState = {
   originalCanvas: null,
   originalCtx: null,
   originalData: null,
+  adjustedData: null,
   sourcePath: '',
   convertedDataUrl: '',
   referencePalette: null,
@@ -259,6 +263,7 @@ const el = {
   buildStatusBadge: $('buildStatusBadge'),
   buildRomSize: $('buildRomSize'),
   btnCopyLog: $('btnCopyLog'),
+  btnPopoutLog: $('btnPopoutLog'),
   btnToggleLog: $('btnToggleLog'),
   btnClearLog: $('btnClearLog'),
   logLevelFilter: $('logLevelFilter'),
@@ -356,6 +361,7 @@ const el = {
   projectTitleInput: $('projectTitleInput'),
   projectAuthorInput: $('projectAuthorInput'),
   projectSerialInput: $('projectSerialInput'),
+  projectBuilderSelect: $('projectBuilderSelect'),
   projectPickerModal: $('projectPickerModal'),
   btnProjectPickerClose: $('btnProjectPickerClose'),
   btnProjectPickerCancel: $('btnProjectPickerCancel'),
@@ -457,9 +463,14 @@ const el = {
   quantizeUseSharedCustomColor: $('quantizeUseSharedCustomColor'),
   quantizeSharedColorRow: $('quantizeSharedColorRow'),
   quantizeDitheringEnabled: $('quantizeDitheringEnabled'),
+  quantizeDitherMode: $('quantizeDitherMode'),
   quantizeDitheringWeight: $('quantizeDitheringWeight'),
   quantizeWeightLabel: $('quantizeWeightLabel'),
   quantizePattern: $('quantizePattern'),
+  quantizeBrightness: $('quantizeBrightness'),
+  quantizeBrightnessLabel: $('quantizeBrightnessLabel'),
+  quantizeSaturation: $('quantizeSaturation'),
+  quantizeSaturationLabel: $('quantizeSaturationLabel'),
   quantizePaletteAsset: $('quantizePaletteAsset'),
   quantizePaletteHint: $('quantizePaletteHint'),
   quantizeReferencePreview: $('quantizeReferencePreview'),
@@ -468,6 +479,7 @@ const el = {
   quantizeReferencePalette: $('quantizeReferencePalette'),
   quantizeBeforeCanvas: $('quantizeBeforeCanvas'),
   quantizeAfterCanvas: $('quantizeAfterCanvas'),
+  quantizeResultPalette: $('quantizeResultPalette'),
   quantizeStats: $('quantizeStats'),
 };
 
@@ -539,9 +551,11 @@ function appendLog(source, text, level = 'info') {
     timestamp: Date.now(),
   };
   state.logs.entries.push(entry);
+  window.electronAPI.appendLogWindowEntry?.(entry).catch?.(() => {});
 
   if (state.logs.entries.length > 4000) {
     state.logs.entries.splice(0, state.logs.entries.length - 4000);
+    syncLogWindowSnapshot();
     renderLogPanel();
     return;
   }
@@ -596,6 +610,7 @@ function renderLogPanel() {
 
 function clearBuildLog() {
   state.logs.entries = [];
+  syncLogWindowSnapshot();
   renderLogPanel();
 }
 
@@ -640,6 +655,17 @@ async function copyBuildLog() {
   }
 }
 
+async function openLogPopout() {
+  try {
+    const result = await window.electronAPI.openLogWindow?.(getLogSnapshot());
+    if (!result?.ok) {
+      appendLog('app', `ログウィンドウを開けませんでした: ${result?.error || 'unknown'}`, 'warn');
+    }
+  } catch (err) {
+    appendLog('app', `ログウィンドウを開けませんでした: ${String(err?.message || err)}`, 'warn');
+  }
+}
+
 function setBuildStatus(type, text) {
   if (!el.buildStatusBadge) return;
   el.buildStatusBadge.textContent = text;
@@ -663,6 +689,7 @@ function setLogOpenHeight(height) {
   const next = Math.max(minHeight, Math.min(maxHeight, Number(height) || state.logOpenHeight));
   state.logOpenHeight = next;
   document.documentElement.style.setProperty('--log-h-open', `${next}px`);
+  saveLogViewerState();
 }
 
 // ============================================================= PLUGINS ===
@@ -684,6 +711,36 @@ const pluginState = {
 const pluginRuntime = createPluginRuntime();
 
 const SIDEBAR_PLUGIN_ORDER_KEY_PREFIX = 'md-editor.sidebarPluginOrder.v1';
+const LOG_VIEWER_STATE_KEY = 'md-editor.logViewerState.v1';
+
+function loadLogViewerState() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LOG_VIEWER_STATE_KEY) || '{}');
+    return {
+      openHeight: Number(parsed.openHeight) || state.logOpenHeight,
+    };
+  } catch (_) {
+    return { openHeight: state.logOpenHeight };
+  }
+}
+
+function saveLogViewerState() {
+  try {
+    localStorage.setItem(LOG_VIEWER_STATE_KEY, JSON.stringify({
+      openHeight: state.logOpenHeight,
+    }));
+  } catch (_) {}
+}
+
+function getLogSnapshot() {
+  return {
+    entries: state.logs.entries.slice(-4000),
+  };
+}
+
+function syncLogWindowSnapshot() {
+  window.electronAPI.syncLogWindow?.(getLogSnapshot()).catch?.(() => {});
+}
 
 function pluginSupportsType(plugin, type) {
   const kinds = Array.isArray(plugin?.pluginTypes) ? plugin.pluginTypes : [];
@@ -924,6 +981,16 @@ function createPluginHostApi(plugin, roots = {}) {
     },
     plugins: {
       invokeHook: (id, hook, payload) => window.electronAPI.invokePluginHook(id, hook, payload),
+    },
+    assets: {
+      reloadResources: async (options = {}) => {
+        await loadResDefinitions({ keepSelection: options.keepSelection !== false });
+        await refreshProjectList();
+        if (el.assetTableHint) {
+          el.assetTableHint.textContent = 'リソースを再読み込みしました';
+        }
+        return { ok: true };
+      },
     },
     events: {
       emit: (eventName, detail) => {
@@ -1177,6 +1244,13 @@ function renderPluginSidebarTabs() {
   bindPluginSidebarTabDnD();
 }
 
+function getFirstSidebarPluginPageId() {
+  return el.sidebarPluginTabs
+    ?.querySelector('.nav-btn-plugin[data-page]')
+    ?.dataset
+    ?.page || '';
+}
+
 function applyPluginPageAvailability() {
   const pageBindings = new Map();
   pluginState.plugins.forEach((plugin) => {
@@ -1259,26 +1333,28 @@ async function setActiveBuilderPlugin(id) {
   pluginState.activeBuilderPlugin = id || null;
   pluginState.activeRoles = { ...(pluginState.activeRoles || {}), builder: id || null };
   try {
-    await window.electronAPI.setPluginRole('builder', id || null);
-  } catch (_) {}
+    const result = await window.electronAPI.setPluginRole('builder', id || null);
+    if (!result?.ok) throw new Error(result?.error || 'unknown');
+  } catch (err) {
+    setPluginRoleStatus(`✕ Build プラグイン保存失敗: ${err?.message || err}`, 'err');
+  }
+  await loadPlugins();
   updateBuildButtonLabel();
   applyBuildAvailability();
-  renderPluginRoleSettings();
-  renderPluginList();
 }
 
 async function setActiveEmulatorPlugin(id) {
   pluginState.activeEmulatorPlugin = id || null;
   pluginState.activeRoles = { ...(pluginState.activeRoles || {}), testplay: id || null };
   try {
-    await window.electronAPI.setPluginRole('testplay', id || null);
+    const result = await window.electronAPI.setPluginRole('testplay', id || null);
+    if (!result?.ok) throw new Error(result?.error || 'unknown');
     setPluginRoleStatus('✓ Emulator プラグイン設定を保存しました', 'ok');
   } catch (err) {
     setPluginRoleStatus(`✕ Emulator プラグイン保存失敗: ${err?.message || err}`, 'err');
   }
+  await loadPlugins();
   applyTestPlayAvailability();
-  renderPluginRoleSettings();
-  renderPluginList();
 }
 
 function updateBuildButtonLabel() {
@@ -1291,6 +1367,33 @@ function updateBuildButtonLabel() {
   } else {
     el.btnBuild.title = '';
     delete el.btnBuild.dataset.pluginBuilder;
+  }
+}
+
+async function restoreProjectPluginRoleState() {
+  const roles = pluginState.activeRoles && typeof pluginState.activeRoles === 'object'
+    ? pluginState.activeRoles
+    : {};
+  let changed = false;
+
+  for (const [roleId, pluginId] of Object.entries(roles)) {
+    if (!roleId || !pluginId) continue;
+    try {
+      const result = await window.electronAPI.setPluginRole(roleId, pluginId);
+      if (result?.ok && Array.isArray(result.changedIds) && result.changedIds.length > 0) {
+        changed = true;
+      }
+    } catch (_) {
+      // プロジェクト設定の復元に失敗しても、既存の検証処理で未対応 role は解除する。
+    }
+  }
+
+  if (changed) {
+    try {
+      pluginState.plugins = await window.electronAPI.listPlugins();
+    } catch (_) {
+      pluginState.plugins = [];
+    }
   }
 }
 
@@ -1315,6 +1418,8 @@ async function loadPlugins() {
 
   pluginState.activeBuilderPlugin = pluginState.activeRoles.builder || null;
   pluginState.activeEmulatorPlugin = pluginState.activeRoles.testplay || null;
+
+  await restoreProjectPluginRoleState();
 
   // 未設定 & スライドショープラグインが有効なら自動でデフォルトに設定
   if (!pluginState.activeBuilderPlugin) {
@@ -1359,7 +1464,12 @@ async function loadPlugins() {
   updateBuildButtonLabel();
   renderPluginSidebarTabs();
   applyPluginPageAvailability();
-  switchPage(state.currentPage);
+  if (!state.startup.selectedDefaultSidebarPage) {
+    switchPage(getFirstSidebarPluginPageId() || getFirstVisiblePageId());
+    state.startup.selectedDefaultSidebarPage = true;
+  } else {
+    switchPage(state.currentPage);
+  }
   renderPluginRoleSettings();
   renderPluginList();
   appendLog('app', `プラグインをスキャン: ${pluginState.plugins.length} 件`);
@@ -1410,15 +1520,16 @@ function renderPluginRoleSettings() {
       if (roleId === 'builder') pluginState.activeBuilderPlugin = nextId;
       if (roleId === 'testplay') pluginState.activeEmulatorPlugin = nextId;
       try {
-        await window.electronAPI.setPluginRole(roleId, nextId);
+        const result = await window.electronAPI.setPluginRole(roleId, nextId);
+        if (!result?.ok) throw new Error(result?.error || 'unknown');
         setPluginRoleStatus(`✓ ${roleId} プラグイン設定を保存しました`, 'ok');
+        await loadPlugins();
       } catch (err) {
         setPluginRoleStatus(`✕ ${roleId} プラグイン保存失敗: ${err?.message || err}`, 'err');
       }
       updateBuildButtonLabel();
       applyBuildAvailability();
       applyTestPlayAvailability();
-      renderPluginList();
     });
   });
 }
@@ -2218,6 +2329,19 @@ async function openProjectPicker() {
   }
 }
 
+async function openCurrentProjectDirectory() {
+  if (!state.project.dir) {
+    if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = '現在のプロジェクトフォルダがありません。';
+    return;
+  }
+  const result = await window.electronAPI.openPathInExplorer(state.project.dir);
+  if (!result?.ok) {
+    const message = `フォルダを開けませんでした: ${result?.error || 'unknown'}`;
+    appendLog('app', message, 'warn');
+    if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = message;
+  }
+}
+
 async function loadProjectConfig() {
   try {
     const projectInfo = await window.electronAPI.getCurrentProject();
@@ -2263,13 +2387,28 @@ async function saveSettings() {
     if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = '✕ 入力内容を修正してください';
     return;
   }
-  state.projectConfig = result.config;
+  try {
+    await persistProjectSettings(result.config, { showMessage: true });
+  } catch (err) {
+    if (el.settingsSavedMsg) {
+      el.settingsSavedMsg.textContent = `✕ 設定を保存できませんでした: ${String(err?.message || err)}`;
+    }
+  }
+}
+
+async function persistProjectSettings(config, { showMessage = false } = {}) {
+  const result = await window.electronAPI.saveProjectConfig(config);
+  if (!result?.ok) {
+    throw new Error(result?.error || 'unknown');
+  }
+  state.projectConfig = result.config || config;
   if (el.settingSerial) el.settingSerial.value = state.projectConfig.serial;
   updateProjectNameDisplay();
-  if (el.settingsSavedMsg) {
+  if (showMessage && el.settingsSavedMsg) {
     el.settingsSavedMsg.textContent = '✓ 設定を保存しました';
     setTimeout(() => { if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = ''; }, 2000);
   }
+  return state.projectConfig;
 }
 
 // ============================================================== BUILD ===
@@ -2341,8 +2480,13 @@ async function runBuild(opts = {}) {
       setBuildStatus('error', '設定エラー');
       return;
     }
-    state.projectConfig = settingsResult.config;
-    updateProjectNameDisplay();
+    try {
+      await persistProjectSettings(settingsResult.config);
+    } catch (err) {
+      appendBuildLog(`[ERROR] プロジェクト設定の保存に失敗: ${String(err?.message || err)}`, 'error');
+      setBuildStatus('error', '設定保存失敗');
+      return;
+    }
 
     // 既存のプロジェクトツリーを尊重し、Build 前は構造整備のみを行う
     const genResult = await window.electronAPI.generateStructureOnly(state.projectConfig);
@@ -2631,17 +2775,39 @@ function stopAudioPreview() {
 function extractDisplayPalette(imageData, maxSwatches) {
   const seen = new Map();
   const data = imageData.data;
+  let hasTransparent = false;
   for (let i = 0; i < data.length; i += 4) {
-    if (data[i + 3] < 128) continue;
+    if (data[i + 3] < 128) {
+      hasTransparent = true;
+      continue;
+    }
     const key = (data[i] << 16) | (data[i + 1] << 8) | data[i + 2];
     seen.set(key, (seen.get(key) || 0) + 1);
   }
   const sorted = [...seen.entries()].sort((a, b) => b[1] - a[1]);
-  return sorted.slice(0, maxSwatches).map(([key]) => ({
+  const palette = sorted.slice(0, Math.max(0, maxSwatches - (hasTransparent ? 1 : 0))).map(([key]) => ({
     r: (key >> 16) & 0xff,
     g: (key >> 8) & 0xff,
     b: key & 0xff,
   }));
+  return hasTransparent
+    ? [{ r: 0, g: 0, b: 0, transparent: true }, ...palette]
+    : palette;
+}
+
+function renderPaletteSwatches(container, colors) {
+  if (!container) return;
+  container.innerHTML = '';
+  colors.forEach(({ r, g, b, transparent, empty }, index) => {
+    const sw = document.createElement('div');
+    sw.className = 'palette-swatch';
+    if (transparent) sw.classList.add('is-transparent');
+    if (empty) sw.classList.add('is-empty');
+    const hex = `#${Number(r || 0).toString(16).padStart(2, '0')}${Number(g || 0).toString(16).padStart(2, '0')}${Number(b || 0).toString(16).padStart(2, '0')}`;
+    sw.style.backgroundColor = transparent ? '' : hex;
+    sw.title = transparent ? `${index}: ${hex} (transparent)` : `${index}: ${hex}`;
+    container.appendChild(sw);
+  });
 }
 
 const IMAGE_PREVIEW_ZOOM_PRESETS = ['25', '50', '100', '200', '300', '400', '800'];
@@ -2765,17 +2931,17 @@ async function syncInlinePreview(entry) {
         const ctx = cvs.getContext('2d', { willReadFrequently: true });
         ctx.drawImage(img, 0, 0);
         const imageData = ctx.getImageData(0, 0, cvs.width, cvs.height);
-        const colors = extractDisplayPalette(imageData, 64);
-        if (el.inlinePalette) {
-          el.inlinePalette.innerHTML = '';
-          colors.forEach(({ r, g, b }) => {
-            const sw = document.createElement('div');
-            sw.className = 'palette-swatch';
-            sw.style.background = `rgb(${r},${g},${b})`;
-            const hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-            sw.title = hex;
-            el.inlinePalette.appendChild(sw);
-          });
+        const fallbackColors = extractDisplayPalette(imageData, 16);
+        const paletteBuilder = getPluginCapability('asset-manager')?.buildPreviewPalette;
+        if (typeof paletteBuilder === 'function' && entry.sourceAbsolutePath) {
+          window.electronAPI.readFileAsDataUrl(entry.sourceAbsolutePath).then((res) => {
+            const colors = res?.ok
+              ? paletteBuilder({ dataUrl: res.dataUrl, fallbackColors, maxColors: 16 })
+              : fallbackColors;
+            renderPaletteSwatches(el.inlinePalette, colors);
+          }).catch(() => renderPaletteSwatches(el.inlinePalette, fallbackColors));
+        } else {
+          renderPaletteSwatches(el.inlinePalette, fallbackColors);
         }
       };
       img.src = src;
@@ -3370,7 +3536,7 @@ async function submitResFileModal() {
 
 function snapChannelTo3Bit(value) {
   const level = Math.max(0, Math.min(7, Math.round((Number(value) / 255) * 7)));
-  return Math.round((level / 7) * 255);
+  return level * 36;
 }
 
 function snapColorToMegaDrive(color) {
@@ -3385,7 +3551,7 @@ function colorDistanceSq(a, b) {
   const dr = a.r - b.r;
   const dg = a.g - b.g;
   const db = a.b - b.b;
-  return dr * dr + dg * dg + db * db;
+  return (dr * dr * 0.30) + (dg * dg * 0.59) + (db * db * 0.11);
 }
 
 function countUniqueColors(imageData) {
@@ -3412,13 +3578,218 @@ function rgbToHex(color) {
   return `#${toHex2(color?.r)}${toHex2(color?.g)}${toHex2(color?.b)}`;
 }
 
+function getColorRange(colors, channel) {
+  let min = Infinity;
+  let max = -Infinity;
+  colors.forEach((color) => {
+    min = Math.min(min, color[channel]);
+    max = Math.max(max, color[channel]);
+  });
+  return max - min;
+}
+
+function weightedAverageColor(colors) {
+  let total = 0;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  colors.forEach((color) => {
+    const weight = Math.max(1, colorImportance(color));
+    total += weight;
+    r += color.r * weight;
+    g += color.g * weight;
+    b += color.b * weight;
+  });
+  return snapColorToMegaDrive({
+    r: total ? r / total : 0,
+    g: total ? g / total : 0,
+    b: total ? b / total : 0,
+  });
+}
+
+function colorImportance(color) {
+  const max = Math.max(color.r, color.g, color.b);
+  const min = Math.min(color.r, color.g, color.b);
+  const saturation = max <= 0 ? 0 : (max - min) / max;
+  return color.count * (1 + saturation * 0.85 + Math.max(0, color.edge || 0) * 0.75);
+}
+
+function weightedMedianCutPalette(colors, maxColors) {
+  if (colors.length <= maxColors) {
+    return colors.map(({ r, g, b }) => ({ r, g, b }));
+  }
+
+  const boxes = [colors.slice()];
+  while (boxes.length < maxColors) {
+    boxes.sort((left, right) => {
+      const leftScore = Math.max(getColorRange(left, 'r'), getColorRange(left, 'g'), getColorRange(left, 'b'))
+        * left.reduce((sum, color) => sum + colorImportance(color), 0);
+      const rightScore = Math.max(getColorRange(right, 'r'), getColorRange(right, 'g'), getColorRange(right, 'b'))
+        * right.reduce((sum, color) => sum + colorImportance(color), 0);
+      return rightScore - leftScore;
+    });
+
+    const box = boxes.shift();
+    if (!box || box.length <= 1) {
+      if (box) boxes.push(box);
+      break;
+    }
+
+    const channel = ['r', 'g', 'b'].sort((a, b) => getColorRange(box, b) - getColorRange(box, a))[0];
+    box.sort((left, right) => left[channel] - right[channel]);
+    const total = box.reduce((sum, color) => sum + colorImportance(color), 0);
+    let acc = 0;
+    let split = 1;
+    for (let i = 0; i < box.length - 1; i += 1) {
+      acc += colorImportance(box[i]);
+      if (acc >= total / 2) {
+        split = i + 1;
+        break;
+      }
+    }
+    boxes.push(box.slice(0, split), box.slice(split));
+  }
+
+  return boxes.map(weightedAverageColor);
+}
+
+function refinePaletteKMeans(colors, initialPalette, maxColors, iterations = 14) {
+  let palette = initialPalette.slice(0, maxColors).map((color) => snapColorToMegaDrive(color));
+  const topColors = colors.slice().sort((a, b) => colorImportance(b) - colorImportance(a));
+
+  while (palette.length < maxColors && topColors.length > 0) {
+    const next = topColors.shift();
+    const key = `${next.r},${next.g},${next.b}`;
+    if (!palette.some((color) => `${color.r},${color.g},${color.b}` === key)) {
+      palette.push({ r: next.r, g: next.g, b: next.b });
+    }
+  }
+  if (palette.length === 0) palette = [{ r: 0, g: 0, b: 0 }];
+
+  for (let iter = 0; iter < iterations; iter += 1) {
+    const buckets = palette.map(() => ({ total: 0, r: 0, g: 0, b: 0 }));
+    colors.forEach((color) => {
+      const idx = nearestColorIndex(color, palette);
+      const weight = colorImportance(color);
+      buckets[idx].total += weight;
+      buckets[idx].r += color.r * weight;
+      buckets[idx].g += color.g * weight;
+      buckets[idx].b += color.b * weight;
+    });
+
+    palette = palette.map((color, index) => {
+      const bucket = buckets[index];
+      if (!bucket.total) return color;
+      return snapColorToMegaDrive({
+        r: bucket.r / bucket.total,
+        g: bucket.g / bucket.total,
+        b: bucket.b / bucket.total,
+      });
+    });
+
+    const seen = new Set();
+    palette = palette.filter((color) => {
+      const key = `${color.r},${color.g},${color.b}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    while (palette.length < maxColors && topColors.length > 0) {
+      const next = topColors.shift();
+      const key = `${next.r},${next.g},${next.b}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        palette.push({ r: next.r, g: next.g, b: next.b });
+      }
+    }
+  }
+
+  while (palette.length < maxColors) {
+    palette.push({ ...(palette[palette.length - 1] || { r: 0, g: 0, b: 0 }) });
+  }
+  return palette.slice(0, maxColors);
+}
+
+function popularDiversePalette(colors, maxColors) {
+  const sorted = colors.slice().sort((a, b) => colorImportance(b) - colorImportance(a));
+  const palette = [];
+  sorted.forEach((color) => {
+    if (palette.length >= maxColors) return;
+    const duplicate = palette.some((entry) => `${entry.r},${entry.g},${entry.b}` === `${color.r},${color.g},${color.b}`);
+    if (duplicate) return;
+    const nearest = palette.length > 0
+      ? Math.min(...palette.map((entry) => colorDistanceSq(color, entry)))
+      : Infinity;
+    if (palette.length < 4 || nearest > 900) {
+      palette.push({ r: color.r, g: color.g, b: color.b });
+    }
+  });
+  sorted.forEach((color) => {
+    if (palette.length >= maxColors) return;
+    if (!palette.some((entry) => `${entry.r},${entry.g},${entry.b}` === `${color.r},${color.g},${color.b}`)) {
+      palette.push({ r: color.r, g: color.g, b: color.b });
+    }
+  });
+  return palette;
+}
+
+function farthestPointPalette(colors, maxColors) {
+  const sorted = colors.slice().sort((a, b) => colorImportance(b) - colorImportance(a));
+  const palette = sorted.length ? [{ r: sorted[0].r, g: sorted[0].g, b: sorted[0].b }] : [];
+  while (palette.length < maxColors && palette.length < sorted.length) {
+    let best = null;
+    let bestScore = -Infinity;
+    sorted.forEach((color) => {
+      if (palette.some((entry) => `${entry.r},${entry.g},${entry.b}` === `${color.r},${color.g},${color.b}`)) return;
+      const nearest = Math.min(...palette.map((entry) => colorDistanceSq(color, entry)));
+      const score = nearest * Math.sqrt(colorImportance(color));
+      if (score > bestScore) {
+        bestScore = score;
+        best = color;
+      }
+    });
+    if (!best) break;
+    palette.push({ r: best.r, g: best.g, b: best.b });
+  }
+  return palette;
+}
+
+function paletteError(colors, palette) {
+  return colors.reduce((sum, color) => {
+    const idx = nearestColorIndex(color, palette);
+    return sum + colorDistanceSq(color, palette[idx]) * colorImportance(color);
+  }, 0);
+}
+
+function chooseOptimizedPalette(colors, maxColors) {
+  const starts = [
+    weightedMedianCutPalette(colors, maxColors),
+    popularDiversePalette(colors, maxColors),
+    farthestPointPalette(colors, maxColors),
+  ];
+  let best = null;
+  let bestScore = Infinity;
+  starts.forEach((start) => {
+    const palette = refinePaletteKMeans(colors, start, maxColors, 18);
+    const score = paletteError(colors, palette);
+    if (score < bestScore) {
+      bestScore = score;
+      best = palette;
+    }
+  });
+  return best || refinePaletteKMeans(colors, starts[0] || [], maxColors);
+}
+
 function buildPalette(imageData, maxColors, transparencyMode, customTransparent, reserveCustomColor) {
   const data = imageData.data;
+  const width = imageData.width;
+  const height = imageData.height;
   let transparentColor = { r: 0, g: 0, b: 0 };
   let transparentFound = false;
-  const pixels = [];
+  const colorCounts = new Map();
 
-  for (let i = 0; i < data.length; i += 4) {
+  for (let p = 0; p < width * height; p += 1) {
+    const i = p * 4;
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
@@ -3437,10 +3808,27 @@ function buildPalette(imageData, maxColors, transparencyMode, customTransparent,
       continue;
     }
 
-    pixels.push({ r, g, b });
+    const snapped = snapColorToMegaDrive({ r, g, b });
+    const key = `${snapped.r},${snapped.g},${snapped.b}`;
+    const current = colorCounts.get(key) || { ...snapped, count: 0, edge: 0 };
+    const x = p % width;
+    const y = Math.floor(p / width);
+    let edge = 0;
+    if (x + 1 < width) {
+      const ri = i + 4;
+      edge += Math.sqrt(colorDistanceSq({ r, g, b }, { r: data[ri], g: data[ri + 1], b: data[ri + 2] })) / 255;
+    }
+    if (y + 1 < height) {
+      const di = i + width * 4;
+      edge += Math.sqrt(colorDistanceSq({ r, g, b }, { r: data[di], g: data[di + 1], b: data[di + 2] })) / 255;
+    }
+    current.count += 1;
+    current.edge += Math.min(2, edge);
+    colorCounts.set(key, current);
   }
 
-  if (pixels.length === 0) {
+  const colors = Array.from(colorCounts.values());
+  if (colors.length === 0) {
     return {
       palette: Array.from({ length: maxColors }, () => ({ r: 0, g: 0, b: 0 })),
       transparentColor,
@@ -3448,66 +3836,10 @@ function buildPalette(imageData, maxColors, transparencyMode, customTransparent,
     };
   }
 
-  const maxSamples = 40000;
-  const stride = Math.max(1, Math.floor(pixels.length / maxSamples));
-  const sampled = [];
-  for (let i = 0; i < pixels.length; i += stride) {
-    sampled.push(pixels[i]);
-  }
-
-  let boxes = [sampled];
-  while (boxes.length < maxColors) {
-    boxes.sort((a, b) => {
-      const rangeA = Math.max(
-        Math.max(...a.map((c) => c.r)) - Math.min(...a.map((c) => c.r)),
-        Math.max(...a.map((c) => c.g)) - Math.min(...a.map((c) => c.g)),
-        Math.max(...a.map((c) => c.b)) - Math.min(...a.map((c) => c.b))
-      );
-      const rangeB = Math.max(
-        Math.max(...b.map((c) => c.r)) - Math.min(...b.map((c) => c.r)),
-        Math.max(...b.map((c) => c.g)) - Math.min(...b.map((c) => c.g)),
-        Math.max(...b.map((c) => c.b)) - Math.min(...b.map((c) => c.b))
-      );
-      return rangeB - rangeA;
-    });
-
-    const box = boxes.shift();
-    if (!box || box.length <= 1) {
-      if (box) boxes.push(box);
-      break;
-    }
-
-    const rangeR = Math.max(...box.map((c) => c.r)) - Math.min(...box.map((c) => c.r));
-    const rangeG = Math.max(...box.map((c) => c.g)) - Math.min(...box.map((c) => c.g));
-    const rangeB = Math.max(...box.map((c) => c.b)) - Math.min(...box.map((c) => c.b));
-    const channel = rangeR >= rangeG && rangeR >= rangeB ? 'r' : rangeG >= rangeB ? 'g' : 'b';
-    box.sort((left, right) => left[channel] - right[channel]);
-    const mid = Math.floor(box.length / 2);
-    boxes.push(box.slice(0, mid), box.slice(mid));
-  }
-
-  const deduped = [];
-  const seen = new Set();
-  boxes.forEach((box) => {
-    if (!box.length) return;
-    const avg = snapColorToMegaDrive({
-      r: box.reduce((sum, c) => sum + c.r, 0) / box.length,
-      g: box.reduce((sum, c) => sum + c.g, 0) / box.length,
-      b: box.reduce((sum, c) => sum + c.b, 0) / box.length,
-    });
-    const key = `${avg.r},${avg.g},${avg.b}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      deduped.push(avg);
-    }
-  });
-
-  while (deduped.length < maxColors) {
-    deduped.push({ ...deduped[deduped.length - 1] || { r: 0, g: 0, b: 0 } });
-  }
+  const palette = chooseOptimizedPalette(colors, maxColors);
 
   return {
-    palette: deduped.slice(0, maxColors),
+    palette,
     transparentColor,
     hasTransparent: transparencyMode !== 'none' && !reserveCustomColor,
   };
@@ -3533,14 +3865,130 @@ function getPatternValue(patternName, x, y) {
   return p[y % h][x % w];
 }
 
-function quantizeToIndexed16(imageData, options) {
+function mapImageToPalette(imageData, palette, options = {}) {
   const out = new ImageData(imageData.width, imageData.height);
   const src = imageData.data;
   const dst = out.data;
   const indices = new Uint8Array(imageData.width * imageData.height);
 
+  const ditherMode = options.ditherMode || 'none';
+  const ditherWeight = Number(options.ditherWeight || 0);
+  const ditherPattern = options.ditherPattern || 'diagonal4';
+  const transparentColor = options.transparentColor || { r: 0, g: 0, b: 0 };
+  const hasTransparent = Boolean(options.hasTransparent);
+  const transparentPaletteIndex = Number.isFinite(Number(options.transparentPaletteIndex))
+    ? Number(options.transparentPaletteIndex)
+    : -1;
+  const isTransparentPixel = typeof options.isTransparentPixel === 'function'
+    ? options.isTransparentPixel
+    : () => false;
+
+  if (ditherMode === 'slow') {
+    const work = new Float32Array(src.length);
+    for (let i = 0; i < src.length; i += 1) work[i] = src[i];
+    const distribute = (px, errR, errG, errB, factor) => {
+      if (px < 0 || px >= indices.length) return;
+      const i = px * 4;
+      if (src[i + 3] < 128) return;
+      work[i] += errR * factor * ditherWeight;
+      work[i + 1] += errG * factor * ditherWeight;
+      work[i + 2] += errB * factor * ditherWeight;
+    };
+
+    for (let y = 0; y < imageData.height; y += 1) {
+      const reverse = (y % 2) === 1;
+      const xStart = reverse ? imageData.width - 1 : 0;
+      const xEnd = reverse ? -1 : imageData.width;
+      const step = reverse ? -1 : 1;
+      for (let x = xStart; x !== xEnd; x += step) {
+        const px = y * imageData.width + x;
+        const i = px * 4;
+        const r = clampColorChannel(work[i]);
+        const g = clampColorChannel(work[i + 1]);
+        const b = clampColorChannel(work[i + 2]);
+        const a = src[i + 3];
+
+        if (hasTransparent && isTransparentPixel(r, g, b, a)) {
+          dst[i] = transparentColor.r;
+          dst[i + 1] = transparentColor.g;
+          dst[i + 2] = transparentColor.b;
+          dst[i + 3] = 0;
+          indices[px] = transparentPaletteIndex;
+          continue;
+        }
+
+        const idx = nearestColorIndex(snapColorToMegaDrive({ r, g, b }), palette);
+        const c = palette[idx];
+        dst[i] = c.r;
+        dst[i + 1] = c.g;
+        dst[i + 2] = c.b;
+        dst[i + 3] = 255;
+        indices[px] = idx;
+
+        const errR = r - c.r;
+        const errG = g - c.g;
+        const errB = b - c.b;
+        const east = y * imageData.width + (x + step);
+        const southWest = (y + 1) * imageData.width + (x - step);
+        const south = (y + 1) * imageData.width + x;
+        const southEast = (y + 1) * imageData.width + (x + step);
+        distribute(east, errR, errG, errB, 7 / 16);
+        distribute(southWest, errR, errG, errB, 3 / 16);
+        distribute(south, errR, errG, errB, 5 / 16);
+        distribute(southEast, errR, errG, errB, 1 / 16);
+      }
+    }
+
+    return { imageData: out, indices };
+  }
+
+  for (let y = 0; y < imageData.height; y += 1) {
+    for (let x = 0; x < imageData.width; x += 1) {
+      const px = y * imageData.width + x;
+      const i = px * 4;
+      const r = src[i];
+      const g = src[i + 1];
+      const b = src[i + 2];
+      const a = src[i + 3];
+
+      if (hasTransparent && isTransparentPixel(r, g, b, a)) {
+        dst[i] = transparentColor.r;
+        dst[i + 1] = transparentColor.g;
+        dst[i + 2] = transparentColor.b;
+        dst[i + 3] = 0;
+        indices[px] = transparentPaletteIndex;
+        continue;
+      }
+
+      let rr = r;
+      let gg = g;
+      let bb = b;
+      if (ditherMode === 'fast') {
+        const p = getPatternValue(ditherPattern, x, y);
+        const shift = (p - 0.5) * ditherWeight * 96;
+        rr = clampColorChannel(rr + shift);
+        gg = clampColorChannel(gg + shift);
+        bb = clampColorChannel(bb + shift);
+      }
+
+      const idx = nearestColorIndex(snapColorToMegaDrive({ r: rr, g: gg, b: bb }), palette);
+      const c = palette[idx];
+      dst[i] = c.r;
+      dst[i + 1] = c.g;
+      dst[i + 2] = c.b;
+      dst[i + 3] = 255;
+      indices[px] = idx;
+    }
+  }
+
+  return { imageData: out, indices };
+}
+
+function quantizeToIndexed16(imageData, options) {
+  const out = new ImageData(imageData.width, imageData.height);
+
   const transparencyMode = options.transparencyMode || 'none';
-  const ditherEnabled = options.ditherEnabled;
+  const ditherMode = options.ditherMode || (options.ditherEnabled ? 'fast' : 'none');
   const ditherWeight = Number(options.ditherWeight || 0);
   const ditherPattern = options.ditherPattern || 'diagonal4';
   const customTransparent = hexToRgb(options.transparencyColor || '#ff00ff');
@@ -3574,57 +4022,53 @@ function quantizeToIndexed16(imageData, options) {
       : (hasTransparent ? [{ ...transparentColor }, ...built.palette] : built.palette);
   }
 
-  for (let y = 0; y < imageData.height; y += 1) {
-    for (let x = 0; x < imageData.width; x += 1) {
-      const i = (y * imageData.width + x) * 4;
-      const r = src[i];
-      const g = src[i + 1];
-      const b = src[i + 2];
-      const a = src[i + 3];
-
+  const mapped = mapImageToPalette(imageData, fullPalette, {
+    ditherMode,
+    ditherWeight,
+    ditherPattern,
+    transparentColor,
+    hasTransparent: !hasReferencePalette && hasTransparent,
+    transparentPaletteIndex: 0,
+    isTransparentPixel: (r, g, b, a) => {
       const isSourceTransparent = a < 128;
       const isCustomTransparent = transparencyMode === 'custom'
         && !reserveCustomColor
         && colorDistanceSq({ r, g, b }, customTransparent) <= (16 * 16 * 3);
-      const transparent = (transparencyMode === 'source' && isSourceTransparent) || isCustomTransparent;
-
-      if (!hasReferencePalette && transparent && hasTransparent) {
-        dst[i] = transparentColor.r;
-        dst[i + 1] = transparentColor.g;
-        dst[i + 2] = transparentColor.b;
-        dst[i + 3] = 0;
-        indices[y * imageData.width + x] = 0; // 透明色はパレットindex 0
-        continue;
-      }
-
-      let rr = r;
-      let gg = g;
-      let bb = b;
-
-      if (ditherEnabled) {
-        const p = getPatternValue(ditherPattern, x, y);
-        const shift = (p - 0.5) * ditherWeight * 96;
-        rr = Math.max(0, Math.min(255, rr + shift));
-        gg = Math.max(0, Math.min(255, gg + shift));
-        bb = Math.max(0, Math.min(255, bb + shift));
-      }
-
-      const idx = nearestColorIndex({ r: rr, g: gg, b: bb }, fullPalette);
-      const c = fullPalette[idx];
-      dst[i] = c.r;
-      dst[i + 1] = c.g;
-      dst[i + 2] = c.b;
-      dst[i + 3] = 255;
-      indices[y * imageData.width + x] = idx;
-    }
-  }
+      return (transparencyMode === 'source' && isSourceTransparent) || isCustomTransparent;
+    },
+  });
 
   return {
-    imageData: out,
+    imageData: mapped.imageData || out,
     palette: fullPalette,
-    indices,
+    indices: mapped.indices,
     transparentPaletteIndex: (!hasReferencePalette && hasTransparent) ? 0 : -1,
   };
+}
+
+function clampColorChannel(value) {
+  return Math.max(0, Math.min(255, Math.round(Number(value) || 0)));
+}
+
+function applyQuantizeToneAdjustments(imageData, options = {}) {
+  const brightness = Number(options.brightness || 0);
+  const saturation = Number(options.saturation || 1);
+  const out = new ImageData(imageData.width, imageData.height);
+  const src = imageData.data;
+  const dst = out.data;
+
+  for (let i = 0; i < src.length; i += 4) {
+    const r = src[i];
+    const g = src[i + 1];
+    const b = src[i + 2];
+    const gray = (r * 0.299) + (g * 0.587) + (b * 0.114);
+    dst[i] = clampColorChannel(gray + ((r - gray) * saturation) + brightness);
+    dst[i + 1] = clampColorChannel(gray + ((g - gray) * saturation) + brightness);
+    dst[i + 2] = clampColorChannel(gray + ((b - gray) * saturation) + brightness);
+    dst[i + 3] = src[i + 3];
+  }
+
+  return out;
 }
 
 function drawImageDataToCanvas(canvas, imageData) {
@@ -3817,6 +4261,7 @@ async function imageDataToIndexedPng(imageData) {
 function closeQuantizeModal() {
   quantizeState.active = false;
   quantizeState.onApply = null;
+  quantizeState.adjustedData = null;
   quantizeState.sourcePath = '';
   quantizeState.referencePalette = null;
   quantizeState.referencePalettePath = '';
@@ -3826,6 +4271,9 @@ function closeQuantizeModal() {
   quantizeState.referencePaletteError = '';
   quantizeState.lastReferenceLogToken = '';
   quantizeState.referencePaletteLabel = '';
+  if (el.quantizeResultPalette) {
+    el.quantizeResultPalette.innerHTML = '';
+  }
   if (el.quantizeModal) {
     el.quantizeModal.classList.remove('open');
     el.quantizeModal.setAttribute('aria-hidden', 'true');
@@ -3857,14 +4305,32 @@ function syncQuantizeColorUI() {
 }
 
 function syncQuantizeDitheringUI() {
-  const enabled = Boolean(el.quantizeDitheringEnabled?.checked);
+  const mode = el.quantizeDitherMode?.value || (el.quantizeDitheringEnabled?.checked ? 'fast' : 'none');
+  const enabled = mode !== 'none';
   if (el.quantizeDitheringWeight) {
     el.quantizeDitheringWeight.disabled = !enabled;
     el.quantizeDitheringWeight.classList.toggle('quantize-control-disabled', !enabled);
   }
   if (el.quantizePattern) {
-    el.quantizePattern.disabled = !enabled;
-    el.quantizePattern.classList.toggle('quantize-control-disabled', !enabled);
+    el.quantizePattern.disabled = mode !== 'fast';
+    el.quantizePattern.classList.toggle('quantize-control-disabled', mode !== 'fast');
+  }
+}
+
+function getQuantizeToneOptions() {
+  return {
+    brightness: Number(el.quantizeBrightness?.value || 0),
+    saturation: Number(el.quantizeSaturation?.value || 1),
+  };
+}
+
+function syncQuantizeToneUI() {
+  const tone = getQuantizeToneOptions();
+  if (el.quantizeBrightnessLabel) {
+    el.quantizeBrightnessLabel.textContent = tone.brightness > 0 ? `+${tone.brightness}` : String(tone.brightness);
+  }
+  if (el.quantizeSaturationLabel) {
+    el.quantizeSaturationLabel.textContent = tone.saturation.toFixed(2);
   }
 }
 
@@ -3905,6 +4371,22 @@ function syncQuantizePaletteUI() {
       el.quantizePaletteHint.classList.remove('form-error');
     }
   }
+}
+
+function renderQuantizeResultPalette(palette = [], transparentIndex = -1) {
+  if (!el.quantizeResultPalette) return;
+  el.quantizeResultPalette.innerHTML = '';
+  const colors = palette.slice(0, 16);
+  while (colors.length < 16) colors.push({ ...(colors[colors.length - 1] || { r: 0, g: 0, b: 0 }) });
+  colors.forEach((color, index) => {
+    const swatch = document.createElement('span');
+    const isTransparent = index === transparentIndex;
+    swatch.className = `palette-swatch${isTransparent ? ' is-transparent' : ''}`;
+    const hex = rgbToHex(color);
+    swatch.style.backgroundColor = isTransparent ? '' : hex;
+    swatch.title = `${index}: ${hex}${isTransparent ? ' (transparent)' : ''}`;
+    el.quantizeResultPalette.appendChild(swatch);
+  });
 }
 
 async function loadQuantizeReferencePalette(sourcePath) {
@@ -4021,15 +4503,22 @@ async function rerenderQuantizePreview() {
 
   syncQuantizeColorUI();
   syncQuantizeDitheringUI();
+  syncQuantizeToneUI();
 
   const selectedRef = el.quantizePaletteAsset?.value || '';
   await loadQuantizeReferencePalette(selectedRef);
+  const tone = getQuantizeToneOptions();
+  const adjustedData = applyQuantizeToneAdjustments(quantizeState.originalData, tone);
+  quantizeState.adjustedData = adjustedData;
+  if (el.quantizeBeforeCanvas) {
+    drawImageDataToCanvas(el.quantizeBeforeCanvas, adjustedData);
+  }
 
   const options = {
     transparencyMode: el.quantizeTransparencyMode?.value || 'none',
     transparencyColor: el.quantizeTransparencyColor?.value || '#ff00ff',
     reserveCustomColor: Boolean(el.quantizeUseSharedCustomColor?.checked),
-    ditherEnabled: Boolean(el.quantizeDitheringEnabled?.checked),
+    ditherMode: el.quantizeDitherMode?.value || (el.quantizeDitheringEnabled?.checked ? 'fast' : 'none'),
     ditherWeight: Number(el.quantizeDitheringWeight?.value || 0),
     ditherPattern: el.quantizePattern?.value || 'diagonal4',
     referencePalette: quantizeState.referencePalette,
@@ -4039,8 +4528,9 @@ async function rerenderQuantizePreview() {
     el.quantizeWeightLabel.textContent = options.ditherWeight.toFixed(2);
   }
 
-  const converted = quantizeToIndexed16(quantizeState.originalData, options);
+  const converted = quantizeToIndexed16(adjustedData, options);
   drawImageDataToCanvas(el.quantizeAfterCanvas, converted.imageData);
+  renderQuantizeResultPalette(converted.palette, converted.transparentPaletteIndex);
   // プレビュー表示用 (RGBA PNG) – 実際の保存は indexed PNG を使う
   quantizeState.convertedDataUrl = readCanvasAsPngDataUrl(el.quantizeAfterCanvas);
   // indexed PNG 生成用に最終変換結果を保存
@@ -4052,10 +4542,14 @@ async function rerenderQuantizePreview() {
     height: quantizeState.originalData.height,
   };
 
-  const srcColors = countUniqueColors(quantizeState.originalData);
+  const srcColors = countUniqueColors(adjustedData);
   const dstColors = countUniqueColors(converted.imageData);
   const refNote = options.referencePalette ? ' / mode: ref-palette' : '';
-  el.quantizeStats.textContent = `colors: ${srcColors} -> ${dstColors} / palette: ${converted.palette.length}${refNote}`;
+  const ditherNote = ` / dither: ${options.ditherMode}`;
+  const toneNote = (tone.brightness !== 0 || tone.saturation !== 1)
+    ? ` / brightness: ${tone.brightness > 0 ? '+' : ''}${tone.brightness} / saturation: ${tone.saturation.toFixed(2)}`
+    : '';
+  el.quantizeStats.textContent = `colors: ${srcColors} -> ${dstColors} / palette: ${converted.palette.length}${refNote}${ditherNote}${toneNote}`;
 }
 
 function populateQuantizePaletteAssetOptions(excludeSourcePath = '') {
@@ -4097,7 +4591,14 @@ async function openQuantizeModal(sourceDataUrl, options = {}) {
   if (el.quantizePaletteAsset) {
     el.quantizePaletteAsset.value = '';
   }
+  if (el.quantizeBrightness) {
+    el.quantizeBrightness.value = '0';
+  }
+  if (el.quantizeSaturation) {
+    el.quantizeSaturation.value = '1';
+  }
   syncQuantizePaletteUI();
+  syncQuantizeToneUI();
 
   if (el.quantizeBeforeCanvas) {
     drawImageDataToCanvas(el.quantizeBeforeCanvas, imageData);
@@ -4110,6 +4611,9 @@ async function openQuantizeModal(sourceDataUrl, options = {}) {
 
   if (el.quantizeDitheringEnabled) {
     el.quantizeDitheringEnabled.checked = true;
+  }
+  if (el.quantizeDitherMode) {
+    el.quantizeDitherMode.value = 'fast';
   }
 
   await rerenderQuantizePreview();
@@ -5474,7 +5978,24 @@ function openProjectModal() {
   if (el.projectTitleInput) el.projectTitleInput.value = state.projectConfig.title || 'MY GAME';
   if (el.projectAuthorInput) el.projectAuthorInput.value = state.projectConfig.author || 'AUTHOR';
   if (el.projectSerialInput) el.projectSerialInput.value = state.projectConfig.serial || 'GM 00000000-00';
+  populateProjectBuilderSelect();
   openModal(el.projectModal);
+}
+
+function getInstalledBuilderPlugins() {
+  return pluginState.plugins
+    .filter((plugin) => plugin.enabled && pluginSupportsRole(plugin, 'builder'))
+    .sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), 'ja'));
+}
+
+function populateProjectBuilderSelect() {
+  if (!el.projectBuilderSelect) return;
+  const builders = getInstalledBuilderPlugins();
+  const options = ['<option value="">空のプロジェクト</option>'];
+  builders.forEach((plugin) => {
+    options.push(`<option value="${escHtml(plugin.id)}">${escHtml(plugin.name)}</option>`);
+  });
+  el.projectBuilderSelect.innerHTML = options.join('');
 }
 
 async function submitProjectModal() {
@@ -5492,6 +6013,10 @@ async function submitProjectModal() {
       region: 'JUE',
     },
   };
+  const selectedBuilder = String(el.projectBuilderSelect?.value || '').trim();
+  if (selectedBuilder) {
+    payload.config.pluginRoles = { builder: selectedBuilder };
+  }
   const result = await window.electronAPI.createNewProject(payload);
   if (!result?.ok) {
     if (!result?.canceled && el.settingsSavedMsg) {
@@ -5503,6 +6028,7 @@ async function submitProjectModal() {
   await loadProjectConfig();
   await loadResDefinitions({ keepSelection: false });
   await refreshProjectList();
+  await loadPlugins();
   if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `✓ プロジェクトを作成しました: ${result.projectDir}`;
 }
 
@@ -5588,6 +6114,8 @@ function bindEvents() {
   el.btnTestPlay?.addEventListener('click', openTestPlay);
   el.btnNewProject?.addEventListener('click', openProjectPicker);
   el.btnOpenProject?.addEventListener('click', openProjectPicker);
+  el.projectName?.addEventListener('click', openProjectPicker);
+  el.projectDirLabel?.addEventListener('click', openCurrentProjectDirectory);
   $('btnOpenSetup')?.addEventListener('click', () => {
     window.electronAPI.openSetupWindow();
   });
@@ -5690,15 +6218,7 @@ function bindEvents() {
     }
   });
 
-  el.btnOpenProjectDir?.addEventListener('click', async () => {
-    if (!state.project.dir) {
-      return;
-    }
-    const result = await window.electronAPI.openPathInExplorer(state.project.dir);
-    if (!result?.ok && el.settingsSavedMsg) {
-      el.settingsSavedMsg.textContent = `フォルダを開けませんでした: ${result?.error || 'unknown'}`;
-    }
-  });
+  el.btnOpenProjectDir?.addEventListener('click', openCurrentProjectDirectory);
   el.btnSettingsProjectPicker?.addEventListener('click', openProjectPicker);
 
   el.btnOpenResDir?.addEventListener('click', async () => {
@@ -5984,8 +6504,11 @@ function bindEvents() {
     el.quantizeTransparencyColor,
     el.quantizeUseSharedCustomColor,
     el.quantizeDitheringEnabled,
+    el.quantizeDitherMode,
     el.quantizeDitheringWeight,
     el.quantizePattern,
+    el.quantizeBrightness,
+    el.quantizeSaturation,
     el.quantizePaletteAsset,
   ].forEach((control) => {
     control?.addEventListener('input', () => { void rerenderQuantizePreview(); });
@@ -5999,6 +6522,10 @@ function bindEvents() {
   el.btnCopyLog?.addEventListener('click', async (e) => {
     e.stopPropagation();
     await copyBuildLog();
+  });
+  el.btnPopoutLog?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await openLogPopout();
   });
   el.btnClearLog?.addEventListener('click', (e) => { e.stopPropagation(); clearBuildLog(); });
   el.btnToggleLog?.addEventListener('click', (e) => { e.stopPropagation(); setLogOpen(!state.logOpen); });
@@ -6126,12 +6653,12 @@ function bindEvents() {
 // ============================================================ BOOTSTRAP ===
 
 async function bootstrap() {
-  setLogOpenHeight(state.logOpenHeight);
+  const savedLogState = loadLogViewerState();
+  setLogOpenHeight(savedLogState.openHeight);
   setLogOpen(false);
   if (el.logLevelFilter) el.logLevelFilter.value = state.logs.levelFilter;
   bindEvents();
   bindCodeScrollSync();
-  switchPage('assets'); // nav-btn の active 状態を確定
   setPreviewPanelOpen(true);
   setAccordionOpen('params', true);
   setAccordionOpen('preview', true);

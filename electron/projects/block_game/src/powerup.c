@@ -12,6 +12,9 @@ PowerUpState powerup_state;
 /** 繝代Ρ繝ｼ繧｢繝・・蜉ｹ譫懊・謖∫ｶ壽凾髢難ｼ医ヵ繝ｬ繝ｼ繝・・*/
 #define POWERUP_DURATION    (60 * 15)   /* 15遘・@ 60fps */
 #define SPEED_UP_BONUS      FIX16(2)
+#define BARRIER_DRAW_UNKNOWN 0xFF
+
+static u8 barrier_draw_state = BARRIER_DRAW_UNKNOWN;
 
 /* ===================================================================
  * 蜀・Κ繝倥Ν繝代・
@@ -91,6 +94,7 @@ void powerupReset(void)
     powerup_state.speed_up = FALSE;
     powerup_state.speed_up_timer = 0;
     barrier_visible = FALSE;
+    barrier_draw_state = BARRIER_DRAW_UNKNOWN;
 }
 
 /**
@@ -223,31 +227,29 @@ void powerupDraw(void)
         }
     }
 
-    /* --- 繝舌Μ繧｢繝ｩ繧､繝ｳ繧ｹ繝励Λ繧､繝・--- */
-    u8 barrier_spr = SPR_BARRIER;
-    if (barrier_visible)
+    if (barrier_draw_state != (u8)barrier_visible)
     {
-        /* 逕ｻ髱｢荳矩Κ縺ｫ繝舌Μ繧｢繝ｩ繧､繝ｳ繧定｡ｨ遉ｺ・・G_A繧ｿ繧､繝ｫ縺ｨ縺励※謠冗判・・*/
         u16 tile_y = (PLAY_FIELD_H / 8) - 1;  /* 譛荳玖｡・*/
-        for (u8 tx = 0; tx < 32; tx++)
+        if (barrier_visible)
         {
-            VDP_setTileMapXY(
-                BG_A,
-                TILE_ATTR_FULL(PAL_SPRITES, TRUE, FALSE, FALSE, TILE_BARRIER_IDX),
-                tx, tile_y
-            );
+            for (u8 tx = 0; tx < 32; tx++)
+            {
+                VDP_setTileMapXY(
+                    BG_A,
+                    TILE_ATTR_FULL(PAL_SPRITES, TRUE, FALSE, FALSE, TILE_BARRIER_IDX),
+                    tx, tile_y
+                );
+            }
         }
-        /* 繝舌Μ繧｢繧ｹ繝励Λ繧､繝医・荳崎ｦ・ｼ・G繧ｿ繧､繝ｫ縺ｧ莉｣逕ｨ・・*/
-        VDP_setSpriteFull(barrier_spr, -128, -128, SPRITE_SIZE(1, 1), 0, 0);
-    }
-    else
-    {
-        /* 繝舌Μ繧｢繝ｩ繧､繝ｳ豸亥悉 */
-        u16 tile_y = (PLAY_FIELD_H / 8) - 1;
-        for (u8 tx = 0; tx < 32; tx++)
+        else
         {
-            VDP_setTileMapXY(BG_A, 0, tx, tile_y);
+            for (u8 tx = 0; tx < 32; tx++)
+            {
+                VDP_setTileMapXY(BG_A, 0, tx, tile_y);
+            }
         }
-        VDP_setSpriteFull(barrier_spr, -128, -128, SPRITE_SIZE(1, 1), 0, 0);
+        barrier_draw_state = (u8)barrier_visible;
     }
+
+    VDP_setSpriteFull(SPR_BARRIER, -128, -128, SPRITE_SIZE(1, 1), 0, 0);
 }
