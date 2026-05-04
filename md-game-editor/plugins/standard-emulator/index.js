@@ -3,16 +3,23 @@
 /**
  * 標準エミュレーター（WASM）プラグイン
  * TestPlay 実行時のフックを提供します。
- * 実際の起動処理は main.js の window:openTestPlay が担当します。
+ * エミュレーターウィンドウ本体はこのプラグイン内の HTML / preload から起動します。
  */
 
 /**
  * @param {{ romPath: string }} payload
+ * @param {{ testPlay?: { openWasmWindow?: Function } }} context
  */
-async function onTestPlay(payload) {
-  // main.js のデフォルト TestPlay 処理（WASM ウィンドウ起動）に委譲
-  // このフックは将来の拡張用（ログ出力・パラメータ変更など）のために用意されています
-  return { ok: true, handled: false };
+async function onTestPlay(payload, context = {}) {
+  if (!context.testPlay || typeof context.testPlay.openWasmWindow !== 'function') {
+    return { ok: false, error: 'Test Play host API is unavailable' };
+  }
+
+  const result = await context.testPlay.openWasmWindow({
+    romPath: payload?.romPath || null,
+    pluginId: 'standard-emulator',
+  });
+  return { ok: true, handled: true, result };
 }
 
 module.exports = { onTestPlay };

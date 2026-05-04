@@ -26,7 +26,6 @@ md-game-editor/
 ├── main.js                  # メインプロセス (ウィンドウ管理 / IPC ハブ)
 ├── preload.js               # メインウィンドウ向け contextBridge
 ├── debug-preload.js         # デバッグウィンドウ向け contextBridge
-├── testplay-preload.js      # テストプレイウィンドウ向け contextBridge
 ├── testplay-settings-preload.js  # テストプレイ設定ウィンドウ向け contextBridge
 ├── setup-manager.js         # ツール (SGDK / JRE / marsdev) の管理
 ├── build-system.js          # SGDK ビルドオーケストレーション
@@ -34,7 +33,6 @@ md-game-editor/
 ├── package.json
 ├── renderer/                # レンダラープロセス (HTML / CSS / JS)
 │   ├── index.html           # メイン画面 (プロジェクト設定 / ビルド)
-│   ├── testplay.html        # テストプレイ画面
 │   ├── testplay-settings.html  # 入力設定画面
 │   ├── debug-wasm.html      # WASM デバッグビューア
 │   └── style.css
@@ -42,6 +40,7 @@ md-game-editor/
 │   ├── copy-pkg.js          # frontend/pkg → md-game-editor/pkg コピー
 │   └── prepare-dist.js      # パッケージ前ビルド (WASM + md-api バイナリ)
 ├── projects/                # 同梱サンプルプロジェクト
+├── plugins/                 # Build / Test Play / Editor プラグイン
 ├── pkg/                     # 実行時 WASM アセット (自動生成)
 └── bin/                     # 同梱バイナリ (自動生成): md-api.exe 等
 ```
@@ -345,8 +344,9 @@ contextBridge.exposeInMainWorld('myFeatureAPI', {
 `md-game-editor/renderer/` 以下の HTML / CSS を編集します:
 
 - `index.html` + `renderer.js` — メイン設定画面
-- `testplay.html` — テストプレイ画面
 - `debug-wasm.html` — WASM デバッグビューア
+
+Test Play 画面は `plugins/standard-emulator/` や `plugins/standard-api-emulator/` 側に内包されています。
 
 ---
 

@@ -120,6 +120,7 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 
 `renderer.entry` と `renderer.styles` は plugin ディレクトリ内の相対パスに限定する。`../` や絶対パスで plugin 外へ出る指定は禁止。
 ページを持たない converter でも `hostRoot` が渡されるため、独自 modal や背景処理のために本体 HTML を変更しない。
+editor plugin の `pageRoot` / `root` は `<section class="editor-page">` 自体なので、root に付ける plugin 固有 class へ `display` を指定しない。ページ表示はホストの `.editor-page.active` が管理する。ページ全体の `display: flex` / `grid` は root 直下に wrapper 要素を作って指定する。
 プラグイン同士の連携は `api.capabilities.get()` / `api.capabilities.require()` / `api.events.on()` / `api.events.emit()` を使い、本体側に個別 plugin ID の分岐を追加しない。
 renderer から main process hook を呼ぶ場合は `hooks` と `mainApi.hooks` の両方に宣言し、`api.plugins.invokeHook()` または `window.electronAPI.invokePluginHook()` を使う。
 asset type / import / image 変換は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として登録する。
@@ -231,6 +232,8 @@ TYPE   name   "ファイルパス"   [追加パラメータ]
 | `onTestPlay` | Test Play ボタン押下 | `romPath` |
 | `generateSource` | ジェネレータ実行時 | *(assets 配列)* |
 
+`onTestPlay` の `context.testPlay` には、組み込みエミュレータープラグイン向けに `openWasmWindow` / `openApiWindow` / `startApiServer` / `stopApiServer` / `isApiServerRunning` が渡される。
+
 ---
 
 ## generateSource の実装ルール
@@ -271,4 +274,4 @@ TYPE   name   "ファイルパス"   [追加パラメータ]
 
 ---
 
-*Last Updated: 2026-04 / SGDK 2.11 / Plugin Runtime v2.4*
+*Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.4*

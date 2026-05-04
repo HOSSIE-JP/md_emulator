@@ -427,6 +427,16 @@ function setEnabledWithDependencies(id, enabled) {
   };
 }
 
+function getPluginDirectory(id) {
+  const pluginId = String(id || '').trim();
+  if (!pluginId) return null;
+  const userDir = path.join(getUserPluginsDir(), pluginId);
+  if (fs.existsSync(userDir)) return userDir;
+  const builtinDir = path.join(getPluginsDir(), pluginId);
+  if (fs.existsSync(builtinDir)) return builtinDir;
+  return null;
+}
+
 function setExclusiveRoleSelection(roleId, id) {
   const role = String(roleId || '').trim();
   const pluginId = String(id || '').trim();
@@ -530,5 +540,6 @@ module.exports = {
   invokeRendererHook,
   isPluginEnabled,
   getPluginsDir,
+  getPluginDirectory,
   getUserPluginsDir,
 };

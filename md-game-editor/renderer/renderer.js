@@ -818,6 +818,19 @@ function getPluginRendererPageId(plugin) {
   return String(plugin?.renderer?.page || plugin?.tab?.page || '').trim();
 }
 
+function getPluginPageDomId(plugin) {
+  const pageId = getPluginRendererPageId(plugin);
+  if (!pageId) return '';
+  const staticSection = document.getElementById(`page-${pageId}`);
+  if (staticSection && !staticSection.dataset.pluginPageOwner) {
+    return pageId;
+  }
+  const safePluginId = String(plugin?.id || 'plugin')
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .replace(/^-+|-+$/g, '') || 'plugin';
+  return `plugin-${safePluginId}`;
+}
+
 function createPluginLogger(plugin) {
   const source = `plugin:${plugin.id}:renderer`;
   return {
@@ -884,16 +897,20 @@ function getPluginDomId(plugin, suffix) {
 }
 
 function ensurePluginPageRoot(plugin) {
-  const pageId = getPluginRendererPageId(plugin);
+  const pageId = getPluginPageDomId(plugin);
   if (!pageId) return null;
 
   let section = document.getElementById(`page-${pageId}`);
-  if (section) return section;
+  if (section) {
+    if (section.dataset.pluginPageOwner === plugin.id) return section;
+    if (!section.dataset.pluginPageOwner && getPluginRendererPageId(plugin) === pageId) return section;
+  }
 
   section = document.createElement('section');
   section.className = 'editor-page';
   section.id = `page-${pageId}`;
   section.dataset.pluginPageOwner = plugin.id;
+  section.dataset.pluginRendererPage = getPluginRendererPageId(plugin);
   const host = document.querySelector('.editor-area');
   host?.appendChild(section);
   return section;
@@ -1076,7 +1093,7 @@ function getFirstVisiblePageId() {
 }
 
 function resolvePluginPageId(plugin) {
-  const pageId = getPluginRendererPageId(plugin);
+  const pageId = getPluginPageDomId(plugin);
   if (pageId && document.getElementById(`page-${pageId}`)) {
     return pageId;
   }
@@ -1259,15 +1276,32 @@ function getFirstSidebarPluginPageId() {
 
 function applyPluginPageAvailability() {
   const pageBindings = new Map();
+  const pluginById = new Map(pluginState.plugins.map((plugin) => [plugin.id, plugin]));
   pluginState.plugins.forEach((plugin) => {
-    const pageId = getPluginRendererPageId(plugin);
-    if (pageId) pageBindings.set(pageId, plugin);
+    const pageId = getPluginPageDomId(plugin);
+    if (!pageId) return;
+    const entries = pageBindings.get(pageId) || [];
+    entries.push(plugin);
+    pageBindings.set(pageId, entries);
   });
 
-  pageBindings.forEach((plugin, pageId) => {
+  document.querySelectorAll('.editor-page[data-plugin-page-owner]').forEach((section) => {
+    const ownerId = section.dataset.pluginPageOwner || '';
+    const owner = pluginById.get(ownerId);
+    const pageId = section.id.replace(/^page-/, '');
+    section.hidden = !(
+      owner
+      && getPluginPageDomId(owner) === pageId
+      && owner.enabled
+      && (owner.hasRenderer || owner.tab)
+    );
+  });
+
+  pageBindings.forEach((plugins, pageId) => {
     const section = document.getElementById(`page-${pageId}`);
     if (!section) return;
-    section.hidden = !(plugin.enabled && (plugin.hasRenderer || plugin.tab));
+    if (section.dataset.pluginPageOwner) return;
+    section.hidden = !plugins.some((plugin) => plugin.enabled && (plugin.hasRenderer || plugin.tab));
   });
 
   if (el.pageCode?.hidden) {
@@ -2465,12 +2499,12 @@ async function persistProjectSettings(config, { showMessage = false } = {}) {
  * @param {string} [opts._generatedByPlugin] - このプラグイン ID が既に main.c を書き込み済み
  */
 async function runBuild(opts = {}) {
-  if (state.building) return;
+  if (state.building) return { success: false, error: 'building' };
   if (el.btnBuild?.disabled) {
     setLogOpen(true);
     appendBuildLog('[WARN] 有効な Build プラグインがありません。Plugins 画面で有効化してください。', 'warn');
     setBuildStatus('error', 'Build プラグイン未設定');
-    return;
+    return { success: false, error: 'Build プラグイン未設定' };
   }
 
   // ---- アクティブビルダープラグインが設定されており、かつ呼び出し元がプラグイン生成後でない場合 ----
@@ -2483,11 +2517,10 @@ async function runBuild(opts = {}) {
       setLogOpen(true);
       setBuildStatus('error', 'プラグイン生成失敗');
       appendBuildLog(`[ERROR] プラグイン生成失敗: ${genResult.error}`, 'error');
-      return;
+      return { success: false, error: genResult.error || 'プラグイン生成失敗' };
     }
     appendBuildLog(`[Plugin] ${builderPluginId}: main.c を生成しました`);
-    await runBuild({ _generatedByPlugin: builderPluginId });
-    return;
+    return runBuild({ _generatedByPlugin: builderPluginId });
   }
 
   // ---- プラグイン生成済みでない通常ビルド: 現在のコードファイルを保存 ----
@@ -2497,14 +2530,14 @@ async function runBuild(opts = {}) {
       updateCodeStatus('⚠ フォルダではなくファイルを選択してください。');
       setLogOpen(true);
       setBuildStatus('error', 'コードファイル未選択');
-      return;
+      return { success: false, error: 'コードファイル未選択' };
     }
     if (state.code.dirty) {
       const saved = await saveCurrentCodeFile();
       if (!saved) {
         setLogOpen(true);
         setBuildStatus('error', '保存失敗');
-        return;
+        return { success: false, error: '保存失敗' };
       }
     }
   }
@@ -2525,14 +2558,14 @@ async function runBuild(opts = {}) {
     if (!settingsResult.valid) {
       appendBuildLog('[ERROR] プロジェクト設定に不正な値があります。Settings を確認してください。', 'error');
       setBuildStatus('error', '設定エラー');
-      return;
+      return { success: false, error: '設定エラー' };
     }
     try {
       await persistProjectSettings(settingsResult.config);
     } catch (err) {
       appendBuildLog(`[ERROR] プロジェクト設定の保存に失敗: ${String(err?.message || err)}`, 'error');
       setBuildStatus('error', '設定保存失敗');
-      return;
+      return { success: false, error: '設定保存失敗' };
     }
 
     // 既存のプロジェクトツリーを尊重し、Build 前は構造整備のみを行う
@@ -2540,7 +2573,7 @@ async function runBuild(opts = {}) {
     if (!genResult.ok) {
       appendBuildLog(`[ERROR] プロジェクト生成失敗: ${genResult.error}`, 'error');
       setBuildStatus('error', 'プロジェクト生成失敗');
-      return;
+      return { success: false, error: genResult.error || 'プロジェクト生成失敗' };
     }
     appendBuildLog(`[INFO] プロジェクト生成: ${genResult.projectDir}`);
 
@@ -2555,15 +2588,18 @@ async function runBuild(opts = {}) {
       setBuildStatus('success', '✓ ビルド成功');
       appendBuildLog('');
       appendBuildLog(`=== ビルド成功 (${sizeKb}) ===`);
+      return buildResult;
     } else {
       setBuildStatus('error', '✕ ビルド失敗');
       appendBuildLog('');
       appendBuildLog(`=== ビルド失敗: ${buildResult.error || ''} ===`, 'error');
+      return buildResult;
     }
   } catch (err) {
     const msg = err.message || String(err);
     appendBuildLog(`[ERROR] ${msg}`, 'error');
     setBuildStatus('error', '✕ エラー');
+    return { success: false, error: msg };
   } finally {
     state.building = false;
     el.btnBuild?.classList.remove('building');
@@ -2579,7 +2615,13 @@ async function openTestPlay() {
     return;
   }
   appendLog('emulator', 'テストプレイ起動を開始します');
-  const romPath = state.lastRomPath || (await window.electronAPI.getRomPath());
+  appendLog('emulator', '最新のプロジェクト設定を ROM ヘッダーへ反映するため、Test Play 前にビルドします');
+  const buildResult = await runBuild();
+  if (!buildResult?.success) {
+    appendLog('emulator', `テストプレイを中止しました: ${buildResult?.error || 'ビルド失敗'}`, 'warn');
+    return;
+  }
+  const romPath = buildResult.romPath || state.lastRomPath || (await window.electronAPI.getRomPath());
   if (!romPath) {
     setLogOpen(true);
     appendLog('emulator', 'ROM が見つかりません。先に Build を実行してください。', 'warn');

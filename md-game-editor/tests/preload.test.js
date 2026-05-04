@@ -80,7 +80,7 @@ test('setup preload exposes setup IPC helpers and progress listener', async () =
 });
 
 test('testplay and debug preload APIs route to their IPC channels', async () => {
-  const testplay = loadPreloadWithMockedElectron(path.join(__dirname, '..', 'testplay-preload.js'));
+  const testplay = loadPreloadWithMockedElectron(path.join(__dirname, '..', 'plugins', 'standard-emulator', 'testplay-preload.js'));
   await testplay.exposed.electronTestPlay.openDebugWindow({ tab: 'vram' });
   await testplay.exposed.electronTestPlay.getSettings();
   assert.deepEqual(testplay.invocations, [
@@ -98,5 +98,17 @@ test('testplay and debug preload APIs route to their IPC channels', async () => 
   await debug.exposed.electronDebug.getWasmSnapshot();
   assert.deepEqual(debug.invocations, [
     { channel: 'debug:getWasmSnapshot', args: [{}] },
+  ]);
+});
+
+test('api testplay preload routes API lifecycle IPC channels', async () => {
+  const api = loadPreloadWithMockedElectron(path.join(__dirname, '..', 'plugins', 'standard-api-emulator', 'api-testplay-preload.js'));
+
+  await api.exposed.apiTestPlay.stopApiServer();
+  await api.exposed.apiTestPlay.isApiServerRunning();
+
+  assert.deepEqual(api.invocations, [
+    { channel: 'api:stopServer', args: [] },
+    { channel: 'api:isRunning', args: [] },
   ]);
 });

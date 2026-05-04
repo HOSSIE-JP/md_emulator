@@ -1,0 +1,917 @@
+import {
+  computeFrameGrid,
+  formatSpritePixelToken,
+  normalizeSymbolName,
+  parseSpriteSizeToken,
+  parseSpriteTime,
+  snapSpritePixels,
+  updateSpriteTimeCell,
+} from './sprite-utils.mjs';
+
+const IMAGE_FILTERS = [
+  { name: 'Images', extensions: ['png', 'bmp'] },
+  { name: 'All Files', extensions: ['*'] },
+];
+
+export function activatePlugin({ plugin, root, api, logger, registerCapability }) {
+  if (!root) return null;
+
+  const state = {
+    allFiles: [],
+    files: [],
+    selectedKey: '',
+    expandedFiles: new Set(),
+    fileFilter: '',
+    keyword: '',
+    frameRow: 0,
+    frameIndex: 0,
+    previewScale: 4,
+    sheetScale: 1,
+    showGrid: true,
+    loop: true,
+    playing: false,
+    image: null,
+    imageDataUrl: '',
+    imagePath: '',
+    grid: computeFrameGrid(16, 16, '16p', '16p'),
+    rangePick: false,
+    rangeStart: null,
+    playbackTimer: 0,
+  };
+
+  root.innerHTML = buildShell();
+  const ui = bindUi(root);
+
+  registerCapability('sprite-editor', {
+    pluginId: plugin.id,
+    root,
+    refresh,
+    getSelectedSprite: () => getSelectedSprite(),
+  });
+
+  bindEvents();
+  void refresh();
+
+  logger.debug('sprite-editor renderer activated');
+  return {
+    deactivate() {
+      stopPlayback();
+      root.innerHTML = '';
+    },
+  };
+
+  function bindEvents() {
+    ui.refresh.addEventListener('click', () => void refresh());
+    ui.add.addEventListener('click', () => void addSprite());
+    ui.fileFilter.addEventListener('change', () => {
+      state.fileFilter = ui.fileFilter.value;
+      renderTree();
+    });
+    ui.keyword.addEventListener('input', () => {
+      state.keyword = ui.keyword.value.trim().toLowerCase();
+      renderTree();
+    });
+    ui.tree.addEventListener('click', (event) => {
+      const fileButton = event.target.closest('[data-file-toggle]');
+      if (fileButton) {
+        const file = fileButton.dataset.fileToggle;
+        if (state.expandedFiles.has(file)) state.expandedFiles.delete(file);
+        else state.expandedFiles.add(file);
+        renderTree();
+        return;
+      }
+      const item = event.target.closest('[data-sprite-key]');
+      if (item) {
+        void selectSprite(item.dataset.spriteKey);
+      }
+    });
+
+    ui.previewScale.addEventListener('input', () => {
+      state.previewScale = numberInRange(ui.previewScale.value, 1, 12, 4);
+      drawPreview();
+    });
+    ui.sheetScale.addEventListener('input', () => {
+      state.sheetScale = numberInRange(ui.sheetScale.value, 1, 8, 1);
+      drawSheet();
+    });
+    ui.gridToggle.addEventListener('change', () => {
+      state.showGrid = ui.gridToggle.checked;
+      drawPreview();
+      drawSheet();
+    });
+    ui.first.addEventListener('click', () => {
+      state.frameIndex = 0;
+      syncFrameControls();
+      drawPreview();
+    });
+    ui.last.addEventListener('click', () => {
+      state.frameIndex = Math.max(0, state.grid.columns - 1);
+      syncFrameControls();
+      drawPreview();
+    });
+    ui.play.addEventListener('click', () => {
+      if (state.playing) stopPlayback();
+      else startPlayback();
+    });
+    ui.loop.addEventListener('click', () => {
+      state.loop = !state.loop;
+      syncPlaybackButtons();
+    });
+    ui.rowInput.addEventListener('change', () => {
+      state.frameRow = numberInRange(ui.rowInput.value, 0, Math.max(0, state.grid.rows - 1), 0);
+      state.frameIndex = numberInRange(state.frameIndex, 0, Math.max(0, state.grid.columns - 1), 0);
+      syncFrameControls();
+      drawPreview();
+    });
+    ui.frameInput.addEventListener('change', () => {
+      state.frameIndex = numberInRange(ui.frameInput.value, 0, Math.max(0, state.grid.columns - 1), 0);
+      syncFrameControls();
+      drawPreview();
+    });
+    ui.frameTime.addEventListener('change', () => void saveFrameTime());
+    ui.frameWidth.addEventListener('change', () => {
+      ui.frameWidth.value = String(snapSpritePixels(ui.frameWidth.value));
+      updateGridFromInputs();
+    });
+    ui.frameHeight.addEventListener('change', () => {
+      ui.frameHeight.value = String(snapSpritePixels(ui.frameHeight.value));
+      updateGridFromInputs();
+    });
+    ui.rangePick.addEventListener('click', () => {
+      state.rangePick = !state.rangePick;
+      state.rangeStart = null;
+      ui.rangePick.setAttribute('aria-pressed', String(state.rangePick));
+      ui.rangePick.classList.toggle('sprite-editor-primary', state.rangePick);
+      setStatus(state.rangePick ? 'シート上で開始セルと終了セルをクリックしてください' : '');
+    });
+    ui.sheetCanvas.addEventListener('click', (event) => {
+      if (!state.rangePick) return;
+      handleSheetRangePick(event);
+    });
+    ui.save.addEventListener('click', () => void saveProperties());
+    ui.delete.addEventListener('click', () => void deleteSelectedSprite());
+  }
+
+  async function refresh() {
+    stopPlayback();
+    setStatus('SPRITE 定義を読み込み中...');
+    const result = await api.electronAPI.listResDefinitions();
+    if (!result?.ok) {
+      setStatus(`読み込み失敗: ${result?.error || 'unknown'}`);
+      return;
+    }
+    state.allFiles = result.files || [];
+    state.files = state.allFiles.map((file) => ({
+      ...file,
+      entries: (file.entries || []).filter((entry) => String(entry.type || '').toUpperCase() === 'SPRITE'),
+    }));
+    state.files.forEach((file) => state.expandedFiles.add(file.file));
+    if (!state.selectedKey || !findSpriteByKey(state.selectedKey)) {
+      const first = state.files.flatMap((file) => file.entries.map((entry) => spriteKey(file.file, entry)))[0] || '';
+      state.selectedKey = first;
+    }
+    renderFileFilter();
+    renderTree();
+    await selectSprite(state.selectedKey, { keepTree: true });
+    setStatus(`SPRITE ${countSprites()} 件`);
+  }
+
+  async function selectSprite(key, options = {}) {
+    state.selectedKey = key || '';
+    if (!options.keepTree) renderTree();
+    const selected = getSelectedSprite();
+    renderProperties(selected);
+    stopPlayback();
+    state.frameRow = 0;
+    state.frameIndex = 0;
+    state.image = null;
+    state.imageDataUrl = '';
+    state.imagePath = '';
+    if (!selected) {
+      state.grid = computeFrameGrid(16, 16, '16p', '16p');
+      drawPreview();
+      drawSheet();
+      return;
+    }
+    await loadSelectedImage(selected.entry);
+    syncFrameControls();
+    drawPreview();
+    drawSheet();
+  }
+
+  async function loadSelectedImage(entry) {
+    const widthToken = entry.width || '16p';
+    const heightToken = entry.height || '16p';
+    state.imagePath = entry.sourceAbsolutePath || '';
+    if (!entry.sourceAbsolutePath) {
+      state.grid = computeFrameGrid(16, 16, widthToken, heightToken);
+      return;
+    }
+    const read = await api.electronAPI.readFileAsDataUrl(entry.sourceAbsolutePath);
+    if (!read?.ok || !read.dataUrl) {
+      setStatus(`画像読み込み失敗: ${read?.error || 'unknown'}`);
+      state.grid = computeFrameGrid(16, 16, widthToken, heightToken);
+      return;
+    }
+    const img = new Image();
+    img.src = read.dataUrl;
+    await img.decode();
+    state.image = img;
+    state.imageDataUrl = read.dataUrl;
+    state.grid = computeFrameGrid(img.naturalWidth, img.naturalHeight, widthToken, heightToken);
+    ui.frameWidth.value = String(state.grid.width);
+    ui.frameHeight.value = String(state.grid.height);
+  }
+
+  function renderFileFilter() {
+    const current = state.fileFilter;
+    ui.fileFilter.innerHTML = [
+      '<option value="">すべて</option>',
+      ...state.files.map((file) => `<option value="${esc(file.file)}">${esc(file.file)}</option>`),
+    ].join('');
+    ui.fileFilter.value = state.files.some((file) => file.file === current) ? current : '';
+    state.fileFilter = ui.fileFilter.value;
+  }
+
+  function renderTree() {
+    const keyword = state.keyword;
+    const selectedKey = state.selectedKey;
+    const files = state.files
+      .filter((file) => !state.fileFilter || file.file === state.fileFilter)
+      .map((file) => ({
+        ...file,
+        entries: file.entries.filter((entry) => !keyword || String(entry.name || '').toLowerCase().includes(keyword)),
+      }));
+
+    if (!files.length || files.every((file) => file.entries.length === 0)) {
+      ui.tree.innerHTML = '<div class="sprite-editor-empty">SPRITE 定義がありません</div>';
+      return;
+    }
+
+    ui.tree.innerHTML = files.map((file) => {
+      const expanded = state.expandedFiles.has(file.file);
+      const children = expanded ? file.entries.map((entry) => {
+        const key = spriteKey(file.file, entry);
+        return `
+          <button class="sprite-editor-item ${key === selectedKey ? 'active' : ''}" type="button" data-sprite-key="${esc(key)}">
+            <canvas class="sprite-editor-thumb" width="48" height="40" data-thumb-key="${esc(key)}"></canvas>
+            <span>
+              <span class="sprite-editor-item-title">${esc(entry.name)}</span>
+              <span class="sprite-editor-item-meta">${esc(entry.width || '')} x ${esc(entry.height || '')}</span>
+            </span>
+          </button>
+        `;
+      }).join('') : '';
+      return `
+        <section class="sprite-editor-file">
+          <button class="sprite-editor-file-toggle" type="button" data-file-toggle="${esc(file.file)}">
+            <span>${expanded ? '▾' : '▸'}</span>
+            <span>${esc(file.file)}</span>
+            <span class="sprite-editor-file-count">${file.entries.length}</span>
+          </button>
+          ${children}
+        </section>
+      `;
+    }).join('');
+    void renderThumbnails();
+  }
+
+  async function renderThumbnails() {
+    const canvases = Array.from(ui.tree.querySelectorAll('[data-thumb-key]'));
+    for (const canvas of canvases) {
+      const item = findSpriteByKey(canvas.dataset.thumbKey);
+      if (!item?.entry?.sourceAbsolutePath) continue;
+      try {
+        const read = await api.electronAPI.readFileAsDataUrl(item.entry.sourceAbsolutePath);
+        if (!read?.ok || !read.dataUrl) continue;
+        const img = new Image();
+        img.src = read.dataUrl;
+        await img.decode();
+        const grid = computeFrameGrid(img.naturalWidth, img.naturalHeight, item.entry.width, item.entry.height);
+        drawContainFrame(canvas, img, { x: 0, y: 0, width: grid.width, height: grid.height });
+      } catch (err) {
+        logger.warn(`サムネイル生成失敗: ${String(err?.message || err)}`);
+      }
+    }
+  }
+
+  function renderProperties(selected) {
+    const entry = selected?.entry;
+    ui.propsDisabled.hidden = Boolean(entry);
+    ui.form.hidden = !entry;
+    if (!entry) return;
+
+    ui.name.value = entry.name || '';
+    ui.sourcePath.value = entry.sourcePath || '';
+    ui.frameWidth.value = String(parseSpriteSizeToken(entry.width || '16p', state.image?.naturalWidth || 0).pixels);
+    ui.frameHeight.value = String(parseSpriteSizeToken(entry.height || '16p', state.image?.naturalHeight || 0).pixels);
+    ui.compression.value = normalizeOption(entry.compression, ['NONE', 'BEST', 'AUTO', 'APLIB', 'FAST', 'LZ4W'], 'NONE');
+    ui.time.value = entry.time || '0';
+    ui.collision.value = normalizeOption(entry.collision, ['NONE', 'CIRCLE', 'BOX'], 'NONE');
+    ui.optType.value = normalizeOption(entry.optType, ['BALANCED', 'SPRITE', 'TILE', 'NONE'], 'BALANCED');
+    ui.optLevel.value = normalizeOption(entry.optLevel, ['FAST', 'MEDIUM', 'SLOW', 'MAX'], 'FAST');
+    ui.optDuplicate.value = normalizeOption(entry.optDuplicate, ['FALSE', 'TRUE'], 'FALSE');
+    ui.comment.value = entry.comment || '';
+  }
+
+  function syncFrameControls() {
+    state.frameRow = numberInRange(state.frameRow, 0, Math.max(0, state.grid.rows - 1), 0);
+    state.frameIndex = numberInRange(state.frameIndex, 0, Math.max(0, state.grid.columns - 1), 0);
+    ui.rowInput.max = String(Math.max(0, state.grid.rows - 1));
+    ui.frameInput.max = String(Math.max(0, state.grid.columns - 1));
+    ui.rowInput.value = String(state.frameRow);
+    ui.frameInput.value = String(state.frameIndex);
+    const entry = getSelectedSprite()?.entry;
+    const matrix = parseSpriteTime(entry?.time || '0', state.grid.rows, state.grid.columns);
+    ui.frameTime.value = matrix[state.frameRow]?.[state.frameIndex] || '0';
+    ui.frameInfo.textContent = `${state.grid.columns} frames x ${state.grid.rows} rows`;
+    syncPlaybackButtons();
+  }
+
+  function syncPlaybackButtons() {
+    ui.play.textContent = state.playing ? '⏸' : '▶';
+    ui.loop.setAttribute('aria-pressed', String(state.loop));
+    ui.loop.classList.toggle('sprite-editor-primary', state.loop);
+  }
+
+  function drawPreview() {
+    const canvas = ui.previewCanvas;
+    const ctx = canvas.getContext('2d');
+    const frame = getCurrentFrame();
+    const scale = state.previewScale;
+    canvas.width = Math.max(1, frame.width * scale);
+    canvas.height = Math.max(1, frame.height * scale);
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (state.image) {
+      ctx.drawImage(state.image, frame.x, frame.y, frame.width, frame.height, 0, 0, canvas.width, canvas.height);
+    }
+    if (state.showGrid) drawGrid(ctx, canvas.width, canvas.height, 8 * scale);
+  }
+
+  function drawSheet() {
+    const canvas = ui.sheetCanvas;
+    const ctx = canvas.getContext('2d');
+    const img = state.image;
+    const scale = state.sheetScale;
+    const width = img?.naturalWidth || state.grid.width;
+    const height = img?.naturalHeight || state.grid.height;
+    canvas.width = Math.max(1, width * scale);
+    canvas.height = Math.max(1, height * scale);
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (img) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    if (state.showGrid) drawGrid(ctx, canvas.width, canvas.height, 8 * scale);
+    drawFrameGrid(ctx, scale);
+  }
+
+  function drawFrameGrid(ctx, scale) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(74, 163, 255, 0.85)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= state.grid.columns; x += 1) {
+      const px = x * state.grid.width * scale + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(px, 0);
+      ctx.lineTo(px, ctx.canvas.height);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= state.grid.rows; y += 1) {
+      const py = y * state.grid.height * scale + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(0, py);
+      ctx.lineTo(ctx.canvas.width, py);
+      ctx.stroke();
+    }
+    const frame = getCurrentFrame();
+    ctx.strokeStyle = '#d2991e';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(frame.x * scale + 1, frame.y * scale + 1, frame.width * scale - 2, frame.height * scale - 2);
+    ctx.restore();
+  }
+
+  function drawGrid(ctx, width, height, step) {
+    if (step < 4) return;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(139, 152, 171, 0.35)';
+    ctx.lineWidth = 1;
+    for (let x = step; x < width; x += step) {
+      ctx.beginPath();
+      ctx.moveTo(Math.round(x) + 0.5, 0);
+      ctx.lineTo(Math.round(x) + 0.5, height);
+      ctx.stroke();
+    }
+    for (let y = step; y < height; y += step) {
+      ctx.beginPath();
+      ctx.moveTo(0, Math.round(y) + 0.5);
+      ctx.lineTo(width, Math.round(y) + 0.5);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  async function saveFrameTime() {
+    const selected = getSelectedSprite();
+    if (!selected) return;
+    const nextTime = updateSpriteTimeCell(
+      selected.entry.time || '0',
+      state.grid.rows,
+      state.grid.columns,
+      state.frameRow,
+      state.frameIndex,
+      ui.frameTime.value,
+    );
+    ui.time.value = nextTime;
+    await saveProperties({ silent: true });
+    syncFrameControls();
+  }
+
+  async function saveProperties(options = {}) {
+    const selected = getSelectedSprite();
+    if (!selected) return false;
+    const frameWidth = snapSpritePixels(ui.frameWidth.value);
+    const frameHeight = snapSpritePixels(ui.frameHeight.value);
+    const entry = {
+      ...selected.entry,
+      name: normalizeSymbolName(ui.name.value),
+      sourcePath: ui.sourcePath.value.trim(),
+      width: formatSpritePixelToken(frameWidth),
+      height: formatSpritePixelToken(frameHeight),
+      compression: ui.compression.value,
+      time: ui.time.value.trim() || '0',
+      collision: ui.collision.value,
+      optType: ui.optType.value,
+      optLevel: ui.optLevel.value,
+      optDuplicate: ui.optDuplicate.value,
+      comment: ui.comment.value,
+    };
+    const result = await api.electronAPI.updateResEntry({
+      file: selected.file.file,
+      lineNumber: selected.entry.lineNumber,
+      entry,
+    });
+    if (!result?.ok) {
+      setStatus(`保存失敗: ${result?.error || 'unknown'}`);
+      return false;
+    }
+    if (!options.silent) setStatus(`保存しました: ${entry.name}`);
+    await refreshAfterSave(selected.file.file, selected.entry.lineNumber);
+    return true;
+  }
+
+  async function refreshAfterSave(fileName, lineNumber) {
+    const result = await api.electronAPI.listResDefinitions();
+    if (!result?.ok) return;
+    state.allFiles = result.files || [];
+    state.files = state.allFiles.map((file) => ({
+      ...file,
+      entries: (file.entries || []).filter((entry) => String(entry.type || '').toUpperCase() === 'SPRITE'),
+    }));
+    const file = state.files.find((item) => item.file === fileName);
+    const entry = file?.entries.find((item) => Number(item.lineNumber) === Number(lineNumber));
+    state.selectedKey = entry ? spriteKey(file.file, entry) : state.selectedKey;
+    renderFileFilter();
+    renderTree();
+    renderProperties(getSelectedSprite());
+    await loadSelectedImage(getSelectedSprite()?.entry || {});
+    syncFrameControls();
+    drawPreview();
+    drawSheet();
+  }
+
+  async function deleteSelectedSprite() {
+    const selected = getSelectedSprite();
+    if (!selected) return;
+    const ok = await confirmModal(`SPRITE 定義を削除しますか？<br><strong>${esc(selected.entry.name)}</strong>`, '削除');
+    if (!ok) return;
+    const result = await api.electronAPI.deleteResEntry({ file: selected.file.file, lineNumber: selected.entry.lineNumber });
+    if (!result?.ok) {
+      setStatus(`削除失敗: ${result?.error || 'unknown'}`);
+      return;
+    }
+    state.selectedKey = '';
+    await refresh();
+    setStatus(`削除しました: ${selected.entry.name}`);
+  }
+
+  async function addSprite() {
+    const resFiles = state.files.map((file) => file.file);
+    if (!resFiles.length) {
+      setStatus('追加先の .res ファイルがありません');
+      return;
+    }
+    const picked = await api.electronAPI.pickFile({
+      title: 'スプライトシートを選択',
+      properties: ['openFile'],
+      filters: IMAGE_FILTERS,
+    });
+    if (picked?.canceled || !picked?.sourcePath) return;
+
+    const pickedName = getFileName(picked.sourcePath);
+    const request = await requestAddInfo({
+      resFiles,
+      defaultFile: state.fileFilter || getSelectedSprite()?.file?.file || resFiles[0],
+      defaultSymbol: normalizeSymbolName(picked.fileName || pickedName),
+      pickedName,
+    });
+    if (!request) return;
+
+    const existing = state.allFiles.flatMap((file) => file.entries || []).some((entry) => entry.name === request.symbol);
+    if (existing) {
+      setStatus(`同名の SPRITE 定義があります: ${request.symbol}`);
+      return;
+    }
+
+    const sourceSize = await readImageSize(picked.sourcePath);
+    const targetSize = {
+      width: snapUpTo8(sourceSize.width || 8),
+      height: snapUpTo8(sourceSize.height || 8),
+    };
+    const imagePipeline = api.capabilities.get('image-import-pipeline');
+    if (!imagePipeline?.convertToIndexed16) {
+      setStatus('画像リサイズ/減色コンバーターが無効または未インストールです');
+      return;
+    }
+    const converted = await imagePipeline.convertToIndexed16({ sourcePath: picked.sourcePath, targetSize });
+    if (converted?.canceled) return;
+    const ext = converted.targetExtension || '.png';
+    const copyResult = await api.electronAPI.writeAssetFile({
+      sourcePath: picked.sourcePath,
+      targetSubdir: 'sprite',
+      targetFileName: `${request.symbol}${ext}`,
+      dataUrl: converted.convertedDataUrl || '',
+    });
+    if (!copyResult?.ok) {
+      setStatus(`画像コピー失敗: ${copyResult?.error || 'unknown'}`);
+      return;
+    }
+    const entry = {
+      type: 'SPRITE',
+      name: request.symbol,
+      sourcePath: copyResult.relativePath,
+      width: '16p',
+      height: '16p',
+      compression: 'NONE',
+      time: '0',
+      collision: 'NONE',
+      optType: 'BALANCED',
+      optLevel: 'FAST',
+      optDuplicate: 'FALSE',
+      comment: request.comment,
+    };
+    const added = await api.electronAPI.addResEntry({ file: request.file, entry });
+    if (!added?.ok) {
+      setStatus(`SPRITE 定義追加失敗: ${added?.error || 'unknown'}`);
+      return;
+    }
+    await refresh();
+    const file = state.files.find((item) => item.file === request.file);
+    const created = file?.entries.find((item) => item.name === request.symbol);
+    if (created) await selectSprite(spriteKey(file.file, created));
+    setStatus(`追加しました: ${request.symbol}`);
+  }
+
+  function updateGridFromInputs() {
+    const img = state.image;
+    state.grid = computeFrameGrid(img?.naturalWidth || 16, img?.naturalHeight || 16, `${ui.frameWidth.value}p`, `${ui.frameHeight.value}p`);
+    state.frameRow = 0;
+    state.frameIndex = 0;
+    syncFrameControls();
+    drawPreview();
+    drawSheet();
+  }
+
+  function handleSheetRangePick(event) {
+    const rect = ui.sheetCanvas.getBoundingClientRect();
+    const x = Math.floor((event.clientX - rect.left) / Math.max(1, rect.width) * ui.sheetCanvas.width / state.sheetScale);
+    const y = Math.floor((event.clientY - rect.top) / Math.max(1, rect.height) * ui.sheetCanvas.height / state.sheetScale);
+    const cell = { x: Math.floor(x / 8), y: Math.floor(y / 8) };
+    if (!state.rangeStart) {
+      state.rangeStart = cell;
+      setStatus('終了セルをクリックしてください');
+      return;
+    }
+    const minX = Math.min(state.rangeStart.x, cell.x);
+    const maxX = Math.max(state.rangeStart.x, cell.x);
+    const minY = Math.min(state.rangeStart.y, cell.y);
+    const maxY = Math.max(state.rangeStart.y, cell.y);
+    ui.frameWidth.value = String(snapSpritePixels((maxX - minX + 1) * 8));
+    ui.frameHeight.value = String(snapSpritePixels((maxY - minY + 1) * 8));
+    state.rangePick = false;
+    state.rangeStart = null;
+    ui.rangePick.setAttribute('aria-pressed', 'false');
+    ui.rangePick.classList.remove('sprite-editor-primary');
+    updateGridFromInputs();
+    setStatus('範囲からフレームサイズを設定しました');
+  }
+
+  function startPlayback() {
+    if (state.playing) return;
+    state.playing = true;
+    syncPlaybackButtons();
+    scheduleNextFrame();
+  }
+
+  function stopPlayback() {
+    state.playing = false;
+    if (state.playbackTimer) window.clearTimeout(state.playbackTimer);
+    state.playbackTimer = 0;
+    syncPlaybackButtons();
+  }
+
+  function scheduleNextFrame() {
+    if (!state.playing) return;
+    const time = Math.max(1, Number(ui.frameTime.value || 0) || 6);
+    state.playbackTimer = window.setTimeout(() => {
+      const last = Math.max(0, state.grid.columns - 1);
+      if (state.frameIndex >= last) {
+        if (!state.loop) {
+          stopPlayback();
+          return;
+        }
+        state.frameIndex = 0;
+      } else {
+        state.frameIndex += 1;
+      }
+      syncFrameControls();
+      drawPreview();
+      scheduleNextFrame();
+    }, time * (1000 / 60));
+  }
+
+  function getCurrentFrame() {
+    return {
+      x: state.frameIndex * state.grid.width,
+      y: state.frameRow * state.grid.height,
+      width: state.grid.width,
+      height: state.grid.height,
+    };
+  }
+
+  function getSelectedSprite() {
+    return findSpriteByKey(state.selectedKey);
+  }
+
+  function findSpriteByKey(key) {
+    for (const file of state.files) {
+      for (const entry of file.entries) {
+        if (spriteKey(file.file, entry) === key) return { file, entry };
+      }
+    }
+    return null;
+  }
+
+  function countSprites() {
+    return state.files.reduce((sum, file) => sum + file.entries.length, 0);
+  }
+
+  function setStatus(message) {
+    ui.status.textContent = message || '';
+  }
+
+  async function readImageSize(sourcePath) {
+    const read = await api.electronAPI.readFileAsDataUrl(sourcePath);
+    if (!read?.ok || !read.dataUrl) return { width: 0, height: 0 };
+    const img = new Image();
+    img.src = read.dataUrl;
+    await img.decode();
+    return { width: img.naturalWidth, height: img.naturalHeight };
+  }
+
+  async function requestAddInfo({ resFiles, defaultFile, defaultSymbol, pickedName }) {
+    const options = resFiles.map((file) => `<option value="${esc(file)}" ${file === defaultFile ? 'selected' : ''}>${esc(file)}</option>`).join('');
+    return formModal({
+      title: 'SPRITE を追加',
+      submitText: '追加',
+      body: `
+        <label class="sprite-editor-field">追加先 .res
+          <select class="sprite-editor-select" name="file">${options}</select>
+        </label>
+        <label class="sprite-editor-field">アセット名
+          <input class="sprite-editor-input" name="symbol" value="${esc(defaultSymbol)}" />
+        </label>
+        <label class="sprite-editor-field">コメント
+          <input class="sprite-editor-input" name="comment" value="${esc(pickedName)}" />
+        </label>
+      `,
+      collect(form) {
+        const symbol = normalizeSymbolName(form.elements.symbol.value);
+        if (!symbol) return null;
+        return {
+          file: form.elements.file.value,
+          symbol,
+          comment: form.elements.comment.value,
+        };
+      },
+    });
+  }
+
+  function confirmModal(message, submitText) {
+    return formModal({
+      title: '確認',
+      submitText,
+      danger: true,
+      body: `<p class="sprite-editor-status">${message}</p>`,
+      collect: () => true,
+    });
+  }
+
+  function formModal({ title, body, submitText, collect, danger = false }) {
+    return new Promise((resolve) => {
+      const modalHtml = `
+          <div class="page-header modal-header">
+            <h2>${esc(title)}</h2>
+            <button class="icon-btn" type="button" data-modal-cancel>✕</button>
+          </div>
+          <form class="settings-form compact-form sprite-editor-modal-form">
+            ${body}
+            <div class="form-actions-inline modal-actions-end">
+              <button class="sprite-editor-secondary" type="button" data-modal-cancel>キャンセル</button>
+              <button class="${danger ? 'sprite-editor-danger' : 'sprite-editor-primary'}" type="submit">${esc(submitText)}</button>
+            </div>
+          </form>
+        `;
+      const modal = api.createModal({
+        id: `${plugin.id}-form-modal`,
+        panelClassName: 'app-panel app-panel-sm',
+        html: modalHtml,
+      });
+      modal.panel.innerHTML = modalHtml;
+      const form = modal.panel.querySelector('form');
+      const close = (value) => {
+        modal.close();
+        resolve(value);
+      };
+      modal.panel.querySelectorAll('[data-modal-cancel]').forEach((button) => {
+        button.addEventListener('click', () => close(null), { once: true });
+      });
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        close(collect(form));
+      }, { once: true });
+      modal.open();
+    });
+  }
+}
+
+function buildShell() {
+  return `
+    <div class="sprite-editor-root">
+      <aside class="sprite-editor-pane">
+        <div class="sprite-editor-toolbar">
+          <h2>SPRITE</h2>
+          <button class="icon-btn" type="button" data-role="refresh" title="更新">↻</button>
+          <button class="icon-btn" type="button" data-role="add" title="追加">＋</button>
+        </div>
+        <div class="sprite-editor-filter">
+          <label>.res ファイル
+            <select class="sprite-editor-select" data-role="file-filter"></select>
+          </label>
+          <label>アセット名
+            <input class="sprite-editor-input" data-role="keyword" type="search" placeholder="keyword" />
+          </label>
+        </div>
+        <div class="sprite-editor-tree" data-role="tree"></div>
+      </aside>
+      <main class="sprite-editor-center">
+        <section class="sprite-editor-preview">
+          <div class="sprite-editor-subtoolbar">
+            <span class="sprite-editor-panel-title">Frame Preview</span>
+            <label class="sprite-editor-inline-field">倍率 <input class="sprite-editor-input" data-role="preview-scale" type="number" min="1" max="12" value="4" /></label>
+            <label class="sprite-editor-inline-field"><input data-role="grid-toggle" type="checkbox" checked /> 8x8</label>
+            <button class="icon-btn" data-role="first" type="button" title="先頭">⏮</button>
+            <button class="icon-btn" data-role="play" type="button" title="再生">▶</button>
+            <button class="icon-btn" data-role="last" type="button" title="末尾">⏭</button>
+            <button class="icon-btn sprite-editor-primary" data-role="loop" type="button" title="ループ" aria-pressed="true">↻</button>
+            <label class="sprite-editor-inline-field">ROW <input class="sprite-editor-input" data-role="row-input" type="number" min="0" value="0" /></label>
+            <label class="sprite-editor-inline-field">Frame <input class="sprite-editor-input" data-role="frame-input" type="number" min="0" value="0" /></label>
+            <label class="sprite-editor-inline-field">Time <input class="sprite-editor-input" data-role="frame-time" type="number" min="0" value="0" /></label>
+          </div>
+          <div class="sprite-editor-canvas-wrap"><canvas data-role="preview-canvas" width="64" height="64"></canvas></div>
+        </section>
+        <section class="sprite-editor-sheet">
+          <div class="sprite-editor-subtoolbar">
+            <span class="sprite-editor-panel-title">Sprite Sheet</span>
+            <span class="sprite-editor-status" data-role="frame-info"></span>
+            <label class="sprite-editor-inline-field">倍率 <input class="sprite-editor-input" data-role="sheet-scale" type="number" min="1" max="8" value="1" /></label>
+            <label class="sprite-editor-inline-field">幅(px) <input class="sprite-editor-input" data-role="frame-width" type="number" min="8" max="248" step="8" value="16" /></label>
+            <label class="sprite-editor-inline-field">高さ(px) <input class="sprite-editor-input" data-role="frame-height" type="number" min="8" max="248" step="8" value="16" /></label>
+            <button class="sprite-editor-secondary" data-role="range-pick" type="button" aria-pressed="false">範囲指定</button>
+          </div>
+          <div class="sprite-editor-canvas-wrap"><canvas data-role="sheet-canvas" width="128" height="128"></canvas></div>
+        </section>
+      </main>
+      <aside class="sprite-editor-pane sprite-editor-props">
+        <div class="sprite-editor-toolbar"><h2>Properties</h2></div>
+        <div class="sprite-editor-empty" data-role="props-disabled">SPRITE を選択してください</div>
+        <form class="sprite-editor-form-grid" data-role="form" hidden>
+          <label class="sprite-editor-field">name <input class="sprite-editor-input" data-role="name" /></label>
+          <label class="sprite-editor-field">sourcePath <input class="sprite-editor-input" data-role="source-path" /></label>
+          <div class="sprite-editor-row">
+            <label class="sprite-editor-field">compression <select class="sprite-editor-select" data-role="compression"><option>NONE</option><option>BEST</option><option>AUTO</option><option>APLIB</option><option>FAST</option><option>LZ4W</option></select></label>
+            <label class="sprite-editor-field">collision <select class="sprite-editor-select" data-role="collision"><option>NONE</option><option>CIRCLE</option><option>BOX</option></select></label>
+          </div>
+          <label class="sprite-editor-field">time <input class="sprite-editor-input" data-role="time" /></label>
+          <div class="sprite-editor-row">
+            <label class="sprite-editor-field">opt_type <select class="sprite-editor-select" data-role="opt-type"><option>BALANCED</option><option>SPRITE</option><option>TILE</option><option>NONE</option></select></label>
+            <label class="sprite-editor-field">opt_level <select class="sprite-editor-select" data-role="opt-level"><option>FAST</option><option>MEDIUM</option><option>SLOW</option><option>MAX</option></select></label>
+          </div>
+          <label class="sprite-editor-field">opt_duplicate <select class="sprite-editor-select" data-role="opt-duplicate"><option>FALSE</option><option>TRUE</option></select></label>
+          <label class="sprite-editor-field">comment <textarea class="sprite-editor-textarea" data-role="comment"></textarea></label>
+          <div class="sprite-editor-actions">
+            <button class="sprite-editor-danger" data-role="delete" type="button">削除</button>
+            <button class="sprite-editor-primary" data-role="save" type="button">保存</button>
+          </div>
+        </form>
+        <p class="sprite-editor-status" data-role="status"></p>
+      </aside>
+    </div>
+  `;
+}
+
+function bindUi(root) {
+  const pick = (role) => root.querySelector(`[data-role="${role}"]`);
+  return {
+    refresh: pick('refresh'),
+    add: pick('add'),
+    fileFilter: pick('file-filter'),
+    keyword: pick('keyword'),
+    tree: pick('tree'),
+    previewScale: pick('preview-scale'),
+    sheetScale: pick('sheet-scale'),
+    gridToggle: pick('grid-toggle'),
+    first: pick('first'),
+    play: pick('play'),
+    last: pick('last'),
+    loop: pick('loop'),
+    rowInput: pick('row-input'),
+    frameInput: pick('frame-input'),
+    frameTime: pick('frame-time'),
+    frameInfo: pick('frame-info'),
+    frameWidth: pick('frame-width'),
+    frameHeight: pick('frame-height'),
+    rangePick: pick('range-pick'),
+    previewCanvas: pick('preview-canvas'),
+    sheetCanvas: pick('sheet-canvas'),
+    propsDisabled: pick('props-disabled'),
+    form: pick('form'),
+    name: pick('name'),
+    sourcePath: pick('source-path'),
+    compression: pick('compression'),
+    time: pick('time'),
+    collision: pick('collision'),
+    optType: pick('opt-type'),
+    optLevel: pick('opt-level'),
+    optDuplicate: pick('opt-duplicate'),
+    comment: pick('comment'),
+    save: pick('save'),
+    delete: pick('delete'),
+    status: pick('status'),
+  };
+}
+
+function drawContainFrame(canvas, img, frame) {
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const scale = Math.min(canvas.width / frame.width, canvas.height / frame.height);
+  const width = Math.max(1, Math.floor(frame.width * scale));
+  const height = Math.max(1, Math.floor(frame.height * scale));
+  const x = Math.floor((canvas.width - width) / 2);
+  const y = Math.floor((canvas.height - height) / 2);
+  ctx.drawImage(img, frame.x, frame.y, frame.width, frame.height, x, y, width, height);
+}
+
+function spriteKey(file, entry) {
+  return `${file}:${entry.lineNumber}:${entry.name}`;
+}
+
+function normalizeOption(value, allowed, fallback) {
+  const upper = String(value || '').toUpperCase();
+  return allowed.includes(upper) ? upper : fallback;
+}
+
+function numberInRange(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function snapUpTo8(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 8;
+  return Math.max(8, Math.ceil(n / 8) * 8);
+}
+
+function getFileName(filePath) {
+  return String(filePath || '').replace(/\\/g, '/').split('/').pop() || 'sprite.png';
+}
+
+function esc(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}

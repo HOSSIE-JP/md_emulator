@@ -193,6 +193,7 @@ button.project-path-chip {
   padding: 20px 24px;
   flex-direction: column;
 }
+.editor-page:not(.active) { display: none !important; }
 .editor-page.active { display: flex; }
 
 /* assets page: no extra padding, layout fills the page */

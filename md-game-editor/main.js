@@ -435,15 +435,130 @@ function pluginSupportsRole(plugin, roleId) {
 function resolvePluginForRole(roleId) {
   let pluginId = buildSystem.getPluginRole(roleId);
   if (!pluginId) {
-    const fallback = pluginManager.listPlugins().find(
-      (p) => p.enabled && pluginSupportsRole(p, roleId),
-    );
+    const fallback = pluginManager.listPlugins()
+      .filter((p) => p.enabled && pluginSupportsRole(p, roleId))
+      .sort((a, b) => {
+        const roleA = (a.roles || []).find((role) => role.id === roleId);
+        const roleB = (b.roles || []).find((role) => role.id === roleId);
+        const orderA = Number(roleA?.order ?? 1000);
+        const orderB = Number(roleB?.order ?? 1000);
+        if (orderA !== orderB) return orderA - orderB;
+        return String(a.name || a.id).localeCompare(String(b.name || b.id), 'ja');
+      })[0];
     if (fallback) {
       pluginId = fallback.id;
       try { buildSystem.setPluginRole(roleId, pluginId); } catch (_) {}
     }
   }
   return pluginId || '';
+}
+
+function resolvePluginAssetPath(pluginId, relativePath) {
+  const pluginDir = pluginManager.getPluginDirectory(pluginId);
+  if (!pluginDir) {
+    throw new Error(`plugin directory not found: ${pluginId}`);
+  }
+
+  const root = path.resolve(pluginDir);
+  const target = path.resolve(root, String(relativePath || ''));
+  const rel = path.relative(root, target);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`invalid plugin asset path: ${relativePath}`);
+  }
+  if (!fs.existsSync(target)) {
+    throw new Error(`plugin asset not found: ${relativePath}`);
+  }
+  return target;
+}
+
+function focusExistingTestPlayWindow() {
+  if (testPlayWindow && !testPlayWindow.isDestroyed()) {
+    testPlayWindow.focus();
+    return true;
+  }
+  return false;
+}
+
+async function openWasmTestPlayWindow(options = {}) {
+  const pluginId = String(options.pluginId || 'standard-emulator');
+  if (focusExistingTestPlayWindow()) {
+    return { opened: true, reused: true };
+  }
+
+  const htmlPath = resolvePluginAssetPath(pluginId, 'testplay.html');
+  const preloadPath = resolvePluginAssetPath(pluginId, 'testplay-preload.js');
+
+  testPlayWindow = new BrowserWindow({
+    width: 800,
+    height: 720,
+    title: 'Test Play - MD Game Editor',
+    backgroundColor: '#0f1117',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: preloadPath,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  const romQuery = options.romPath ? `?romPath=${encodeURIComponent(options.romPath)}` : '';
+  testPlayWindow.loadFile(htmlPath, { search: romQuery });
+  testPlayWindow.on('closed', () => { testPlayWindow = null; });
+  return { opened: true, reused: false };
+}
+
+async function openApiTestPlayWindow(options = {}) {
+  const pluginId = String(options.pluginId || 'standard-api-emulator');
+  if (focusExistingTestPlayWindow()) {
+    return { opened: true, reused: true, port: apiServerPort };
+  }
+
+  const htmlPath = resolvePluginAssetPath(pluginId, 'api-testplay.html');
+  const preloadPath = resolvePluginAssetPath(pluginId, 'api-testplay-preload.js');
+  const startResult = await startApiServer(options.port || 8080);
+  const port = startResult.port || startResult.currentPort || apiServerPort || options.port || 8080;
+
+  testPlayWindow = new BrowserWindow({
+    width: 1120,
+    height: 760,
+    title: 'Test Play API - MD Game Editor',
+    backgroundColor: '#0f1117',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: preloadPath,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  const search = new URLSearchParams();
+  search.set('port', String(port));
+  if (options.romPath) search.set('romPath', options.romPath);
+
+  testPlayWindow.loadFile(htmlPath, { search: `?${search.toString()}` });
+  testPlayWindow.on('closed', async () => {
+    testPlayWindow = null;
+    await stopApiServer();
+  });
+
+  return { opened: true, reused: false, port, apiStarted: !startResult.alreadyRunning };
+}
+
+function createTestPlayHostApi(pluginId) {
+  return {
+    openWasmWindow: (options = {}) => openWasmTestPlayWindow({
+      ...options,
+      pluginId: options.pluginId || pluginId,
+    }),
+    openApiWindow: (options = {}) => openApiTestPlayWindow({
+      ...options,
+      pluginId: options.pluginId || pluginId,
+    }),
+    startApiServer: (options = {}) => startApiServer(options.port || 8080),
+    stopApiServer,
+    isApiServerRunning: () => ({ running: !!apiServerProcess, port: apiServerPort }),
+  };
 }
 
 function syncProjectPluginRoleState() {
@@ -650,6 +765,7 @@ function readEmbeddedWasmInfo() {
 
 function stopApiServer() {
   if (!apiServerProcess) {
+    apiServerPort = null;
     return Promise.resolve(false);
   }
 
@@ -736,7 +852,7 @@ async function findAvailablePort(preferredPort, maxOffset = 20) {
 
 async function startApiServer(port) {
   if (apiServerProcess) {
-    return { alreadyRunning: true };
+    return { alreadyRunning: true, port: apiServerPort, currentPort: apiServerPort };
   }
 
   const preferredPort = port || 8080;
@@ -769,6 +885,7 @@ async function startApiServer(port) {
   apiServerProcess.on('exit', (code, signal) => {
     sendToRenderer('api-exit', { code, signal });
     apiServerProcess = null;
+    apiServerPort = null;
   });
 
   return {
@@ -1298,6 +1415,7 @@ ipcMain.handle('window:openTestPlay', async (_event, romPath) => {
       {
         projectDir: buildSystem.getProjectDir(),
         logger: createPluginLogger(emulatorPluginId),
+        testPlay: createTestPlayHostApi(emulatorPluginId),
       }
     );
 
@@ -1309,27 +1427,10 @@ ipcMain.handle('window:openTestPlay', async (_event, romPath) => {
     }
   }
 
-  if (testPlayWindow && !testPlayWindow.isDestroyed()) {
-    testPlayWindow.focus();
-    return { opened: true, reused: true };
-  }
-  testPlayWindow = new BrowserWindow({
-    width: 800,
-    height: 720,
-    title: 'Test Play - MD Game Editor',
-    backgroundColor: '#0f1117',
-    autoHideMenuBar: true,
-    webPreferences: {
-      preload: path.join(__dirname, 'testplay-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-    },
+  return openWasmTestPlayWindow({
+    romPath: romPath || null,
+    pluginId: emulatorPluginId,
   });
-  const romQuery = romPath ? `?romPath=${encodeURIComponent(romPath)}` : '';
-  testPlayWindow.loadFile(path.join(__dirname, 'renderer', 'testplay.html'), { search: romQuery });
-  testPlayWindow.on('closed', () => { testPlayWindow = null; });
-  return { opened: true, reused: false };
 });
 
 // ---- Build IPC ----

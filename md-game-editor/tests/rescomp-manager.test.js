@@ -75,6 +75,24 @@ test('entryToResLine writes XGM2 WAV rate settings', () => {
   assert.equal(line, 'WAV bgm_stage bgm/stage.wav XGM2 6650 TRUE');
 });
 
+test('SPRITE entries preserve pixel size suffix and frame time matrix', () => {
+  const parsed = rescomp.parseResContent(
+    'SPRITE hero sprite/hero.png 32p 16p FAST [[3,4][5,6]] BOX TILE MEDIUM TRUE\n',
+  );
+
+  assert.equal(parsed.entries.length, 1);
+  assert.equal(parsed.entries[0].type, 'SPRITE');
+  assert.equal(parsed.entries[0].width, '32p');
+  assert.equal(parsed.entries[0].height, '16p');
+  assert.equal(parsed.entries[0].time, '[[3,4][5,6]]');
+  assert.equal(parsed.entries[0].collision, 'BOX');
+  assert.equal(parsed.entries[0].optType, 'TILE');
+  assert.equal(parsed.entries[0].optLevel, 'MEDIUM');
+  assert.equal(parsed.entries[0].optDuplicate, 'TRUE');
+
+  assert.equal(rescomp.entryToResLine(parsed.entries[0]), 'SPRITE hero sprite/hero.png 32p 16p FAST [[3,4][5,6]] BOX TILE MEDIUM TRUE');
+});
+
 test('listResDefinitions creates a default resources.res when none exists', () => {
   const projectDir = makeProject();
   const result = rescomp.listResDefinitions(projectDir);

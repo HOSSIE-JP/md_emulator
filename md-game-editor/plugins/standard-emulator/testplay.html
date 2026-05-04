@@ -58,9 +58,9 @@
   <div class="status-bar" id="statusBar">初期化中...</div>
 
   <script type="module">
-    import MdEmulator from '../md-emulator.js';
+    import MdEmulator from '../../md-emulator.js';
 
-    const WASM_JS_URL = new URL('../pkg/md_wasm.js', import.meta.url).href;
+    const WASM_JS_URL = new URL('../../pkg/md_wasm.js', import.meta.url).href;
     const ACTION_TO_BUTTON = {
       UP: MdEmulator.Buttons.UP,
       DOWN: MdEmulator.Buttons.DOWN,

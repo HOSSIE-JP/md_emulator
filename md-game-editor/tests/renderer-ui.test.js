@@ -67,6 +67,24 @@ test('startup selects the first sidebar plugin and project creation exposes buil
   assert.match(renderer, /payload\.config\.pluginRoles\s*=\s*\{\s*builder:\s*selectedBuilder\s*\}/);
 });
 
+test('plugin page availability keeps multiple editor plugin pages independent', () => {
+  const renderer = readRendererFile('renderer.js');
+  const css = readRendererFile('style.css');
+
+  assert.match(renderer, /function getPluginPageDomId\(plugin\)/);
+  assert.match(renderer, /return `plugin-\$\{safePluginId\}`/);
+  assert.match(renderer, /section\.dataset\.pluginRendererPage = getPluginRendererPageId\(plugin\)/);
+  assert.match(renderer, /const pageId = getPluginPageDomId\(plugin\)/);
+  assert.match(renderer, /const pageBindings = new Map\(\)/);
+  assert.match(renderer, /const pluginById = new Map\(pluginState\.plugins\.map/);
+  assert.ok(renderer.includes("document.querySelectorAll('.editor-page[data-plugin-page-owner]')"));
+  assert.match(renderer, /section\.dataset\.pluginPageOwner/);
+  assert.match(renderer, /getPluginPageDomId\(owner\) === pageId/);
+  assert.match(renderer, /section\.hidden = !plugins\.some\(\(plugin\) => plugin\.enabled && \(plugin\.hasRenderer \|\| plugin\.tab\)\)/);
+  assert.doesNotMatch(renderer, /pageBindings\.set\(pageId,\s*plugin\)/);
+  assert.match(css, /\.editor-page:not\(\.active\)\s*\{\s*display:\s*none\s*!important;\s*\}/);
+});
+
 test('startup requires project selection and quits when canceled', () => {
   const renderer = readRendererFile('renderer.js');
 
@@ -98,6 +116,56 @@ test('project settings save through IPC before build structure generation', () =
   assert.match(renderer, /await persistProjectSettings\(result\.config,\s*\{\s*showMessage:\s*true\s*\}\)/);
   assert.match(renderer, /await persistProjectSettings\(settingsResult\.config\)/);
   assert.match(renderer, /generateStructureOnly\(state\.projectConfig\)/);
+});
+
+test('test play rebuilds before opening so ROM header matches project settings', () => {
+  const renderer = readRendererFile('renderer.js');
+
+  assert.match(renderer, /async function openTestPlay\(\)/);
+  assert.match(renderer, /Test Play 前にビルドします/);
+  assert.match(renderer, /const buildResult = await runBuild\(\)/);
+  assert.match(renderer, /if \(!buildResult\?\.success\)/);
+  assert.match(renderer, /const romPath = buildResult\.romPath \|\| state\.lastRomPath/);
+});
+
+test('api testplay window exposes default-on sound toggle', () => {
+  const html = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'standard-api-emulator', 'api-testplay.html'),
+    'utf-8',
+  );
+
+  assert.match(html, /id="btnAudio" class="icon-btn is-active"/);
+  assert.match(html, /let audioEnabled = true/);
+  assert.match(html, /api\/v1\/audio\/samples\?frames=/);
+  assert.match(html, /function fetchAndPlayAudio\(\)/);
+  assert.match(html, /await fetchAndPlayAudio\(\)/);
+});
+
+test('api testplay toolbar uses icon buttons for primary controls', () => {
+  const html = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'standard-api-emulator', 'api-testplay.html'),
+    'utf-8',
+  );
+
+  ['btnPlay', 'btnReset', 'btnStep', 'btnAudio', 'btnInfo', 'btnDebug', 'btnStopApi'].forEach((id) => {
+    assert.match(html, new RegExp(`id="${id}" class="icon-btn`));
+  });
+  assert.match(html, /<symbol id="icon-pause"/);
+  assert.match(html, /<symbol id="icon-volume-off"/);
+  assert.match(html, /function setButtonIcon\(button,\s*symbolId\)/);
+});
+
+test('api testplay opens a bundled debug viewer with the active API port', () => {
+  const pluginDir = path.join(__dirname, '..', 'plugins', 'standard-api-emulator');
+  const html = fs.readFileSync(path.join(pluginDir, 'api-testplay.html'), 'utf-8');
+  const debugHtml = fs.readFileSync(path.join(pluginDir, 'api-debug.html'), 'utf-8');
+
+  assert.match(html, /id="btnDebug"/);
+  assert.match(html, /new URL\('api-debug\.html',\s*window\.location\.href\)/);
+  assert.match(html, /debugUrl\.searchParams\.set\('port',\s*String\(port\)\)/);
+  assert.match(html, /window\.open\(debugUrl\.href,\s*'md-api-debug'/);
+  assert.match(debugHtml, /API Debug Viewer/);
+  assert.match(debugHtml, /const initialPort = Number\(params\.get\('port'\)\) \|\| 8080/);
 });
 
 test('exclusive role selection reloads plugin state after saving', () => {

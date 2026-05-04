@@ -79,8 +79,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     audio: null,
   };
 
-  root.classList.add('block-stage-editor-root');
   root.innerHTML = `
+    <div class="block-stage-editor-root">
     <div class="bse-top-tabs">
       <button class="active" data-tab="stage">ステージ編集</button>
       <button data-tab="assets">アセット設定</button>
@@ -150,6 +150,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       </div>
     </section>
     <div class="bse-preview" hidden><div class="bse-preview-panel"><button class="bse-icon bse-preview-close" title="閉じる">x</button><div class="bse-preview-body"></div></div></div>
+    </div>
   `;
 
   const ui = {

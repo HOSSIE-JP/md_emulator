@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-04 / Plugin Runtime v2.4
+> § Last Updated: 2026-05 / Plugin Runtime v2.4
 
 ---
 
@@ -108,6 +108,7 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 - Assets / Code のようなページ UI は `renderer.page` と `tab.page` を一致させる
 - Converter は `image-resize`, `image-quantize`, `audio-convert-ui` などの capability を登録し、利用側 plugin は capability 経由で呼び出す
 - 新規ページ、ツール、converter、モーダル、プレビューは本体 HTML/renderer に追加せず、`root` / `pageRoot` / `hostRoot` と `api.createModal()` / `api.mountElement()` で plugin 側に mount する
+- editor plugin の `pageRoot` / `root` は `<section class="editor-page">` 自体なので、root に付ける plugin 固有 class へ `display` を指定しない。ページ全体の `display` はホストの `.editor-page.active` が管理する。レイアウト用の `display: flex/grid` は root 直下の wrapper 要素に指定する
 - プラグイン同士の連携は `api.capabilities.get()` / `api.capabilities.require()` / `api.events.on()` / `api.events.emit()` を使い、本体側に個別 plugin ID の分岐を追加しない
 - renderer から main process hook を呼ぶ場合は `hooks` と `mainApi.hooks` の両方に宣言し、`api.plugins.invokeHook()` または `window.electronAPI.invokePluginHook()` を使う
 - asset type / import / image 変換は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として登録する
@@ -180,8 +181,8 @@ return:  { ok: boolean, sourceCode?: string, error?: string }
 ```ts
 payload: { romPath: string }
 return:  { ok: boolean, handled: boolean }
-// handled: true → デフォルトの WASM ウィンドウ起動をスキップ
-// handled: false → デフォルト動作に委譲
+// handled: true → プラグイン側で Test Play 起動済み
+// context.testPlay.openWasmWindow / openApiWindow で組み込みウィンドウを起動できる
 ```
 
 ### `getTab()`, `onActivate(payload, context)`, `onDeactivate(payload, context)`
@@ -315,10 +316,12 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `slideshow` | `build` | imageXXX アセットのスライドショー生成 |
 | `code-editor` | `editor` | src/ ファイルツリー + コードエディタ |
 | `asset-manager` | `editor`, `asset` | resources.res アセット管理 |
+| `sprite-editor` | `editor`, `asset` | SPRITE 定義編集 + スプライトシート/フレームプレビュー |
 | `image-resize-converter` | `converter` | 8px 境界リサイズ |
 | `image-quantize-converter` | `converter` | 16 色減色変換 |
 | `audio-converter` | `converter` | WAV/MP3/OGG 変換と音声変換 UI |
 | `standard-emulator` | `emulator` | WASM Mega Drive エミュレーター |
+| `standard-api-emulator` | `emulator`, `tool` | REST API Mega Drive エミュレーター |
 
 > 新しいプラグインが追加されたら、このテーブルに追記し § Last Updated を更新すること。
 
@@ -343,3 +346,4 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | Electron API を直接使う | `context` / `require()` 経由でアクセスする |
 | ブラウザ API (fetch, DOM) を使う | プラグインはメインプロセス (Node.js) で動作するため使用不可 |
 | generateSource でエラー時に例外を throw | `{ ok: false, error: "メッセージ" }` を返す |
+| editor plugin の root class に `display: flex/grid` を指定 | root 直下の wrapper に指定する。root は `.editor-page` なので、`display` を上書きすると別タブでも前の plugin 画面が表示される |

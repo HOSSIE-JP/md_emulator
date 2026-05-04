@@ -156,3 +156,45 @@ test('image-quantize utility functions snap and index colors', async () => {
   assert.equal(quantized.indices[2], 0);
   assert.ok(quantized.palette.length <= 16);
 });
+
+test('sprite-editor utility functions parse size, frame grid, and frame times', async () => {
+  const utils = await importPluginModule('sprite-editor', 'sprite-utils.mjs');
+
+  assert.equal(utils.parseSpriteSizeToken('4', 128).pixels, 32);
+  assert.equal(utils.parseSpriteSizeToken('32p', 128).pixels, 32);
+  assert.equal(utils.parseSpriteSizeToken('4f', 128).pixels, 32);
+  assert.equal(utils.formatSpritePixelToken(31), '32p');
+
+  const grid = utils.computeFrameGrid(96, 32, '32p', '16p');
+  assert.equal(grid.columns, 3);
+  assert.equal(grid.rows, 2);
+  assert.deepEqual(grid.frames[4], { row: 1, frame: 1, x: 32, y: 16, width: 32, height: 16 });
+
+  assert.deepEqual(utils.parseSpriteTime('3', 2, 3), [['3', '3', '3'], ['3', '3', '3']]);
+  assert.deepEqual(utils.parseSpriteTime('[[3,4,5][6,,8]]', 2, 3), [['3', '4', '5'], ['6', '', '8']]);
+  assert.equal(utils.updateSpriteTimeCell('3', 2, 3, 1, 2, 9), '[[3,3,3][3,3,9]]');
+});
+
+test('sprite-editor declares plugin-local page and uses v2.4 capabilities', () => {
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'sprite-editor', 'manifest.json'),
+    'utf-8',
+  ));
+  const rendererSource = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'sprite-editor', 'renderer.js'),
+    'utf-8',
+  );
+
+  assert.deepEqual(manifest.types, ['editor', 'asset']);
+  assert.equal(manifest.tab.page, 'sprite-editor');
+  assert.ok(manifest.dependencies.includes('asset-manager'));
+  assert.ok(manifest.renderer.capabilities.includes('sprite-editor'));
+  assert.match(rendererSource, /registerCapability\(['"]sprite-editor['"]/);
+  assert.match(rendererSource, /listResDefinitions\(\)/);
+  assert.match(rendererSource, /image-import-pipeline/);
+  assert.match(rendererSource, /writeAssetFile/);
+  assert.match(rendererSource, /addResEntry/);
+  assert.match(rendererSource, /updateResEntry/);
+  assert.match(rendererSource, /deleteResEntry/);
+  assert.doesNotMatch(rendererSource, /window\.prompt|window\.alert|window\.confirm/);
+});
