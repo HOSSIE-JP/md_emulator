@@ -15,7 +15,10 @@ test('asset-manager utility functions keep asset defaults stable', async () => {
 
   assert.equal(utils.inferTypeFromExtension('.png'), 'IMAGE');
   assert.equal(utils.inferTypeFromExtension('.mp3'), 'WAV');
+  assert.equal(utils.inferTypeFromExtension('.mid'), 'XGM2');
+  assert.equal(utils.inferTypeFromExtension('.midi'), 'XGM2');
   assert.equal(utils.inferTypeFromExtension('.tmx'), 'MAP');
+  assert.deepEqual(utils.allowedTypesForExtension('.mid'), ['XGM2', 'XGM']);
   assert.deepEqual(utils.allowedTypesForExtension('.vgm'), ['XGM', 'XGM2']);
   assert.equal(utils.defaultSubDirForType('SPRITE'), 'sprite');
   assert.equal(utils.defaultSubDirForType('XGM2'), 'music');
@@ -50,7 +53,9 @@ test('asset-manager declares v2.4 asset provider capabilities', () => {
     path.join(__dirname, '..', 'plugins', 'asset-manager', 'renderer.js'),
     'utf-8',
   );
+  const appRendererSource = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'renderer.js'), 'utf-8');
 
+  assert.ok(manifest.dependencies.includes('midi-converter'));
   assert.ok(manifest.renderer.capabilities.includes('asset-type-provider'));
   assert.ok(manifest.renderer.capabilities.includes('asset-import-handler'));
   assert.ok(manifest.renderer.capabilities.includes('image-import-pipeline'));
@@ -74,6 +79,14 @@ test('asset-manager declares v2.4 asset provider capabilities', () => {
   assert.match(rendererSource, /mountReloadButton\(\{ root,\s*api,\s*logger \}\)/);
   assert.match(rendererSource, /reloadResources\?\.\(\{ keepSelection:\s*true \}\)/);
   assert.match(rendererSource, /buildPreviewPaletteFromDataUrl/);
+  assert.match(rendererSource, /MIDI_EXTS/);
+  assert.match(appRendererSource, /tryHandleAssetImport/);
+  assert.match(appRendererSource, /asset-import-handler/);
+  assert.match(appRendererSource, /handleImport/);
+  assert.match(appRendererSource, /vgm-preview-player/);
+  assert.match(appRendererSource, /isVgmPreviewEntry/);
+  assert.match(appRendererSource, /toggleVgmPreview/);
+  assert.doesNotMatch(appRendererSource, /midi-converter/);
 });
 
 function makePngChunk(type, data) {

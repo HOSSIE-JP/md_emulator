@@ -35,6 +35,7 @@ test('listPlugins reads user plugins and normalizes manifest fields', () => {
     types: ['editor', 'asset'],
     hooks: ['getTab', 'onActivate'],
     dependencies: ['beta', 'beta', 'gamma'],
+    icon: 'Music',
     permissions: ['project.read', 'project.read', 'res.write'],
     roles: [{ id: 'custom-role', label: 'Custom Role', exclusive: true, order: 50 }],
     tab: { label: 'Alpha' },
@@ -48,6 +49,7 @@ test('listPlugins reads user plugins and normalizes manifest fields', () => {
   assert.equal(alpha.pluginType, 'editor');
   assert.deepEqual(alpha.hooks, ['getTab', 'onActivate']);
   assert.deepEqual(alpha.dependencies, ['beta', 'gamma']);
+  assert.equal(alpha.icon, 'music');
   assert.deepEqual(alpha.permissions, ['project.read', 'res.write']);
   assert.deepEqual(alpha.roles, [{ id: 'custom-role', label: 'Custom Role', exclusive: true, order: 50 }]);
   assert.equal(alpha.enabled, true);

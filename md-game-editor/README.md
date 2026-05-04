@@ -114,6 +114,24 @@ VSCode タスクからも起動できます:
   - 選択したファイルを `res/` 配下へコピー（サブディレクトリ指定可）
   - その相対パスで `.res` に定義を追加
 
+### MIDI BGM の登録
+
+`.mid` / `.midi` を登録する場合は、Assets ページの「登録」で MIDI ファイルを選び、通常のアセット登録画面で type / symbol / 保存先を確認して登録します。MIDI Converter は追加の確認画面を開かず、その設定を使ってすぐに変換と `.res` 登録を行います。
+
+基本手順:
+
+1. `Symbol` に C コードから参照するアセット名を入力する。
+2. 通常は `Target` を `XGM2 (VGM source)` のままにする。
+3. 「登録」を押す。
+
+この設定では `res/music/<symbol>.vgm` が生成され、`resources.res` に `XGM2 <symbol> music/<symbol>.vgm` として登録されます。Mega Drive / SGDK の BGM として使う場合は、この XGM2 登録が推奨です。
+
+`Target` に `XGM` を選ぶと `.xgm` を直接登録できます。この場合、`resources.res` には `XGM <symbol> music/<symbol>.xgm AUTO` が登録されます。ただし `.xgm` 生成には SGDK 付属の `xgmtool.exe` が必要です。`xgmtool.exe` が見つからない、または実行できない環境では VGM 生成までは成功し、XGM 登録は warning として止まります。
+
+変換結果の status に `Voice steal` が多く表示される場合は、MIDI の同時発音数が Mega Drive の FM チャンネル数を超えています。必要に応じて BGM 作曲プラグインへ import し、トラック割当や音数を調整してください。
+
+登録後に Assets 一覧で `.vgm` ソースの `XGM2` アセットを選ぶと、プレビューパネルの再生ボタンで簡易 VGM preview ができます。これは Web Audio による FM + PSG 近似再生で、実機音色の完全再現ではありませんが、メロディやテンポの確認に使えます。`.xgm` のみのアセットは初期対応では preview 対象外です。
+
 ### 画像減色（16色化）
 
 画像系アセット登録時、16色を超える場合は減色ダイアログを開けます。

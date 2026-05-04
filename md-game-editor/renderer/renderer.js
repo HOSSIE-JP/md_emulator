@@ -43,6 +43,8 @@ const state = {
   preview: {
     audio: null,
     audioEntryId: '',
+    vgmEntryId: '',
+    vgmDurationSec: 0,
     imageEntryId: '',
     spriteTimer: 0,
     spriteEntryId: '',
@@ -1259,9 +1261,9 @@ function renderPluginSidebarTabs() {
       const pageId = resolvePluginPageId(plugin);
       if (!pageId) return null;
       const label = String(plugin.tab?.label || plugin.name || plugin.id);
-      const iconId = resolvePluginIconId(plugin.tab?.icon);
+      const iconId = resolvePluginIconId(plugin.icon || plugin.tab?.icon);
       return `
-        <button class="nav-btn nav-btn-plugin" data-page="${escHtml(pageId)}" data-plugin-id="${escHtml(plugin.id)}" draggable="true" title="ドラッグで並び替え">
+        <button class="nav-btn nav-btn-plugin" data-page="${escHtml(pageId)}" data-plugin-id="${escHtml(plugin.id)}" draggable="true" title="${escHtml(label)} - ドラッグで並び替え">
           <svg class="icon"><use href="#${escHtml(iconId)}"></use></svg>
           <span class="nav-label">${escHtml(label)}</span>
         </button>
@@ -2841,6 +2843,22 @@ function isAudioEntry(entry) {
   return !!entry && pathExt(entry.sourcePath) === '.wav';
 }
 
+function getVgmPreviewSourcePath(entry) {
+  if (!entry) return '';
+  if (pathExt(entry.sourcePath) === '.vgm') return entry.sourceAbsolutePath || entry.sourcePath || '';
+  const files = Array.isArray(entry.files) ? entry.files : [];
+  const firstFile = String(files[0] || '');
+  if (pathExt(firstFile) !== '.vgm') return '';
+  const resRoot = String(state.rescomp.resRoot || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  return resRoot ? `${resRoot}/${firstFile.replace(/^\/+/, '')}` : firstFile;
+}
+
+function isVgmPreviewEntry(entry) {
+  if (!entry || !getVgmPreviewSourcePath(entry)) return false;
+  const player = getPluginCapability('vgm-preview-player');
+  return typeof player?.canPreview === 'function' ? player.canPreview(entry) : false;
+}
+
 function pathExt(value) {
   const m = String(value || '').toLowerCase().match(/(\.[a-z0-9]+)$/i);
   return m ? m[1] : '';
@@ -2868,6 +2886,14 @@ function stopAudioPreview() {
     state.preview.audio = null;
   }
   state.preview.audioEntryId = '';
+  syncAudioPlayer(false);
+}
+
+function stopVgmPreview() {
+  const player = getPluginCapability('vgm-preview-player');
+  player?.stop?.();
+  state.preview.vgmEntryId = '';
+  state.preview.vgmDurationSec = 0;
   syncAudioPlayer(false);
 }
 
@@ -3202,11 +3228,54 @@ function redrawCurrentSpritePreview() {
 }
 
 async function syncInlinePreview(entry) {
+  stopVgmPreview();
   stopSpritePreview();
   if (!entry) {
     if (el.inlineImagePreview) el.inlineImagePreview.hidden = true;
     if (el.inlineAudioPreview) el.inlineAudioPreview.hidden = true;
     if (el.inlineNoPreview) el.inlineNoPreview.hidden = false;
+    return;
+  }
+
+  if (isVgmPreviewEntry(entry)) {
+    if (el.inlineImagePreview) el.inlineImagePreview.hidden = true;
+    if (el.inlineNoPreview) el.inlineNoPreview.hidden = true;
+    if (el.inlineAudioPreview) el.inlineAudioPreview.hidden = false;
+    if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = '<span class="audio-meta-loading">VGM を読み込み中...</span>';
+    syncAudioPlayer(false);
+
+    const sourcePath = getVgmPreviewSourcePath(entry);
+    const player = getPluginCapability('vgm-preview-player');
+    if (!sourcePath || !player?.load) {
+      if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = '<div class="audio-meta-row"><span>VGM preview provider が利用できません</span></div>';
+      return;
+    }
+    window.electronAPI.readFileAsDataUrl(sourcePath).then((res) => {
+      if (state.rescomp.selectedEntryLine !== entry.lineNumber) return;
+      if (!res?.ok || !res.dataUrl) {
+        if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = `<div class="audio-meta-row"><span>${escHtml(entry.sourcePath || sourcePath)} を読み込めません</span></div>`;
+        return;
+      }
+      const loaded = player.load({ entry, dataUrl: res.dataUrl });
+      if (!loaded?.ok) {
+        if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = `<div class="audio-meta-row"><span>${escHtml(loaded?.error || 'VGM を解析できません')}</span></div>`;
+        return;
+      }
+      state.preview.vgmEntryId = entry.id;
+      state.preview.vgmDurationSec = Number(loaded.meta?.durationSec || 0);
+      const warnings = (loaded.warnings || loaded.meta?.warnings || []).slice(0, 3);
+      if (el.audioPreviewMeta) {
+        el.audioPreviewMeta.innerHTML = `
+          <div class="audio-meta-row"><span class="audio-meta-label">ファイル</span><span>${escHtml(entry.sourcePath || sourcePath)}</span></div>
+          <div class="audio-meta-row"><span class="audio-meta-label">再生時間</span><span>${formatDuration(loaded.meta?.durationSec || 0)}</span></div>
+          <div class="audio-meta-row"><span class="audio-meta-label">形式</span><span>VGM preview / FM+PSG 近似</span></div>
+          <div class="audio-meta-row"><span class="audio-meta-label">Writes</span><span>YM2612 ${Number(loaded.meta?.ym2612Writes || 0).toLocaleString()} / PSG ${Number(loaded.meta?.psgWrites || 0).toLocaleString()}</span></div>
+          ${warnings.length ? `<div class="audio-meta-row"><span class="audio-meta-label">Warning</span><span>${escHtml(warnings.join(' / '))}</span></div>` : ''}
+        `;
+      }
+    }).catch((err) => {
+      if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = `<div class="audio-meta-row"><span>${escHtml(String(err?.message || err))}</span></div>`;
+    });
     return;
   }
 
@@ -3281,6 +3350,7 @@ async function syncInlinePreview(entry) {
   }
 
   if (isAudioEntry(entry)) {
+    stopVgmPreview();
     if (el.inlineImagePreview) el.inlineImagePreview.hidden = true;
     if (el.inlineNoPreview) el.inlineNoPreview.hidden = true;
     if (el.inlineAudioPreview) el.inlineAudioPreview.hidden = false;
@@ -3365,6 +3435,7 @@ function toggleAudioPreview(entry) {
     return;
   }
 
+  stopVgmPreview();
   if (state.preview.audioEntryId === entry.id && state.preview.audio) {
     stopAudioPreview();
     return;
@@ -3392,6 +3463,46 @@ function toggleAudioPreview(entry) {
   }).catch(() => {
     stopAudioPreview();
   });
+}
+
+async function toggleVgmPreview(entry) {
+  if (!isVgmPreviewEntry(entry)) return;
+  const player = getPluginCapability('vgm-preview-player');
+  if (!player?.play) return;
+
+  if (state.preview.vgmEntryId === entry.id && player.isPlaying?.()) {
+    stopVgmPreview();
+    return;
+  }
+
+  stopAudioPreview();
+  state.preview.vgmEntryId = entry.id;
+  const result = await player.play({
+    onTime: (currentSec) => {
+      const duration = Math.max(0.01, Number(state.preview.vgmDurationSec || 0));
+      if (el.audioSeek) el.audioSeek.value = (currentSec / duration) * 100;
+      if (el.audioTime) {
+        const m = Math.floor(currentSec / 60);
+        const s = Math.floor(currentSec % 60).toString().padStart(2, '0');
+        el.audioTime.textContent = `${m}:${s}`;
+      }
+    },
+    onEnded: () => {
+      stopVgmPreview();
+    },
+    onError: () => {
+      stopVgmPreview();
+    },
+  });
+  if (result?.ok) {
+    state.preview.vgmDurationSec = Number(result.durationSec || state.preview.vgmDurationSec || 0);
+    syncAudioPlayer(true);
+  } else {
+    stopVgmPreview();
+    if (el.audioPreviewMeta) {
+      el.audioPreviewMeta.innerHTML += `<div class="audio-meta-row"><span class="audio-meta-label">Error</span><span>${escHtml(result?.error || 'VGM preview failed')}</span></div>`;
+    }
+  }
 }
 
 function renderAssetTable() {
@@ -6183,6 +6294,25 @@ async function applyAudioConvertModal() {
   closeAudioConvertModal(true);
 }
 
+async function tryHandleAssetImport(payload) {
+  const handlers = getPluginCapabilities('asset-import-handler');
+  for (const handler of handlers) {
+    if (typeof handler?.handleImport !== 'function') continue;
+    try {
+      const canHandle = typeof handler.canHandle === 'function'
+        ? handler.canHandle(payload)
+        : true;
+      if (!canHandle) continue;
+      const result = await handler.handleImport(payload);
+      if (result?.handled) return result;
+    } catch (err) {
+      appendLog('app', `asset-import-handler エラー: ${String(err?.message || err)}`, 'warn');
+      return { handled: false, error: String(err?.message || err) };
+    }
+  }
+  return { handled: false };
+}
+
 async function submitAssetModal() {
   const picked = state.rescomp.pendingAssetPick;
   if (!picked) {
@@ -6263,6 +6393,28 @@ async function submitAssetModal() {
       comment,
       resFile,
     });
+    return;
+  }
+
+  const handled = await tryHandleAssetImport({
+    picked,
+    normalizedType,
+    targetSubdir,
+    targetFileName,
+    symbol,
+    comment,
+    resFile,
+  });
+  if (handled?.handled) {
+    state.rescomp.pendingAssetPick = null;
+    closeModal(el.assetModal);
+    if (el.assetTableHint && handled.message) {
+      el.assetTableHint.textContent = handled.message;
+    }
+    return;
+  }
+  if (handled?.error) {
+    if (el.assetTableHint) el.assetTableHint.textContent = handled.error;
     return;
   }
 
@@ -6676,12 +6828,19 @@ function bindEvents() {
   });
 
   el.btnTogglePreviewPanel?.addEventListener('click', () => {
-    setPreviewPanelOpen(!state.preview.panelOpen);
+    const nextOpen = !state.preview.panelOpen;
+    if (!nextOpen) {
+      stopAudioPreview();
+      stopVgmPreview();
+    }
+    setPreviewPanelOpen(nextOpen);
   });
 
   el.btnAudioPlay?.addEventListener('click', () => {
     const entry = getCurrentSelectedEntry();
-    if (entry && isAudioEntry(entry)) {
+    if (entry && isVgmPreviewEntry(entry)) {
+      toggleVgmPreview(entry);
+    } else if (entry && isAudioEntry(entry)) {
       if (state.preview.audio && state.preview.audioEntryId === entry.id) {
         stopAudioPreview();
       } else {
@@ -6693,6 +6852,8 @@ function bindEvents() {
   el.audioSeek?.addEventListener('input', () => {
     if (state.preview.audio && state.preview.audio.duration) {
       state.preview.audio.currentTime = (parseFloat(el.audioSeek.value) / 100) * state.preview.audio.duration;
+    } else if (state.preview.vgmEntryId) {
+      el.audioSeek.value = 0;
     }
   });
 

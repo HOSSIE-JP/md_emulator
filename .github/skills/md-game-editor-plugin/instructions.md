@@ -58,6 +58,7 @@ Copilot がプラグインを生成するとき、以下の順序で作業する
   "name": "<表示名>",
   "description": "<説明>",
   "version": "1.0.0",
+  "icon": "build",
   "types": ["build"],           // 必ず配列
   "hooks": ["onBuildStart", "onBuildEnd"],
   "permissions": ["project.read", "project.write", "build.configure"],

@@ -343,7 +343,7 @@ function createPluginLogger(pluginId) {
 }
 
 const DEFAULT_ASSET_FILE_FILTERS = [
-  { name: 'Assets', extensions: ['png', 'bmp', 'pal', 'tsx', 'tmx', 'vgm', 'xgm', 'wav', 'mp3', 'ogg'] },
+  { name: 'Assets', extensions: ['png', 'bmp', 'pal', 'tsx', 'tmx', 'vgm', 'xgm', 'mid', 'midi', 'wav', 'mp3', 'ogg'] },
   { name: 'All Files', extensions: ['*'] },
 ];
 
@@ -2237,6 +2237,8 @@ app.on('window-all-closed', () => {
 });
 
 module.exports.__test = {
+  DEFAULT_ASSET_FILE_FILTERS,
+  normalizeDialogFilters,
   normalizeWindowBounds,
   readMainWindowBounds,
   saveMainWindowBounds,

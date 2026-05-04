@@ -78,9 +78,20 @@ test('midi-converter manifest exposes main hook and renderer capability', () => 
   assert.deepEqual(manifest.hooks, ['convertMidiMusic']);
   assert.deepEqual(manifest.mainApi.hooks, ['convertMidiMusic']);
   assert.ok(manifest.renderer.capabilities.includes('midi-convert-ui'));
+  assert.ok(manifest.renderer.capabilities.includes('asset-import-handler'));
+  assert.ok(manifest.renderer.capabilities.includes('vgm-preview-player'));
   assert.match(rendererSource, /registerCapability\(['"]midi-convert-ui['"]/);
+  assert.match(rendererSource, /registerCapability\(['"]asset-import-handler['"]/);
+  assert.match(rendererSource, /registerCapability\(['"]vgm-preview-player['"]/);
+  assert.match(rendererSource, /createVgmPreviewPlayer/);
+  assert.match(rendererSource, /async function handleImport/);
+  assert.match(rendererSource, /convertMidiMusic\(\{/);
+  assert.match(rendererSource, /addResEntry/);
+  assert.match(rendererSource, /XGM2/);
+  assert.match(rendererSource, /XGM/);
   assert.doesNotMatch(fs.readFileSync(path.join(pluginDir, 'index.js'), 'utf-8'), /python|midi2vgm\.py|runPython/i);
   assert.doesNotMatch(rendererSource, /window\.prompt|window\.alert|window\.confirm/);
+  assert.doesNotMatch(rendererSource, /MIDI 変換ウィザードを開きました|設定を確認して Convert/);
 });
 
 test('JS converter core reads MIDI and emits Mega Drive VGM data', () => {
@@ -140,6 +151,25 @@ test('main hook saves MIDI conversion outputs under project res/music', () => {
   assert.equal(result.asset.sourcePath, 'music/imported_theme.vgm');
   assert.ok(fs.existsSync(path.join(projectDir, 'res', 'music', 'imported_theme.vgm')));
   assert.ok(result.warnings.some((warning) => warning.includes('xgmtool')));
+});
+
+test('main hook honors asset-manager output target settings', () => {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'midi-converter-target-'));
+  const midiPath = path.join(projectDir, 'lead.mid');
+  fs.writeFileSync(midiPath, makeMidiFixture());
+
+  const result = converter.convertMidiMusic({
+    sourcePath: midiPath,
+    symbol: 'Asset Name',
+    targetSubdir: 'music/stage 1',
+    targetFileName: 'stage theme.mid',
+    outputs: { vgm: true, xgm: false, registerAsset: true },
+  }, { projectDir });
+
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.files.vgm, 'res/music/stage_1/stage_theme.vgm');
+  assert.equal(result.asset.sourcePath, 'music/stage_1/stage_theme.vgm');
+  assert.ok(fs.existsSync(path.join(projectDir, 'res', 'music', 'stage_1', 'stage_theme.vgm')));
 });
 
 test('main hook converts XGM when bundled xgmtool is available', (t) => {

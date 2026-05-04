@@ -86,6 +86,16 @@ test('log snapshots are normalized and capped for popout forwarding', () => {
   assert.equal(typeof normalizedEntry.timestamp, 'number');
 });
 
+test('asset source picker default filter includes MIDI music files', () => {
+  const api = loadMainForWindowState(makeTempUserData());
+  const assetFilter = api.DEFAULT_ASSET_FILE_FILTERS.find((filter) => filter.name === 'Assets');
+
+  assert.ok(assetFilter);
+  assert.ok(assetFilter.extensions.includes('mid'));
+  assert.ok(assetFilter.extensions.includes('midi'));
+  assert.deepEqual(api.normalizeDialogFilters([]), api.DEFAULT_ASSET_FILE_FILTERS);
+});
+
 test('project plugin roles restore exclusive plugin enabled state in main process', () => {
   const userData = makeTempUserData();
   const { main, buildSystem } = loadMainWithBuildSystem(userData);

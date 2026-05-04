@@ -52,6 +52,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
   "name": "表示名",             // 必須: UI に表示される名前
   "description": "説明文",      // 任意: 設定画面用の説明
   "version": "1.0.0",          // 必須: semver 形式
+  "icon": "puzzle",            // 任意: サイドバーなどで使う組み込みアイコン名
   "types": ["build"],          // 必須: 配列で記述
   "hooks": ["onBuildStart"],   // 任意: 実装するフック名の宣言
   "permissions": ["project.read", "project.write", "build.configure"],
@@ -106,14 +107,16 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 - `entry` と `styles` は plugin ディレクトリ内の相対パスだけを指定する
 - `../` や絶対パスで plugin 外へ出る指定は禁止
 - Assets / Code のようなページ UI は `renderer.page` と `tab.page` を一致させる
+- サイドバーの初期表示順は `tab.order` の昇順。ゲーム特化エディタは 1-9、Assets は 10、BGM は 20、Code は 30 を目安にし、ユーザーのドラッグ並び替え保存がある場合はそちらが優先される
 - Converter は `image-resize`, `image-quantize`, `audio-convert-ui` などの capability を登録し、利用側 plugin は capability 経由で呼び出す
 - 新規ページ、ツール、converter、モーダル、プレビューは本体 HTML/renderer に追加せず、`root` / `pageRoot` / `hostRoot` と `api.createModal()` / `api.mountElement()` で plugin 側に mount する
 - editor plugin の `pageRoot` / `root` は `<section class="editor-page">` 自体なので、root に付ける plugin 固有 class へ `display` を指定しない。ページ全体の `display` はホストの `.editor-page.active` が管理する。レイアウト用の `display: flex/grid` は root 直下の wrapper 要素に指定する
 - プラグイン同士の連携は `api.capabilities.get()` / `api.capabilities.require()` / `api.events.on()` / `api.events.emit()` を使い、本体側に個別 plugin ID の分岐を追加しない
 - renderer から main process hook を呼ぶ場合は `hooks` と `mainApi.hooks` の両方に宣言し、`api.plugins.invokeHook()` または `window.electronAPI.invokePluginHook()` を使う
-- asset type / import / image 変換は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として登録する
+- asset type / import / image 変換は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として登録する。標準コピー前に独自 wizard を挟む場合は `asset-import-handler.handleImport(payload)` を実装する
 - Build / Test Play など単一選択 plugin は `roles` で宣言し、project.json の標準保存先は `pluginRoles` とする
 - 単一選択 role で競合 plugin が無効化される場合、その plugin に依存する plugin も同時に無効化される
+- `src/boot/rom_head.c` はプロジェクト設定からエディタ本体が生成するため、build plugin のテンプレート同期で上書きしない
 - `permissions` は v2.4 では表示・レビュー用途の宣言で、sandbox 強制ではない
 - 新規 plugin で本体 `main.js` / `preload.js` / `build-system.js` の個別追記が必要に見える場合は、まず Runtime v2.4 の汎用 API 不足として扱う
 
@@ -123,7 +126,7 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 2. Build / Test Play の単一選択 plugin は `roles` を宣言し、project 側は `project.json.pluginRoles` に保存する
 3. UI、modal、preview、converter 連携は plugin の `renderer.js` で実装し、本体 HTML / renderer / main / preload へ個別追記しない
 4. main process の処理が必要な場合は `hooks` と `mainApi.hooks` に同じ hook 名を宣言し、renderer から `api.plugins.invokeHook()` で呼ぶ
-5. asset 登録拡張は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として提供する
+5. asset 登録拡張は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として提供する。標準コピー前に独自 wizard を挟む場合は `asset-import-handler.handleImport(payload)` を使う
 
 ---
 

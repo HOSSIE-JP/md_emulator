@@ -26,6 +26,15 @@ function toProjectRelative(projectDir, absolutePath) {
   return path.relative(projectDir, absolutePath).replace(/\\/g, '/');
 }
 
+function sanitizeResSubdir(value, fallback = 'music') {
+  const parts = String(value || fallback)
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((part) => part.replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^\.+$/, '').replace(/^_+|_+$/g, ''))
+    .filter(Boolean);
+  return parts.length > 0 ? parts.join('/') : fallback;
+}
+
 function findBundledXgmTool(payload = {}) {
   const explicit = String(payload.xgmToolPath || '');
   if (explicit) return explicit;
@@ -61,11 +70,13 @@ function convertMidiMusic(payload = {}, context = {}) {
     return { ok: false, error: 'VGM または XGM の出力を少なくとも 1 つ有効にしてください。' };
   }
 
-  const musicDir = path.join(projectDir, 'res', 'music');
+  const outputSubdir = sanitizeResSubdir(payload.targetSubdir || payload.outputSubdir || 'music');
+  const targetBaseName = sanitizeSymbol(payload.targetFileName || payload.outputBaseName || symbol, symbol);
+  const musicDir = path.join(projectDir, 'res', outputSubdir);
   fs.mkdirSync(musicDir, { recursive: true });
 
-  const vgmPath = path.join(musicDir, `${symbol}.vgm`);
-  const xgmPath = path.join(musicDir, `${symbol}.xgm`);
+  const vgmPath = path.join(musicDir, `${targetBaseName}.vgm`);
+  const xgmPath = path.join(musicDir, `${targetBaseName}.xgm`);
 
   logger.info?.(`[${manifest.id}] MIDI 変換開始: ${path.basename(sourcePath)} -> ${symbol}`);
   let converted = null;
@@ -117,7 +128,7 @@ function convertMidiMusic(payload = {}, context = {}) {
     asset: registerAsset && files.vgm ? {
       type: 'XGM2',
       name: symbol,
-      sourcePath: `music/${symbol}.vgm`,
+      sourcePath: `${outputSubdir}/${targetBaseName}.vgm`,
     } : null,
     diagnostics,
     warnings,
@@ -129,6 +140,7 @@ module.exports = {
   convertMidiMusic,
   _private: {
     findBundledXgmTool,
+    sanitizeResSubdir,
     sanitizeSymbol,
   },
 };

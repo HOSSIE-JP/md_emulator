@@ -127,7 +127,7 @@ test('block-game-builder generator syncs the template and returns main source', 
     assert.match(powerupSource, /barrier_draw_state != \(u8\)barrier_visible/);
   }
   assert.equal(fs.existsSync(path.join(projectDir, 'src', 'boot', 'sega.s')), true);
-  assert.match(fs.readFileSync(path.join(projectDir, 'src', 'boot', 'rom_head.c'), 'utf-8'), /0x00200001/);
+  assert.equal(fs.existsSync(path.join(projectDir, 'src', 'boot', 'rom_head.c')), false);
   assert.equal(fs.existsSync(path.join(projectDir, 'inc', 'game.h')), true);
   {
     const gameHeader = fs.readFileSync(path.join(projectDir, 'inc', 'game.h'), 'utf-8');
@@ -145,7 +145,9 @@ test('block-game-builder generator syncs the template and returns main source', 
 
 test('block-game-builder build start lets SGDK own the boot object', () => {
   const projectDir = path.join(makeTempDir('md-editor-block-builder-build-start-'), 'demo');
-  fs.mkdirSync(projectDir, { recursive: true });
+  const romHeadPath = path.join(projectDir, 'src', 'boot', 'rom_head.c');
+  fs.mkdirSync(path.dirname(romHeadPath), { recursive: true });
+  fs.writeFileSync(romHeadPath, '/* project settings generated ROM header */\n"USER HEADER";\n', 'utf-8');
 
   const stagePlugin = require('../plugins/block-stage-editor');
   const assets = requiredBlockAssets();
@@ -163,6 +165,7 @@ test('block-game-builder build start lets SGDK own the boot object', () => {
   });
 
   assert.equal(result.ok, true);
+  assert.equal(fs.readFileSync(romHeadPath, 'utf-8'), '/* project settings generated ROM header */\n"USER HEADER";\n');
   assert.match(result.makeVariables.SRC_C, /src\/main\.c/);
   assert.match(result.makeVariables.SRC_C, /src\/score\.c/);
   assert.equal(Object.hasOwn(result.makeVariables, 'SRC_S'), false);

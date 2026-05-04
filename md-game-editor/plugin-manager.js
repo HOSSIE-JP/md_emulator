@@ -14,6 +14,7 @@
  *     "name": "Plugin Name",
  *     "description": "...",
  *     "version": "1.0.0",
+ *     "icon": "puzzle",
  *     "types": ["build", "logger"],
  *     "roles": [{ "id": "builder", "label": "Build", "exclusive": true }],
  *     "hooks": ["onBuildStart", "onBuildLog", "onBuildEnd"]
@@ -86,6 +87,13 @@ function normalizeRendererCapabilities(renderer) {
       .map((capability) => String(capability || '').trim())
       .filter(Boolean),
   ));
+}
+
+function normalizeIcon(manifest) {
+  const raw = typeof manifest.icon === 'string' && manifest.icon.trim()
+    ? manifest.icon
+    : manifest.tab?.icon;
+  return String(raw || '').trim().toLowerCase();
 }
 
 function normalizeMainApi(manifest) {
@@ -271,6 +279,7 @@ function listPlugins() {
         name: manifest.name || id,
         description: manifest.description || '',
         version: manifest.version || '0.0.0',
+        icon: normalizeIcon(manifest),
         pluginTypes,
         pluginType: pluginTypes[0] || 'unknown',
         tab: manifest.tab || null,

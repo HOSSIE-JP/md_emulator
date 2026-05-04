@@ -3,6 +3,7 @@
   "name": "コードエディタ",
   "description": "プロジェクト配下のファイルをツリー表示して編集・新規作成・削除できる標準エディタプラグインです。",
   "version": "0.1.0",
+  "icon": "code",
   "types": ["editor"],
   "permissions": ["project.read", "project.write"],
   "hooks": [
@@ -13,7 +14,8 @@
   "tab": {
     "label": "コード",
     "icon": "code",
-    "page": "code"
+    "page": "code",
+    "order": 30
   },
   "renderer": {
     "entry": "renderer.js",

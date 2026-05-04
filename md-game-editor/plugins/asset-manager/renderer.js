@@ -1,6 +1,7 @@
 import {
   AUDIO_EXTS,
   IMAGE_EXTS,
+  MIDI_EXTS,
   allowedTypesForExtension,
   defaultSubDirForType,
   inferTypeFromExtension,
@@ -31,6 +32,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       const initialType = inferTypeFromExtension(ext);
       const fileName = String(file.fileName || '');
       const isAudioInput = AUDIO_EXTS.includes(ext);
+      const isMidiInput = MIDI_EXTS.includes(ext);
       return {
         initialType,
         allowedTypes: allowedTypesForExtension(ext, DEFAULT_TYPES),
@@ -41,6 +43,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
           : fileName,
         isImageInput: IMAGE_EXTS.includes(ext),
         isAudioInput,
+        isMidiInput,
       };
     },
   });

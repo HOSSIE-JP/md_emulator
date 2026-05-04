@@ -9,6 +9,10 @@ function readRendererFile(name) {
   return fs.readFileSync(path.join(__dirname, '..', 'renderer', name), 'utf-8');
 }
 
+function readPluginManifest(pluginId) {
+  return JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'plugins', pluginId, 'manifest.json'), 'utf-8'));
+}
+
 test('settings page keeps project and export settings in two columns', () => {
   const html = readRendererFile('index.html');
   const css = readRendererFile('style.css');
@@ -65,6 +69,36 @@ test('startup selects the first sidebar plugin and project creation exposes buil
   assert.doesNotMatch(renderer, /function getInstalledBuilderPlugins\(\)\s*\{[\s\S]*?plugin\.enabled && pluginSupportsRole\(plugin,\s*'builder'\)/);
   assert.match(renderer, /空のプロジェクト/);
   assert.match(renderer, /payload\.config\.pluginRoles\s*=\s*\{\s*builder:\s*selectedBuilder\s*\}/);
+});
+
+test('sidebar plugin icons prefer manifest icon over tab icon', () => {
+  const html = readRendererFile('index.html');
+  const renderer = readRendererFile('renderer.js');
+
+  assert.match(html, /id="icon-sprite"/);
+  assert.match(html, /id="icon-grid"/);
+  assert.match(html, /id="icon-music"/);
+  assert.match(renderer, /resolvePluginIconId\(plugin\.icon \|\| plugin\.tab\?\.icon\)/);
+});
+
+test('default sidebar order prioritizes game editors then core tools', () => {
+  const html = readRendererFile('index.html');
+  const block = readPluginManifest('block-stage-editor');
+  const assets = readPluginManifest('asset-manager');
+  const bgm = readPluginManifest('md-bgm-composer');
+  const code = readPluginManifest('code-editor');
+  const sprites = readPluginManifest('sprite-editor');
+
+  assert.equal(block.tab.order, 5);
+  assert.equal(assets.tab.order, 10);
+  assert.equal(bgm.tab.order, 20);
+  assert.equal(code.tab.order, 30);
+  assert.equal(sprites.tab.order, 40);
+  assert.ok(block.tab.order < assets.tab.order);
+  assert.ok(assets.tab.order < bgm.tab.order);
+  assert.ok(bgm.tab.order < code.tab.order);
+  assert.ok(html.indexOf('id="sidebarPluginTabs"') < html.indexOf('data-page="plugins"'));
+  assert.ok(html.indexOf('data-page="plugins"') < html.indexOf('data-page="settings"'));
 });
 
 test('plugin page availability keeps multiple editor plugin pages independent', () => {

@@ -1,10 +1,12 @@
 export const IMAGE_EXTS = ['.png', '.bmp'];
 export const AUDIO_EXTS = ['.wav', '.mp3', '.ogg'];
+export const MIDI_EXTS = ['.mid', '.midi'];
 
 export function inferTypeFromExtension(ext) {
   const e = String(ext || '').toLowerCase();
   if (e === '.pal') return 'PALETTE';
   if (AUDIO_EXTS.includes(e)) return 'WAV';
+  if (MIDI_EXTS.includes(e)) return 'XGM2';
   if (e === '.vgm' || e === '.xgm') return 'XGM';
   if (e === '.tsx') return 'TILESET';
   if (e === '.tmx') return 'MAP';
@@ -16,6 +18,7 @@ export function allowedTypesForExtension(ext, allTypes = []) {
   const e = String(ext || '').toLowerCase();
   if (IMAGE_EXTS.includes(e)) return ['PALETTE', 'IMAGE', 'BITMAP', 'SPRITE', 'MAP', 'TILEMAP', 'TILESET'];
   if (AUDIO_EXTS.includes(e)) return ['WAV'];
+  if (MIDI_EXTS.includes(e)) return ['XGM2', 'XGM'];
   if (e === '.xgm' || e === '.vgm') return ['XGM', 'XGM2'];
   if (e === '.tsx') return ['TILESET'];
   if (e === '.tmx') return ['MAP', 'TILEMAP'];

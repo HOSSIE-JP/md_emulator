@@ -16,7 +16,6 @@ const SOURCE_FILES = [
   'ui.c',
 ];
 const BOOT_FILES = [
-  path.join('boot', 'rom_head.c'),
   path.join('boot', 'sega.s'),
 ];
 
