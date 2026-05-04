@@ -215,8 +215,8 @@ function entryToResLine(entry) {
     case 'SPRITE':
       parts.push(
         source,
-        entry.width || '2',
-        entry.height || '2',
+        spriteSizeToTileToken(entry.width || '2'),
+        spriteSizeToTileToken(entry.height || '2'),
         entry.compression || 'NONE',
         entry.time || '0',
         entry.collision || 'NONE',
@@ -269,6 +269,15 @@ function entryToResLine(entry) {
   }
 
   return parts.join(' ').trim();
+}
+
+function spriteSizeToTileToken(value) {
+  const raw = String(value || '').trim();
+  const upper = raw.toUpperCase();
+  const numeric = Number.parseInt(upper, 10);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '1';
+  const tiles = upper.endsWith('P') ? Math.ceil(numeric / 8) : numeric;
+  return String(Math.max(1, Math.min(31, tiles)));
 }
 
 function entryToResText(entry) {

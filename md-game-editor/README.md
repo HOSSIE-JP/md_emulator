@@ -1,7 +1,7 @@
 # md-game-editor
 
 Electron ベースの **Mega Drive ゲームエディタ & エミュレータ** シェルです。  
-`frontend/pkg/` にビルドされた WASM コアと、`md-api` REST サーバーを内包し、デスクトップアプリとして動作します。
+`standard-emulator` プラグインにビルド済み WASM コアを、`standard-api-emulator` プラグインに `md-api` REST サーバーを内包するデスクトップアプリとして動作します。
 
 ---
 
@@ -37,12 +37,10 @@ md-game-editor/
 │   ├── debug-wasm.html      # WASM デバッグビューア
 │   └── style.css
 ├── scripts/
-│   ├── copy-pkg.js          # frontend/pkg → md-game-editor/pkg コピー
-│   └── prepare-dist.js      # パッケージ前ビルド (WASM + md-api バイナリ)
+│   ├── copy-pkg.js          # frontend/pkg → plugins/standard-emulator/pkg コピー
+│   └── prepare-dist.js      # パッケージ前ビルド (WASM + plugin-local md-api バイナリ)
 ├── projects/                # 同梱サンプルプロジェクト
-├── plugins/                 # Build / Test Play / Editor プラグイン
-├── pkg/                     # 実行時 WASM アセット (自動生成)
-└── bin/                     # 同梱バイナリ (自動生成): md-api.exe 等
+└── plugins/                 # Build / Test Play / Editor プラグイン
 ```
 
 ---
@@ -79,11 +77,11 @@ wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg
 cd md-game-editor
 npm install
 
-# 3. WASM アセットを md-game-editor/pkg にコピー
+# 3. WASM アセットを標準 WASM エミュレータープラグインへコピー
 npm run copy-pkg
 ```
 
-> **注意**: `md-game-editor/pkg/` は `.gitignore` 対象です。`copy-pkg` または `prepare:dist` で都度生成してください。
+> **注意**: `md-game-editor/plugins/standard-emulator/pkg/` は `.gitignore` 対象です。`copy-pkg` または `prepare:dist` で都度生成してください。
 
 ---
 
@@ -181,7 +179,7 @@ npm run build:mac
 
 1. `wasm-pack build` で WASM コアを再ビルド
 2. `cargo build --release -p md-api` で API バイナリを生成
-3. バイナリを `md-game-editor/bin/` にコピー
+3. バイナリを `md-game-editor/plugins/standard-api-emulator/bin/` にコピー
 
 VSCode タスクからも実行できます:
 

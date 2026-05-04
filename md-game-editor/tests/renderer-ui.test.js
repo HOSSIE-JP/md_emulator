@@ -168,6 +168,16 @@ test('api testplay opens a bundled debug viewer with the active API port', () =>
   assert.match(debugHtml, /const initialPort = Number\(params\.get\('port'\)\) \|\| 8080/);
 });
 
+test('copy-pkg targets the standard emulator plugin instead of app root pkg', () => {
+  const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'copy-pkg.js'), 'utf-8');
+
+  assert.match(script, /standardEmulatorRoot = path\.join\(appRoot,\s*'plugins',\s*'standard-emulator'\)/);
+  assert.match(script, /const toPkg = path\.join\(standardEmulatorRoot,\s*'pkg'\)/);
+  assert.match(script, /const toWrapper = path\.join\(standardEmulatorRoot,\s*'md-emulator\.js'\)/);
+  assert.match(script, /const toPlayer = path\.join\(standardEmulatorRoot,\s*'wasm-player\.js'\)/);
+  assert.doesNotMatch(script, /const toPkg = path\.join\(appRoot,\s*'pkg'\)/);
+});
+
 test('exclusive role selection reloads plugin state after saving', () => {
   const renderer = readRendererFile('renderer.js');
 

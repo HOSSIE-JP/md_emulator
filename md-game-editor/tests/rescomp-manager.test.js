@@ -75,7 +75,7 @@ test('entryToResLine writes XGM2 WAV rate settings', () => {
   assert.equal(line, 'WAV bgm_stage bgm/stage.wav XGM2 6650 TRUE');
 });
 
-test('SPRITE entries preserve pixel size suffix and frame time matrix', () => {
+test('SPRITE entries parse pixel size suffix and write SGDK tile counts', () => {
   const parsed = rescomp.parseResContent(
     'SPRITE hero sprite/hero.png 32p 16p FAST [[3,4][5,6]] BOX TILE MEDIUM TRUE\n',
   );
@@ -90,7 +90,33 @@ test('SPRITE entries preserve pixel size suffix and frame time matrix', () => {
   assert.equal(parsed.entries[0].optLevel, 'MEDIUM');
   assert.equal(parsed.entries[0].optDuplicate, 'TRUE');
 
-  assert.equal(rescomp.entryToResLine(parsed.entries[0]), 'SPRITE hero sprite/hero.png 32p 16p FAST [[3,4][5,6]] BOX TILE MEDIUM TRUE');
+  assert.equal(rescomp.entryToResLine(parsed.entries[0]), 'SPRITE hero sprite/hero.png 4 2 FAST [[3,4][5,6]] BOX TILE MEDIUM TRUE');
+  assert.equal(rescomp.entryToResLine({
+    type: 'SPRITE',
+    name: 'enemies',
+    sourcePath: 'sprite/enemies.png',
+    width: '48p',
+    height: '32p',
+    compression: 'NONE',
+    time: '1',
+    collision: 'NONE',
+    optType: 'BALANCED',
+    optLevel: 'FAST',
+    optDuplicate: 'FALSE',
+  }), 'SPRITE enemies sprite/enemies.png 6 4 NONE 1 NONE BALANCED FAST FALSE');
+  assert.equal(rescomp.entryToResLine({
+    type: 'SPRITE',
+    name: 'enemies',
+    sourcePath: 'sprite/enemies.png',
+    width: '48p',
+    height: '32p',
+    compression: 'NONE',
+    time: '[[1,1][1,1,1,1]]',
+    collision: 'NONE',
+    optType: 'BALANCED',
+    optLevel: 'FAST',
+    optDuplicate: 'FALSE',
+  }), 'SPRITE enemies sprite/enemies.png 6 4 NONE [[1,1][1,1,1,1]] NONE BALANCED FAST FALSE');
 });
 
 test('listResDefinitions creates a default resources.res when none exists', () => {

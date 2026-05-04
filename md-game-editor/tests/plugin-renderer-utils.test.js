@@ -135,6 +135,31 @@ test('asset preview renderer uses asset-manager palette helper and 16 swatches',
   assert.match(rendererSource, /renderPaletteSwatches\(el\.inlinePalette,\s*colors\)/);
 });
 
+test('asset preview animates SPRITE entries with row-aware timing', () => {
+  const rendererSource = fs.readFileSync(
+    path.join(__dirname, '..', 'renderer', 'renderer.js'),
+    'utf-8',
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '..', 'renderer', 'style.css'),
+    'utf-8',
+  );
+
+  assert.match(rendererSource, /function syncSpriteInlinePreview\(entry\)/);
+  assert.match(rendererSource, /parseSpritePreviewTimeRows\(entry\.time \|\| '0'/);
+  assert.match(rendererSource, /data-sprite-preview-row/);
+  assert.match(rendererSource, /\$\{index\} \(\$\{row\.length\} frames\)/);
+  assert.doesNotMatch(rendererSource, /ROW \$\{index\}/);
+  assert.match(rendererSource, /data-sprite-preview-toggle/);
+  assert.match(rendererSource, /href="#icon-stop"/);
+  assert.match(rendererSource, /#icon-play/);
+  assert.match(rendererSource, /function toggleSpritePreviewPlayback\(\)/);
+  assert.match(rendererSource, /scheduleSpritePreviewFrame/);
+  assert.match(rendererSource, /isSpriteEntry\(entry\)[\s\S]*await syncSpriteInlinePreview\(entry\)/);
+  assert.match(css, /\.image-preview-frame img\[hidden\],[\s\S]*\.image-preview-frame canvas\[hidden\]\s*\{[\s\S]*display:\s*none !important/);
+  assert.match(css, /\.sprite-animation-preview-canvas\s*\{[\s\S]*image-rendering:\s*pixelated/);
+});
+
 test('image-quantize utility functions snap and index colors', async () => {
   const utils = await importPluginModule('image-quantize-converter', 'quantize-utils.mjs');
   const imageData = {
@@ -164,6 +189,10 @@ test('sprite-editor utility functions parse size, frame grid, and frame times', 
   assert.equal(utils.parseSpriteSizeToken('32p', 128).pixels, 32);
   assert.equal(utils.parseSpriteSizeToken('4f', 128).pixels, 32);
   assert.equal(utils.formatSpritePixelToken(31), '32p');
+  assert.equal(utils.formatSpriteTileToken(48), '6');
+  assert.equal(utils.snapSpritePixels(500), 248);
+  assert.equal(utils.parseSpriteSizeToken('40p', 128).pixels, 40);
+  assert.equal(utils.parseSpriteSizeToken('256p', 512).pixels, 248);
 
   const grid = utils.computeFrameGrid(96, 32, '32p', '16p');
   assert.equal(grid.columns, 3);
@@ -173,6 +202,11 @@ test('sprite-editor utility functions parse size, frame grid, and frame times', 
   assert.deepEqual(utils.parseSpriteTime('3', 2, 3), [['3', '3', '3'], ['3', '3', '3']]);
   assert.deepEqual(utils.parseSpriteTime('[[3,4,5][6,,8]]', 2, 3), [['3', '4', '5'], ['6', '', '8']]);
   assert.equal(utils.updateSpriteTimeCell('3', 2, 3, 1, 2, 9), '[[3,3,3][3,3,9]]');
+  assert.deepEqual(utils.deriveRowFrameCounts('1', 2, 4), [4, 4]);
+  assert.deepEqual(utils.deriveRowFrameCounts('[[1,1][1,1,1,1]]', 2, 4), [2, 4]);
+  assert.equal(utils.getActiveFrameCountForRow('[[1,1][1,1,1,1]]', 2, 4, 0), 2);
+  assert.equal(utils.resizeSpriteTimeRow('[[1,1][1,1,1,1]]', 2, 4, 0, 3, 7), '[[1,1,7][1,1,1,1]]');
+  assert.equal(utils.resizeSpriteTimeRow('[[1,1,7][1,1,1,1]]', 2, 4, 1, 2, 7), '[[1,1,7][1,1]]');
 });
 
 test('sprite-editor declares plugin-local page and uses v2.4 capabilities', () => {
@@ -192,6 +226,22 @@ test('sprite-editor declares plugin-local page and uses v2.4 capabilities', () =
   assert.match(rendererSource, /registerCapability\(['"]sprite-editor['"]/);
   assert.match(rendererSource, /listResDefinitions\(\)/);
   assert.match(rendererSource, /image-import-pipeline/);
+  assert.match(rendererSource, /data-role="splitter"/);
+  assert.match(rendererSource, /addEventListener\(['"]wheel['"]/);
+  assert.match(rendererSource, /min="0\.25" max="12" step="0\.25"/);
+  assert.match(rendererSource, /selectFrameFromSheet/);
+  assert.match(rendererSource, /data-role="row-list"/);
+  assert.match(rendererSource, /resizeSpriteTimeRow/);
+  assert.match(rendererSource, /getActiveFrameCountForRow/);
+  const sheetClickFn = rendererSource.slice(
+    rendererSource.indexOf('function selectFrameFromSheet'),
+    rendererSource.indexOf('function startPlayback'),
+  );
+  assert.doesNotMatch(sheetClickFn, /startPlayback\(\)/);
+  assert.doesNotMatch(rendererSource, /range-pick|rangePick|handleSheetRangePick/);
+  assert.match(rendererSource, /drawCollisionOverlay/);
+  assert.match(rendererSource, /targetWidth: snapUpTo8/);
+  assert.match(rendererSource, /targetSize = \{\s*width: request\.targetWidth,\s*height: request\.targetHeight,/);
   assert.match(rendererSource, /writeAssetFile/);
   assert.match(rendererSource, /addResEntry/);
   assert.match(rendererSource, /updateResEntry/);

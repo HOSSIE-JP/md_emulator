@@ -44,6 +44,12 @@ const state = {
     audio: null,
     audioEntryId: '',
     imageEntryId: '',
+    spriteTimer: 0,
+    spriteEntryId: '',
+    spriteRow: 0,
+    spriteFrame: 0,
+    spriteImage: null,
+    spritePlaying: false,
     imageZoom: 'fit',
     imageNaturalWidth: 0,
     imageNaturalHeight: 0,
@@ -2827,6 +2833,10 @@ function isImageEntry(entry) {
   return !!entry && IMAGE_EXTS.includes(pathExt(entry.sourcePath));
 }
 
+function isSpriteEntry(entry) {
+  return !!entry && String(entry.type || '').toUpperCase() === 'SPRITE' && IMAGE_EXTS.includes(pathExt(entry.sourcePath));
+}
+
 function isAudioEntry(entry) {
   return !!entry && pathExt(entry.sourcePath) === '.wav';
 }
@@ -2859,6 +2869,17 @@ function stopAudioPreview() {
   }
   state.preview.audioEntryId = '';
   syncAudioPlayer(false);
+}
+
+function stopSpritePreview() {
+  if (state.preview.spriteTimer) {
+    window.clearTimeout(state.preview.spriteTimer);
+  }
+  state.preview.spriteTimer = 0;
+  state.preview.spriteEntryId = '';
+  state.preview.spriteImage = null;
+  state.preview.spriteFrame = 0;
+  state.preview.spritePlaying = false;
 }
 
 function extractDisplayPalette(imageData, maxSwatches) {
@@ -2980,11 +3001,217 @@ function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function parseSpritePreviewSizeToken(value, imageDimension = 0) {
+  const raw = String(value || '').trim().toUpperCase();
+  const numeric = Number.parseInt(raw, 10);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 16;
+  if (raw.endsWith('P')) return Math.max(8, Math.min(248, Math.round(numeric / 8) * 8));
+  if (raw.endsWith('F')) {
+    const frames = Math.max(1, numeric);
+    return imageDimension > 0 ? Math.max(8, Math.floor(imageDimension / frames / 8) * 8) : frames * 8;
+  }
+  return Math.max(8, Math.min(248, numeric * 8));
+}
+
+function parseSpritePreviewTimeRows(value, rows, columns) {
+  const rowCount = Math.max(1, Number(rows) || 1);
+  const columnCount = Math.max(1, Number(columns) || 1);
+  const text = String(value == null ? '' : value).trim();
+  if (!text || !text.startsWith('[')) {
+    const fill = normalizeSpritePreviewTime(text || '0');
+    return Array.from({ length: rowCount }, () => Array.from({ length: columnCount }, () => fill));
+  }
+  const matches = Array.from(text.matchAll(/\[([^\[\]]*)\]/g)).map((match) => match[1]);
+  return Array.from({ length: rowCount }, (_, rowIndex) => {
+    const rowText = matches[rowIndex];
+    if (rowText == null) return Array.from({ length: columnCount }, () => '0');
+    const values = rowText === '' ? ['0'] : rowText.split(',').map((cell) => normalizeSpritePreviewTime(cell));
+    return values.slice(0, columnCount).length ? values.slice(0, columnCount) : ['0'];
+  });
+}
+
+function normalizeSpritePreviewTime(value) {
+  const n = Number.parseInt(String(value == null ? '' : value).trim(), 10);
+  if (!Number.isFinite(n) || n < 0) return '0';
+  return String(n);
+}
+
+function ensureSpritePreviewCanvas() {
+  if (!el.inlineImageFrame) return null;
+  let canvas = el.inlineImageFrame.querySelector('[data-sprite-preview-canvas]');
+  if (!canvas) {
+    canvas = document.createElement('canvas');
+    canvas.dataset.spritePreviewCanvas = 'true';
+    canvas.className = 'sprite-animation-preview-canvas';
+    el.inlineImageFrame.appendChild(canvas);
+  }
+  return canvas;
+}
+
+function getSpritePreviewScale(frameWidth, frameHeight) {
+  const zoom = String(state.preview.imageZoom || 'fit');
+  if (zoom !== 'fit') return Math.max(0.25, Number(zoom) / 100 || 1);
+  const host = el.inlineImageFrame;
+  const fitWidth = Math.max(1, (host?.clientWidth || 240) - 24);
+  const fitHeight = Math.max(1, (host?.clientHeight || 180) - 24);
+  return Math.max(1, Math.min(8, Math.floor(Math.min(fitWidth / frameWidth, fitHeight / frameHeight))));
+}
+
+async function syncSpriteInlinePreview(entry) {
+  if (el.inlineAudioPreview) el.inlineAudioPreview.hidden = true;
+  if (el.inlineNoPreview) el.inlineNoPreview.hidden = true;
+  if (el.inlineImagePreview) el.inlineImagePreview.hidden = false;
+  if (el.inlinePreviewImage) {
+    el.inlinePreviewImage.hidden = true;
+    el.inlinePreviewImage.style.display = 'none';
+    el.inlinePreviewImage.removeAttribute('src');
+  }
+  if (el.inlinePalette) el.inlinePalette.innerHTML = '';
+
+  const canvas = ensureSpritePreviewCanvas();
+  if (!canvas) return;
+  canvas.hidden = false;
+
+  const data = entry.sourceAbsolutePath
+    ? await window.electronAPI.readFileAsDataUrl(entry.sourceAbsolutePath).catch(() => null)
+    : null;
+  if (!data?.ok || !data.dataUrl) {
+    if (el.inlinePreviewInfo) el.inlinePreviewInfo.textContent = `SPRITE ${entry.name || ''}: 画像を読み込めません`;
+    return;
+  }
+
+  const img = new Image();
+  img.src = data.dataUrl;
+  await img.decode();
+  if (state.rescomp.selectedEntryLine !== entry.lineNumber) return;
+
+  state.preview.spriteEntryId = entry.id || `${entry.lineNumber}:${entry.name}`;
+  state.preview.spriteImage = img;
+  state.preview.spriteFrame = 0;
+  state.preview.spriteRow = 0;
+  state.preview.spritePlaying = true;
+  state.preview.imageNaturalWidth = img.naturalWidth;
+  state.preview.imageNaturalHeight = img.naturalHeight;
+
+  const frameWidth = parseSpritePreviewSizeToken(entry.width || '2', img.naturalWidth);
+  const frameHeight = parseSpritePreviewSizeToken(entry.height || '2', img.naturalHeight);
+  const columns = Math.max(1, Math.floor(img.naturalWidth / frameWidth));
+  const rows = Math.max(1, Math.floor(img.naturalHeight / frameHeight));
+  const timeRows = parseSpritePreviewTimeRows(entry.time || '0', rows, columns);
+
+  renderSpritePreviewInfo(entry, frameWidth, frameHeight, rows, columns, timeRows);
+  drawSpritePreviewFrame(canvas, img, frameWidth, frameHeight, 0, 0);
+  scheduleSpritePreviewFrame({ entry, img, canvas, frameWidth, frameHeight, rows, columns, timeRows });
+}
+
+function renderSpritePreviewInfo(entry, frameWidth, frameHeight, rows, columns, timeRows) {
+  if (!el.inlinePreviewInfo) return;
+  const options = timeRows.map((row, index) => (
+    `<option value="${index}" ${index === state.preview.spriteRow ? 'selected' : ''}>${index} (${row.length} frames)</option>`
+  )).join('');
+  el.inlinePreviewInfo.innerHTML = `
+    <div class="sprite-preview-info-line">SPRITE ${escHtml(entry.name || '')}: ${frameWidth} × ${frameHeight}px / ${columns} cols × ${rows} rows</div>
+    <div class="sprite-preview-controls">
+      <label class="sprite-preview-row-control">Animation
+        <select class="form-input form-input-mono" data-sprite-preview-row>${options}</select>
+      </label>
+      <button class="icon-btn sprite-preview-play-toggle" type="button" data-sprite-preview-toggle aria-label="停止" title="SPRITEアニメーションを停止">
+        <svg class="icon"><use href="#icon-stop"></use></svg>
+      </button>
+    </div>
+  `;
+  const select = el.inlinePreviewInfo.querySelector('[data-sprite-preview-row]');
+  select?.addEventListener('change', () => {
+    state.preview.spriteRow = Number(select.value) || 0;
+    state.preview.spriteFrame = 0;
+    redrawCurrentSpritePreview();
+  });
+  const toggle = el.inlinePreviewInfo.querySelector('[data-sprite-preview-toggle]');
+  toggle?.addEventListener('click', () => toggleSpritePreviewPlayback());
+  syncSpritePreviewPlaybackButton();
+}
+
+function drawSpritePreviewFrame(canvas, img, frameWidth, frameHeight, row, frame) {
+  const scale = getSpritePreviewScale(frameWidth, frameHeight);
+  const width = Math.max(1, Math.round(frameWidth * scale));
+  const height = Math.max(1, Math.round(frameHeight * scale));
+  canvas.width = width;
+  canvas.height = height;
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(img, frame * frameWidth, row * frameHeight, frameWidth, frameHeight, 0, 0, width, height);
+}
+
+function scheduleSpritePreviewFrame({ entry, img, canvas, frameWidth, frameHeight, rows, columns, timeRows }) {
+  if (!state.preview.spriteEntryId) return;
+  if (state.preview.spriteTimer) {
+    window.clearTimeout(state.preview.spriteTimer);
+    state.preview.spriteTimer = 0;
+  }
+  const row = Math.max(0, Math.min(rows - 1, Number(state.preview.spriteRow) || 0));
+  const rowTimes = timeRows[row] && timeRows[row].length ? timeRows[row] : Array.from({ length: columns }, () => '0');
+  const frameCount = Math.max(1, Math.min(columns, rowTimes.length));
+  state.preview.spriteFrame = Math.max(0, Math.min(frameCount - 1, state.preview.spriteFrame));
+  drawSpritePreviewFrame(canvas, img, frameWidth, frameHeight, row, state.preview.spriteFrame);
+  syncSpritePreviewPlaybackButton();
+  if (!state.preview.spritePlaying || frameCount <= 1) return;
+  const frameTime = Math.max(1, Number.parseInt(rowTimes[state.preview.spriteFrame] || '0', 10) || 6);
+  state.preview.spriteTimer = window.setTimeout(() => {
+    if (state.rescomp.selectedEntryLine !== entry.lineNumber) return;
+    state.preview.spriteFrame = (state.preview.spriteFrame + 1) % frameCount;
+    scheduleSpritePreviewFrame({ entry, img, canvas, frameWidth, frameHeight, rows, columns, timeRows });
+  }, frameTime * (1000 / 60));
+}
+
+function syncSpritePreviewPlaybackButton() {
+  const toggle = el.inlinePreviewInfo?.querySelector?.('[data-sprite-preview-toggle]');
+  if (!toggle) return;
+  toggle.classList.toggle('active', !!state.preview.spritePlaying);
+  const label = state.preview.spritePlaying ? '停止' : '再生';
+  toggle.setAttribute('aria-label', label);
+  toggle.title = state.preview.spritePlaying ? 'SPRITEアニメーションを停止' : 'SPRITEアニメーションを再生';
+  toggle.querySelector('use')?.setAttribute('href', state.preview.spritePlaying ? '#icon-stop' : '#icon-play');
+}
+
+function toggleSpritePreviewPlayback() {
+  const entry = getCurrentSelectedEntry();
+  if (!isSpriteEntry(entry)) return;
+  state.preview.spritePlaying = !state.preview.spritePlaying;
+  if (!state.preview.spritePlaying && state.preview.spriteTimer) {
+    window.clearTimeout(state.preview.spriteTimer);
+    state.preview.spriteTimer = 0;
+  }
+  syncSpritePreviewPlaybackButton();
+  redrawCurrentSpritePreview();
+}
+
+function redrawCurrentSpritePreview() {
+  const entry = getCurrentSelectedEntry();
+  const img = state.preview.spriteImage;
+  const canvas = el.inlineImageFrame?.querySelector?.('[data-sprite-preview-canvas]');
+  if (!isSpriteEntry(entry) || !img || !canvas || canvas.hidden) return;
+  const frameWidth = parseSpritePreviewSizeToken(entry.width || '2', img.naturalWidth);
+  const frameHeight = parseSpritePreviewSizeToken(entry.height || '2', img.naturalHeight);
+  const columns = Math.max(1, Math.floor(img.naturalWidth / frameWidth));
+  const rows = Math.max(1, Math.floor(img.naturalHeight / frameHeight));
+  const timeRows = parseSpritePreviewTimeRows(entry.time || '0', rows, columns);
+  scheduleSpritePreviewFrame({ entry, img, canvas, frameWidth, frameHeight, rows, columns, timeRows });
+}
+
 async function syncInlinePreview(entry) {
+  stopSpritePreview();
   if (!entry) {
     if (el.inlineImagePreview) el.inlineImagePreview.hidden = true;
     if (el.inlineAudioPreview) el.inlineAudioPreview.hidden = true;
     if (el.inlineNoPreview) el.inlineNoPreview.hidden = false;
+    return;
+  }
+
+  if (isSpriteEntry(entry)) {
+    await syncSpriteInlinePreview(entry);
     return;
   }
 
@@ -3001,9 +3228,13 @@ async function syncInlinePreview(entry) {
 
     const src = entry.sourceAbsolutePath ? toFileUrl(entry.sourceAbsolutePath) : '';
     if (el.inlinePreviewImage) {
+      el.inlinePreviewImage.hidden = false;
+      el.inlinePreviewImage.style.display = '';
       el.inlinePreviewImage.src = src;
       applyInlineImageZoom();
     }
+    const spriteCanvas = el.inlineImageFrame?.querySelector?.('[data-sprite-preview-canvas]');
+    if (spriteCanvas) spriteCanvas.hidden = true;
 
     if (src) {
       const img = new Image();
@@ -6468,11 +6699,13 @@ function bindEvents() {
   el.inlineImageZoom?.addEventListener('change', () => {
     state.preview.imageZoom = el.inlineImageZoom.value || 'fit';
     applyInlineImageZoom();
+    redrawCurrentSpritePreview();
   });
   el.inlineImageFrame?.addEventListener('wheel', (event) => {
     event.preventDefault();
     const step = event.deltaY < 0 ? 1 : -1;
     stepInlineImageZoom(step);
+    redrawCurrentSpritePreview();
   }, { passive: false });
 
   el.assetTypeInput?.addEventListener('change', syncAssetModalForType);

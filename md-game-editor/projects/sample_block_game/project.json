@@ -3,9 +3,9 @@
   "author": "HOSSIE",
   "serial": "GM 00000000-01",
   "region": "JUE",
-  "generatedAt": "2026-05-03T16:07:48.686Z",
+  "generatedAt": "2026-05-04T16:35:40.752Z",
   "pluginRoles": {
     "builder": "block-game-builder",
-    "testplay": "standard-emulator"
+    "testplay": "standard-api-emulator"
   }
 }

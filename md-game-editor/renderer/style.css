@@ -837,6 +837,52 @@ button.project-path-chip {
   image-rendering: pixelated;
 }
 
+.image-preview-frame img[hidden],
+.image-preview-frame canvas[hidden] {
+  display: none !important;
+}
+
+.sprite-animation-preview-canvas {
+  display: block;
+  image-rendering: pixelated;
+  background: #0b0f17;
+  border: 1px solid var(--border);
+}
+
+.sprite-preview-info-line {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.sprite-preview-row-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sprite-preview-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.sprite-preview-play-toggle.active {
+  border-color: var(--accent);
+  background: rgba(66, 153, 225, 0.16);
+  color: var(--text);
+}
+
+.sprite-preview-play-toggle {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+}
+
 /* ====================================================== GENERIC MODAL */
 .app-modal {
   position: fixed;

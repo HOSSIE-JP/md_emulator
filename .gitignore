@@ -64,6 +64,8 @@ __pycache__/
 /*.log
 /*.csv
 /*.prof
+/md-game-editor/bin/
+/md-game-editor/plugins/standard-api-emulator/bin/
 
 # Misc binaries
 *.exe

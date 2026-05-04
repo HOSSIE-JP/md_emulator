@@ -39,6 +39,10 @@ export function formatSpritePixelToken(value) {
   return `${snapSpritePixels(value)}p`;
 }
 
+export function formatSpriteTileToken(value) {
+  return String(Math.max(1, Math.min(31, Math.floor(snapSpritePixels(value) / 8))));
+}
+
 export function computeFrameGrid(imageWidth, imageHeight, widthToken, heightToken) {
   const width = parseSpriteSizeToken(widthToken, imageWidth).pixels;
   const height = parseSpriteSizeToken(heightToken, imageHeight).pixels;
@@ -54,30 +58,20 @@ export function computeFrameGrid(imageWidth, imageHeight, widthToken, heightToke
 }
 
 export function parseSpriteTime(value, rows = 1, columns = 1) {
-  const rowCount = Math.max(1, Number(rows) || 1);
-  const columnCount = Math.max(1, Number(columns) || 1);
-  const text = String(value == null ? '' : value).trim();
+  const rowCount = normalizeCount(rows, 1);
+  const columnCount = normalizeCount(columns, 1);
+  const sourceRows = parseSpriteTimeRows(value, rowCount, columnCount);
   const matrix = createTimeMatrix(rowCount, columnCount, '0');
-  if (!text) return matrix;
-
-  if (!text.startsWith('[')) {
-    const fill = normalizeTimeCell(text);
-    return createTimeMatrix(rowCount, columnCount, fill);
-  }
-
-  const matches = Array.from(text.matchAll(/\[([^\[\]]*)\]/g)).map((match) => match[1]);
-  const rowsText = matches.length > 0 ? matches : [text.replace(/^\[+|\]+$/g, '')];
-  rowsText.slice(0, rowCount).forEach((rowText, rowIndex) => {
-    const values = rowText.split(',').map((cell) => normalizeTimeCell(cell));
-    values.slice(0, columnCount).forEach((cell, columnIndex) => {
-      matrix[rowIndex][columnIndex] = cell;
+  sourceRows.forEach((row, rowIndex) => {
+    row.slice(0, columnCount).forEach((cell, columnIndex) => {
+      matrix[rowIndex][columnIndex] = normalizeTimeCell(cell);
     });
   });
   return matrix;
 }
 
 export function updateSpriteTimeCell(value, rows, columns, rowIndex, frameIndex, nextTime) {
-  const matrix = parseSpriteTime(value, rows, columns);
+  const matrix = parseSpriteTimeRows(value, rows, columns);
   const safeRow = clampIndex(rowIndex, matrix.length);
   const safeFrame = clampIndex(frameIndex, matrix[safeRow]?.length || 1);
   matrix[safeRow][safeFrame] = normalizeTimeCell(nextTime);
@@ -89,8 +83,54 @@ export function serializeSpriteTime(matrix) {
   return `[${rows.map((row) => `[${(Array.isArray(row) ? row : []).map((cell) => normalizeTimeCell(cell)).join(',')}]`).join('')}]`;
 }
 
+export function deriveRowFrameCounts(value, rows = 1, columns = 1) {
+  const columnCount = normalizeCount(columns, 1);
+  return parseSpriteTimeRows(value, rows, columnCount)
+    .map((row) => Math.max(1, Math.min(columnCount, row.length || columnCount)));
+}
+
+export function resizeSpriteTimeRow(value, rows, columns, rowIndex, frameCount, fillTime) {
+  const columnCount = normalizeCount(columns, 1);
+  const matrix = parseSpriteTimeRows(value, rows, columnCount);
+  const safeRow = clampIndex(rowIndex, matrix.length);
+  const safeCount = Math.max(1, Math.min(columnCount, Math.floor(Number(frameCount) || 1)));
+  const fill = normalizeTimeCell(fillTime);
+  const row = matrix[safeRow].slice(0, safeCount);
+  while (row.length < safeCount) row.push(fill);
+  matrix[safeRow] = row;
+  return serializeSpriteTime(matrix);
+}
+
+export function getActiveFrameCountForRow(value, rows, columns, rowIndex) {
+  const counts = deriveRowFrameCounts(value, rows, columns);
+  return counts[clampIndex(rowIndex, counts.length)] || 1;
+}
+
+function parseSpriteTimeRows(value, rows = 1, columns = 1) {
+  const rowCount = normalizeCount(rows, 1);
+  const columnCount = normalizeCount(columns, 1);
+  const text = String(value == null ? '' : value).trim();
+  if (!text || !text.startsWith('[')) {
+    const fill = normalizeTimeCell(text || '0');
+    return createTimeMatrix(rowCount, columnCount, fill);
+  }
+
+  const matches = Array.from(text.matchAll(/\[([^\[\]]*)\]/g)).map((match) => match[1]);
+  const rowsText = matches.length > 0 ? matches : [text.replace(/^\[+|\]+$/g, '')];
+  return Array.from({ length: rowCount }, (_, rowIndex) => {
+    const rowText = rowsText[rowIndex];
+    if (rowText == null) return createTimeRow(columnCount, '0');
+    const values = rowText === '' ? [''] : rowText.split(',').map((cell) => normalizeTimeCell(cell));
+    return values.slice(0, columnCount).length ? values.slice(0, columnCount) : ['0'];
+  });
+}
+
 function createTimeMatrix(rows, columns, fill) {
   return Array.from({ length: rows }, () => Array.from({ length: columns }, () => normalizeTimeCell(fill)));
+}
+
+function createTimeRow(columns, fill) {
+  return Array.from({ length: columns }, () => normalizeTimeCell(fill));
 }
 
 function normalizeTimeCell(value) {
@@ -99,6 +139,12 @@ function normalizeTimeCell(value) {
   const n = Number.parseInt(text, 10);
   if (!Number.isFinite(n) || n < 0) return '0';
   return String(n);
+}
+
+function normalizeCount(value, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.floor(n);
 }
 
 function clampIndex(value, length) {

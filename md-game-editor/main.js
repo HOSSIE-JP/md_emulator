@@ -733,8 +733,10 @@ function createMenu() {
 }
 
 function readEmbeddedWasmInfo() {
-  const pkgPath = path.join(__dirname, 'pkg', 'package.json');
-  const buildMetaPath = path.join(__dirname, 'pkg', 'build_meta.js');
+  const standardEmulatorDir = pluginManager.getPluginDirectory('standard-emulator')
+    || path.join(__dirname, 'plugins', 'standard-emulator');
+  const pkgPath = path.join(standardEmulatorDir, 'pkg', 'package.json');
+  const buildMetaPath = path.join(standardEmulatorDir, 'pkg', 'build_meta.js');
   let packageVersion = 'unknown';
   let buildVersion = 'unknown';
 
@@ -810,7 +812,9 @@ function resolveApiLaunch() {
 
   if (app.isPackaged) {
     const binName = isWin ? 'md-api.exe' : 'md-api';
-    const packagedBin = path.join(process.resourcesPath, 'bin', binName);
+    const standardApiEmulatorDir = pluginManager.getPluginDirectory('standard-api-emulator')
+      || path.join(process.resourcesPath, 'plugins', 'standard-api-emulator');
+    const packagedBin = path.join(standardApiEmulatorDir, 'bin', binName);
     if (!fs.existsSync(packagedBin)) {
       throw new Error(`md-api binary not found: ${packagedBin}`);
     }
@@ -818,7 +822,7 @@ function resolveApiLaunch() {
     return {
       command: packagedBin,
       args: [],
-      cwd: process.resourcesPath,
+      cwd: standardApiEmulatorDir,
     };
   }
 
@@ -1998,10 +2002,12 @@ async function handleExportHtml() {
   }
 
   // ソースファイルパスを確認
-  const pkgDir = path.join(__dirname, 'pkg');
+  const standardEmulatorDir = pluginManager.getPluginDirectory('standard-emulator')
+    || path.join(__dirname, 'plugins', 'standard-emulator');
+  const pkgDir = path.join(standardEmulatorDir, 'pkg');
   const wasmJsPath = path.join(pkgDir, 'md_wasm.js');
   const wasmBinPath = path.join(pkgDir, 'md_wasm_bg.wasm');
-  const playerJsPath = path.join(__dirname, 'wasm-player.js');
+  const playerJsPath = path.join(standardEmulatorDir, 'wasm-player.js');
 
   for (const [label, p] of [['md_wasm.js', wasmJsPath], ['md_wasm_bg.wasm', wasmBinPath], ['wasm-player.js', playerJsPath]]) {
     if (!fs.existsSync(p)) {

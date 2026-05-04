@@ -19,3 +19,22 @@ test('packaging includes the bundled game editor sample projects', () => {
   assert.doesNotMatch(config, /from:\s*projects\/sample\s/);
   assert.doesNotMatch(config, /to:\s*projects\/sample\s/);
 });
+
+test('packaging keeps WASM runtime assets inside the standard emulator plugin', () => {
+  const config = readPackageConfig();
+
+  assert.match(config, /from:\s*plugins/);
+  assert.match(config, /to:\s*plugins/);
+  assert.doesNotMatch(config, /^\s*-\s*pkg\/\*\*/m);
+  assert.doesNotMatch(config, /^\s*-\s*md-emulator\.js/m);
+  assert.doesNotMatch(config, /^\s*-\s*md-emulator\.d\.ts/m);
+});
+
+test('packaging keeps md-api binary inside the standard API emulator plugin', () => {
+  const config = readPackageConfig();
+
+  assert.match(config, /from:\s*plugins/);
+  assert.match(config, /to:\s*plugins/);
+  assert.doesNotMatch(config, /from:\s*bin/);
+  assert.doesNotMatch(config, /to:\s*bin/);
+});

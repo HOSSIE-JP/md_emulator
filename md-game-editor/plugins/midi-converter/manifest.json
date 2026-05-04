@@ -1,0 +1,18 @@
+{
+  "id": "midi-converter",
+  "name": "MIDI Converter",
+  "description": "MIDI ファイルを Mega Drive 向け VGM/XGM に変換し、XGM2 アセット登録用 payload を生成します。",
+  "version": "0.1.0",
+  "types": ["converter", "asset"],
+  "permissions": ["project.read", "project.write", "dialog.openFile", "res.read", "res.write", "main.invokeHook"],
+  "hooks": ["convertMidiMusic"],
+  "mainApi": {
+    "hooks": ["convertMidiMusic"],
+    "capabilities": ["midi-convert"]
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "capabilities": ["midi-convert-ui"]
+  }
+}

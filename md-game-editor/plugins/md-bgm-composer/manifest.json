@@ -1,0 +1,26 @@
+{
+  "id": "md-bgm-composer",
+  "name": "MD BGM Composer",
+  "description": "Mega Drive 向け BGM を tracker 形式で作曲し、MIDI import、VGM/XGM export、XGM2 アセット登録を行います。",
+  "version": "0.1.0",
+  "types": ["editor", "converter", "asset"],
+  "permissions": ["project.read", "project.write", "dialog.openFile", "res.read", "res.write", "main.invokeHook"],
+  "hooks": ["importMidi", "exportMusic", "validateSong"],
+  "mainApi": {
+    "hooks": ["importMidi", "exportMusic", "validateSong"],
+    "capabilities": ["music-import", "music-export"]
+  },
+  "tab": {
+    "label": "BGM",
+    "icon": "music",
+    "page": "md-bgm-composer",
+    "order": 35
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "md-bgm-composer",
+    "capabilities": ["page", "md-bgm-composer", "music-import-handler"]
+  },
+  "dependencies": ["midi-converter"]
+}

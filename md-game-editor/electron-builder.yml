@@ -3,16 +3,9 @@ productName: MegaDriveGameEditor
 files:
   - "*.js"
   - renderer/**
-  - pkg/**
-  - md-emulator.js
-  - md-emulator.d.ts
   - build/icon.png
   - build/icon.ico
 extraResources:
-  - from: bin
-    to: bin
-    filter:
-      - "**/*"
   - from: plugins
     to: plugins
     filter:

@@ -5,13 +5,14 @@ const appRoot = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(appRoot, '..');
 
 const fromPkg = path.join(repoRoot, 'frontend', 'pkg');
-const toPkg = path.join(appRoot, 'pkg');
+const standardEmulatorRoot = path.join(appRoot, 'plugins', 'standard-emulator');
+const toPkg = path.join(standardEmulatorRoot, 'pkg');
 const fromWrapper = path.join(repoRoot, 'frontend', 'md-emulator.js');
 const fromTypes = path.join(repoRoot, 'frontend', 'md-emulator.d.ts');
-const toWrapper = path.join(appRoot, 'md-emulator.js');
-const toTypes = path.join(appRoot, 'md-emulator.d.ts');
+const toWrapper = path.join(standardEmulatorRoot, 'md-emulator.js');
+const toTypes = path.join(standardEmulatorRoot, 'md-emulator.d.ts');
 const fromPlayer = path.join(repoRoot, 'frontend', 'wasm-player.js');
-const toPlayer = path.join(appRoot, 'wasm-player.js');
+const toPlayer = path.join(standardEmulatorRoot, 'wasm-player.js');
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -51,7 +52,7 @@ function main() {
     copyRecursive(fromPlayer, toPlayer);
   }
 
-  console.log('Copied frontend WASM assets into md-game-editor directory.');
+  console.log('Copied frontend WASM assets into standard-emulator plugin.');
 }
 
 main();

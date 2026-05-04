@@ -35,7 +35,13 @@ function prepareFrontendAssets() {
 function prepareMdApiBinary() {
   const isWin = process.platform === 'win32';
   const sourceBin = path.join(repoRoot, 'target', 'release', isWin ? 'md-api.exe' : 'md-api');
-  const destBin = path.join(appRoot, 'bin', isWin ? 'md-api.exe' : 'md-api');
+  const destBin = path.join(
+    appRoot,
+    'plugins',
+    'standard-api-emulator',
+    'bin',
+    isWin ? 'md-api.exe' : 'md-api',
+  );
 
   if (!fs.existsSync(sourceBin)) {
     console.log('md-api release binary not found. Building md-api (release)...');
@@ -52,7 +58,7 @@ function prepareMdApiBinary() {
     fs.chmodSync(destBin, 0o755);
   }
 
-  console.log(`Prepared md-api binary: ${destBin}`);
+  console.log(`Prepared standard-api-emulator md-api binary: ${destBin}`);
 }
 
 function injectBuildMeta() {

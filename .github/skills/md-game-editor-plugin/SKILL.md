@@ -320,6 +320,8 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `image-resize-converter` | `converter` | 8px 境界リサイズ |
 | `image-quantize-converter` | `converter` | 16 色減色変換 |
 | `audio-converter` | `converter` | WAV/MP3/OGG 変換と音声変換 UI |
+| `midi-converter` | `converter`, `asset` | MIDI から VGM/XGM 生成、XGM2 アセット登録 payload 生成 |
+| `md-bgm-composer` | `editor`, `converter`, `asset` | Mega Drive 向け BGM tracker、MIDI import、VGM/XGM export、XGM2 アセット登録 |
 | `standard-emulator` | `emulator` | WASM Mega Drive エミュレーター |
 | `standard-api-emulator` | `emulator`, `tool` | REST API Mega Drive エミュレーター |
 

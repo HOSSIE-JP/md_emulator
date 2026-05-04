@@ -161,7 +161,7 @@
 
 .sprite-editor-center {
   display: grid;
-  grid-template-rows: minmax(220px, 0.9fr) minmax(240px, 1.1fr);
+  grid-template-rows: minmax(220px, 0.9fr) 6px minmax(240px, 1.1fr);
   gap: 1px;
   background: var(--border);
 }
@@ -173,6 +173,19 @@
   background: var(--bg);
   display: flex;
   flex-direction: column;
+}
+
+.sprite-editor-splitter {
+  min-height: 6px;
+  cursor: row-resize;
+  background: linear-gradient(to right, transparent, var(--muted) 45%, var(--muted) 55%, transparent);
+  opacity: 0.55;
+}
+
+.sprite-editor-splitter:hover,
+.sprite-editor-splitter.is-dragging {
+  opacity: 1;
+  background-color: rgba(74, 163, 255, 0.14);
 }
 
 .sprite-editor-canvas-wrap {
@@ -188,6 +201,40 @@
   image-rendering: pixelated;
   background: #0b0f17;
   border: 1px solid var(--border);
+}
+
+.sprite-editor-animation-rows {
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  padding: 8px 10px 10px;
+  display: grid;
+  gap: 7px;
+}
+
+.sprite-editor-row-title {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sprite-editor-row-list {
+  display: grid;
+  gap: 6px;
+}
+
+.sprite-editor-row-config {
+  display: grid;
+  grid-template-columns: 74px minmax(104px, 128px) minmax(118px, 148px) 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.sprite-editor-row-config.is-selected {
+  background: rgba(74, 163, 255, 0.08);
+  border-radius: 6px;
+  padding: 4px;
+  margin: -4px;
 }
 
 .sprite-editor-props {

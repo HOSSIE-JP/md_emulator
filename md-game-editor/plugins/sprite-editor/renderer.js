@@ -1,9 +1,12 @@
 import {
   computeFrameGrid,
-  formatSpritePixelToken,
+  deriveRowFrameCounts,
+  formatSpriteTileToken,
+  getActiveFrameCountForRow,
   normalizeSymbolName,
   parseSpriteSizeToken,
   parseSpriteTime,
+  resizeSpriteTimeRow,
   snapSpritePixels,
   updateSpriteTimeCell,
 } from './sprite-utils.mjs';
@@ -34,9 +37,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     imageDataUrl: '',
     imagePath: '',
     grid: computeFrameGrid(16, 16, '16p', '16p'),
-    rangePick: false,
-    rangeStart: null,
     playbackTimer: 0,
+    splitterDrag: null,
   };
 
   root.innerHTML = buildShell();
@@ -87,12 +89,23 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     });
 
     ui.previewScale.addEventListener('input', () => {
-      state.previewScale = numberInRange(ui.previewScale.value, 1, 12, 4);
+      state.previewScale = normalizeZoom(ui.previewScale.value, 4, 12);
+      ui.previewScale.value = formatZoom(state.previewScale);
       drawPreview();
     });
+    ui.previewWrap.addEventListener('wheel', (event) => {
+      updateZoomFromWheel(event, 'preview');
+    }, { passive: false });
     ui.sheetScale.addEventListener('input', () => {
-      state.sheetScale = numberInRange(ui.sheetScale.value, 1, 8, 1);
+      state.sheetScale = normalizeZoom(ui.sheetScale.value, 1, 8);
+      ui.sheetScale.value = formatZoom(state.sheetScale);
       drawSheet();
+    });
+    ui.sheetWrap.addEventListener('wheel', (event) => {
+      updateZoomFromWheel(event, 'sheet');
+    }, { passive: false });
+    ui.splitter.addEventListener('pointerdown', (event) => {
+      startSplitterDrag(event);
     });
     ui.gridToggle.addEventListener('change', () => {
       state.showGrid = ui.gridToggle.checked;
@@ -105,7 +118,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       drawPreview();
     });
     ui.last.addEventListener('click', () => {
-      state.frameIndex = Math.max(0, state.grid.columns - 1);
+      state.frameIndex = Math.max(0, getActiveFrameCount() - 1);
       syncFrameControls();
       drawPreview();
     });
@@ -129,6 +142,34 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       drawPreview();
     });
     ui.frameTime.addEventListener('change', () => void saveFrameTime());
+    ui.time.addEventListener('change', () => {
+      syncFrameControls();
+      drawPreview();
+      drawSheet();
+    });
+    ui.rowList.addEventListener('change', (event) => {
+      const frameInput = event.target.closest('[data-row-frame-count]');
+      if (frameInput) {
+        void saveRowFrameCount(frameInput);
+        return;
+      }
+      const fillInput = event.target.closest('[data-row-default-time]');
+      if (fillInput) {
+        fillInput.value = String(Math.max(0, Number.parseInt(fillInput.value, 10) || 0));
+      }
+    });
+    ui.rowList.addEventListener('click', (event) => {
+      const rowButton = event.target.closest('[data-row-select]');
+      if (!rowButton) return;
+      state.frameRow = numberInRange(rowButton.dataset.rowSelect, 0, Math.max(0, state.grid.rows - 1), 0);
+      state.frameIndex = numberInRange(state.frameIndex, 0, getActiveFrameCount() - 1, 0);
+      syncFrameControls();
+      drawPreview();
+      drawSheet();
+    });
+    ui.collision.addEventListener('change', () => {
+      drawPreview();
+    });
     ui.frameWidth.addEventListener('change', () => {
       ui.frameWidth.value = String(snapSpritePixels(ui.frameWidth.value));
       updateGridFromInputs();
@@ -137,16 +178,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       ui.frameHeight.value = String(snapSpritePixels(ui.frameHeight.value));
       updateGridFromInputs();
     });
-    ui.rangePick.addEventListener('click', () => {
-      state.rangePick = !state.rangePick;
-      state.rangeStart = null;
-      ui.rangePick.setAttribute('aria-pressed', String(state.rangePick));
-      ui.rangePick.classList.toggle('sprite-editor-primary', state.rangePick);
-      setStatus(state.rangePick ? 'シート上で開始セルと終了セルをクリックしてください' : '');
-    });
     ui.sheetCanvas.addEventListener('click', (event) => {
-      if (!state.rangePick) return;
-      handleSheetRangePick(event);
+      selectFrameFromSheet(event);
     });
     ui.save.addEventListener('click', () => void saveProperties());
     ui.delete.addEventListener('click', () => void deleteSelectedSprite());
@@ -316,15 +349,17 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 
   function syncFrameControls() {
     state.frameRow = numberInRange(state.frameRow, 0, Math.max(0, state.grid.rows - 1), 0);
-    state.frameIndex = numberInRange(state.frameIndex, 0, Math.max(0, state.grid.columns - 1), 0);
+    const activeFrames = getActiveFrameCount(state.frameRow);
+    state.frameIndex = numberInRange(state.frameIndex, 0, Math.max(0, activeFrames - 1), 0);
     ui.rowInput.max = String(Math.max(0, state.grid.rows - 1));
-    ui.frameInput.max = String(Math.max(0, state.grid.columns - 1));
+    ui.frameInput.max = String(Math.max(0, activeFrames - 1));
     ui.rowInput.value = String(state.frameRow);
     ui.frameInput.value = String(state.frameIndex);
-    const entry = getSelectedSprite()?.entry;
-    const matrix = parseSpriteTime(entry?.time || '0', state.grid.rows, state.grid.columns);
+    const matrix = parseSpriteTime(getTimeValue(), state.grid.rows, state.grid.columns);
     ui.frameTime.value = matrix[state.frameRow]?.[state.frameIndex] || '0';
-    ui.frameInfo.textContent = `${state.grid.columns} frames x ${state.grid.rows} rows`;
+    const counts = getRowFrameCounts();
+    ui.frameInfo.textContent = `${counts.join('/')} active frames x ${state.grid.rows} rows`;
+    renderAnimationRows(counts);
     syncPlaybackButtons();
   }
 
@@ -346,7 +381,31 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (state.image) {
       ctx.drawImage(state.image, frame.x, frame.y, frame.width, frame.height, 0, 0, canvas.width, canvas.height);
     }
+    drawCollisionOverlay(ctx, frame.width, frame.height, scale);
     if (state.showGrid) drawGrid(ctx, canvas.width, canvas.height, 8 * scale);
+  }
+
+  function drawCollisionOverlay(ctx, frameWidth, frameHeight, scale) {
+    const collision = normalizeOption(ui.collision?.value, ['NONE', 'CIRCLE', 'BOX'], 'NONE');
+    if (collision === 'NONE') return;
+    const width = frameWidth * 0.75 * scale;
+    const height = frameHeight * 0.75 * scale;
+    const x = ((frameWidth * scale) - width) / 2;
+    const y = ((frameHeight * scale) - height) / 2;
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 82, 82, 0.16)';
+    ctx.strokeStyle = 'rgba(255, 214, 102, 0.95)';
+    ctx.lineWidth = Math.max(1, Math.floor(scale / 2));
+    if (collision === 'CIRCLE') {
+      ctx.beginPath();
+      ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(x, y, width, height);
+      ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.max(1, width - 1), Math.max(1, height - 1));
+    }
+    ctx.restore();
   }
 
   function drawSheet() {
@@ -367,6 +426,19 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 
   function drawFrameGrid(ctx, scale) {
     ctx.save();
+    const counts = getRowFrameCounts();
+    ctx.fillStyle = 'rgba(11, 15, 23, 0.58)';
+    ctx.strokeStyle = 'rgba(255, 82, 82, 0.45)';
+    ctx.lineWidth = 1;
+    counts.forEach((count, row) => {
+      if (count >= state.grid.columns) return;
+      const x = count * state.grid.width * scale;
+      const y = row * state.grid.height * scale;
+      const width = (state.grid.columns - count) * state.grid.width * scale;
+      const height = state.grid.height * scale;
+      ctx.fillRect(x, y, width, height);
+      ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.max(1, width - 1), Math.max(1, height - 1));
+    });
     ctx.strokeStyle = 'rgba(74, 163, 255, 0.85)';
     ctx.lineWidth = 1;
     for (let x = 0; x <= state.grid.columns; x += 1) {
@@ -414,7 +486,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const selected = getSelectedSprite();
     if (!selected) return;
     const nextTime = updateSpriteTimeCell(
-      selected.entry.time || '0',
+      getTimeValue(),
       state.grid.rows,
       state.grid.columns,
       state.frameRow,
@@ -435,8 +507,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       ...selected.entry,
       name: normalizeSymbolName(ui.name.value),
       sourcePath: ui.sourcePath.value.trim(),
-      width: formatSpritePixelToken(frameWidth),
-      height: formatSpritePixelToken(frameHeight),
+      width: formatSpriteTileToken(frameWidth),
+      height: formatSpriteTileToken(frameHeight),
       compression: ui.compression.value,
       time: ui.time.value.trim() || '0',
       collision: ui.collision.value,
@@ -508,11 +580,13 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (picked?.canceled || !picked?.sourcePath) return;
 
     const pickedName = getFileName(picked.sourcePath);
+    const sourceSize = await readImageSize(picked.sourcePath);
     const request = await requestAddInfo({
       resFiles,
       defaultFile: state.fileFilter || getSelectedSprite()?.file?.file || resFiles[0],
       defaultSymbol: normalizeSymbolName(picked.fileName || pickedName),
       pickedName,
+      sourceSize,
     });
     if (!request) return;
 
@@ -522,10 +596,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       return;
     }
 
-    const sourceSize = await readImageSize(picked.sourcePath);
     const targetSize = {
-      width: snapUpTo8(sourceSize.width || 8),
-      height: snapUpTo8(sourceSize.height || 8),
+      width: request.targetWidth,
+      height: request.targetHeight,
     };
     const imagePipeline = api.capabilities.get('image-import-pipeline');
     if (!imagePipeline?.convertToIndexed16) {
@@ -581,28 +654,17 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     drawSheet();
   }
 
-  function handleSheetRangePick(event) {
+  function selectFrameFromSheet(event) {
     const rect = ui.sheetCanvas.getBoundingClientRect();
     const x = Math.floor((event.clientX - rect.left) / Math.max(1, rect.width) * ui.sheetCanvas.width / state.sheetScale);
     const y = Math.floor((event.clientY - rect.top) / Math.max(1, rect.height) * ui.sheetCanvas.height / state.sheetScale);
-    const cell = { x: Math.floor(x / 8), y: Math.floor(y / 8) };
-    if (!state.rangeStart) {
-      state.rangeStart = cell;
-      setStatus('終了セルをクリックしてください');
-      return;
-    }
-    const minX = Math.min(state.rangeStart.x, cell.x);
-    const maxX = Math.max(state.rangeStart.x, cell.x);
-    const minY = Math.min(state.rangeStart.y, cell.y);
-    const maxY = Math.max(state.rangeStart.y, cell.y);
-    ui.frameWidth.value = String(snapSpritePixels((maxX - minX + 1) * 8));
-    ui.frameHeight.value = String(snapSpritePixels((maxY - minY + 1) * 8));
-    state.rangePick = false;
-    state.rangeStart = null;
-    ui.rangePick.setAttribute('aria-pressed', 'false');
-    ui.rangePick.classList.remove('sprite-editor-primary');
-    updateGridFromInputs();
-    setStatus('範囲からフレームサイズを設定しました');
+    state.frameRow = numberInRange(Math.floor(y / Math.max(1, state.grid.height)), 0, Math.max(0, state.grid.rows - 1), 0);
+    const activeFrames = getActiveFrameCount(state.frameRow);
+    state.frameIndex = numberInRange(Math.floor(x / Math.max(1, state.grid.width)), 0, Math.max(0, activeFrames - 1), 0);
+    syncFrameControls();
+    drawPreview();
+    drawSheet();
+    setStatus(`ROW ${state.frameRow} / Frame ${state.frameIndex} を選択しました`);
   }
 
   function startPlayback() {
@@ -623,7 +685,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (!state.playing) return;
     const time = Math.max(1, Number(ui.frameTime.value || 0) || 6);
     state.playbackTimer = window.setTimeout(() => {
-      const last = Math.max(0, state.grid.columns - 1);
+      const last = Math.max(0, getActiveFrameCount(state.frameRow) - 1);
       if (state.frameIndex >= last) {
         if (!state.loop) {
           stopPlayback();
@@ -669,6 +731,57 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     ui.status.textContent = message || '';
   }
 
+  function getTimeValue() {
+    return ui.time?.value?.trim() || getSelectedSprite()?.entry?.time || '0';
+  }
+
+  function getRowFrameCounts() {
+    return deriveRowFrameCounts(getTimeValue(), state.grid.rows, state.grid.columns);
+  }
+
+  function getActiveFrameCount(rowIndex = state.frameRow) {
+    return getActiveFrameCountForRow(getTimeValue(), state.grid.rows, state.grid.columns, rowIndex);
+  }
+
+  function renderAnimationRows(counts = getRowFrameCounts()) {
+    const matrix = parseSpriteTime(getTimeValue(), state.grid.rows, state.grid.columns);
+    ui.rowList.innerHTML = counts.map((count, rowIndex) => {
+      const rowTime = matrix[rowIndex]?.find((cell) => String(cell).trim() !== '') || matrix[rowIndex]?.[0] || '0';
+      const selected = rowIndex === state.frameRow;
+      return `
+        <div class="sprite-editor-row-config ${selected ? 'is-selected' : ''}">
+          <button class="sprite-editor-secondary" type="button" data-row-select="${rowIndex}">ROW ${rowIndex}</button>
+          <label class="sprite-editor-inline-field">有効
+            <input class="sprite-editor-input" data-row-frame-count="${rowIndex}" type="number" min="1" max="${state.grid.columns}" value="${count}" />
+          </label>
+          <label class="sprite-editor-inline-field">既定 time
+            <input class="sprite-editor-input" data-row-default-time="${rowIndex}" type="number" min="0" value="${esc(rowTime)}" />
+          </label>
+          <span class="sprite-editor-status">${selected ? '選択中' : ''}</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  async function saveRowFrameCount(input) {
+    const selected = getSelectedSprite();
+    if (!selected) return;
+    const rowIndex = numberInRange(input.dataset.rowFrameCount, 0, Math.max(0, state.grid.rows - 1), 0);
+    const frameCount = numberInRange(input.value, 1, state.grid.columns, state.grid.columns);
+    input.value = String(frameCount);
+    const fillInput = ui.rowList.querySelector(`[data-row-default-time="${rowIndex}"]`);
+    const fillTime = fillInput?.value || ui.frameTime.value || '0';
+    ui.time.value = resizeSpriteTimeRow(getTimeValue(), state.grid.rows, state.grid.columns, rowIndex, frameCount, fillTime);
+    if (rowIndex === state.frameRow) {
+      state.frameIndex = numberInRange(state.frameIndex, 0, Math.max(0, frameCount - 1), 0);
+    }
+    await saveProperties({ silent: true });
+    syncFrameControls();
+    drawPreview();
+    drawSheet();
+    setStatus(`ROW ${rowIndex} の有効フレーム数を ${frameCount} にしました`);
+  }
+
   async function readImageSize(sourcePath) {
     const read = await api.electronAPI.readFileAsDataUrl(sourcePath);
     if (!read?.ok || !read.dataUrl) return { width: 0, height: 0 };
@@ -678,7 +791,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     return { width: img.naturalWidth, height: img.naturalHeight };
   }
 
-  async function requestAddInfo({ resFiles, defaultFile, defaultSymbol, pickedName }) {
+  async function requestAddInfo({ resFiles, defaultFile, defaultSymbol, pickedName, sourceSize }) {
+    const sourceWidth = snapUpTo8(sourceSize?.width || 8);
+    const sourceHeight = snapUpTo8(sourceSize?.height || 8);
     const options = resFiles.map((file) => `<option value="${esc(file)}" ${file === defaultFile ? 'selected' : ''}>${esc(file)}</option>`).join('');
     return formModal({
       title: 'SPRITE を追加',
@@ -690,6 +805,14 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         <label class="sprite-editor-field">アセット名
           <input class="sprite-editor-input" name="symbol" value="${esc(defaultSymbol)}" />
         </label>
+        <div class="sprite-editor-row">
+          <label class="sprite-editor-field">画像幅(px)
+            <input class="sprite-editor-input" name="targetWidth" type="number" min="8" step="8" value="${sourceWidth}" />
+          </label>
+          <label class="sprite-editor-field">画像高さ(px)
+            <input class="sprite-editor-input" name="targetHeight" type="number" min="8" step="8" value="${sourceHeight}" />
+          </label>
+        </div>
         <label class="sprite-editor-field">コメント
           <input class="sprite-editor-input" name="comment" value="${esc(pickedName)}" />
         </label>
@@ -700,10 +823,60 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         return {
           file: form.elements.file.value,
           symbol,
+          targetWidth: snapUpTo8(form.elements.targetWidth.value),
+          targetHeight: snapUpTo8(form.elements.targetHeight.value),
           comment: form.elements.comment.value,
         };
       },
     });
+  }
+
+  function updateZoomFromWheel(event, target) {
+    event.preventDefault();
+    const delta = event.deltaY < 0 ? 1 : -1;
+    if (target === 'preview') {
+      state.previewScale = nextZoom(state.previewScale, delta, 12);
+      ui.previewScale.value = formatZoom(state.previewScale);
+      drawPreview();
+      return;
+    }
+    state.sheetScale = nextZoom(state.sheetScale, delta, 8);
+    ui.sheetScale.value = formatZoom(state.sheetScale);
+    drawSheet();
+  }
+
+  function startSplitterDrag(event) {
+    const rect = ui.center.getBoundingClientRect();
+    const topMin = 160;
+    const bottomMin = 180;
+    state.splitterDrag = {
+      top: rect.top,
+      height: rect.height,
+      min: topMin,
+      max: Math.max(topMin, rect.height - bottomMin),
+    };
+    ui.splitter.setPointerCapture?.(event.pointerId);
+    ui.splitter.classList.add('is-dragging');
+    window.addEventListener('pointermove', handleSplitterDrag);
+    window.addEventListener('pointerup', stopSplitterDrag, { once: true });
+    handleSplitterDrag(event);
+  }
+
+  function handleSplitterDrag(event) {
+    if (!state.splitterDrag) return;
+    const nextTop = numberInRange(
+      event.clientY - state.splitterDrag.top,
+      state.splitterDrag.min,
+      state.splitterDrag.max,
+      Math.floor(state.splitterDrag.height * 0.45),
+    );
+    ui.center.style.gridTemplateRows = `${nextTop}px 6px minmax(180px, 1fr)`;
+  }
+
+  function stopSplitterDrag() {
+    state.splitterDrag = null;
+    ui.splitter.classList.remove('is-dragging');
+    window.removeEventListener('pointermove', handleSplitterDrag);
   }
 
   function confirmModal(message, submitText) {
@@ -777,7 +950,7 @@ function buildShell() {
         <section class="sprite-editor-preview">
           <div class="sprite-editor-subtoolbar">
             <span class="sprite-editor-panel-title">Frame Preview</span>
-            <label class="sprite-editor-inline-field">倍率 <input class="sprite-editor-input" data-role="preview-scale" type="number" min="1" max="12" value="4" /></label>
+            <label class="sprite-editor-inline-field">倍率 <input class="sprite-editor-input" data-role="preview-scale" type="number" min="0.25" max="12" step="0.25" value="4" /></label>
             <label class="sprite-editor-inline-field"><input data-role="grid-toggle" type="checkbox" checked /> 8x8</label>
             <button class="icon-btn" data-role="first" type="button" title="先頭">⏮</button>
             <button class="icon-btn" data-role="play" type="button" title="再生">▶</button>
@@ -787,18 +960,22 @@ function buildShell() {
             <label class="sprite-editor-inline-field">Frame <input class="sprite-editor-input" data-role="frame-input" type="number" min="0" value="0" /></label>
             <label class="sprite-editor-inline-field">Time <input class="sprite-editor-input" data-role="frame-time" type="number" min="0" value="0" /></label>
           </div>
-          <div class="sprite-editor-canvas-wrap"><canvas data-role="preview-canvas" width="64" height="64"></canvas></div>
+          <div class="sprite-editor-canvas-wrap" data-role="preview-wrap"><canvas data-role="preview-canvas" width="64" height="64"></canvas></div>
         </section>
+        <div class="sprite-editor-splitter" data-role="splitter" title="表示領域を調整" aria-label="表示領域を調整"></div>
         <section class="sprite-editor-sheet">
           <div class="sprite-editor-subtoolbar">
             <span class="sprite-editor-panel-title">Sprite Sheet</span>
             <span class="sprite-editor-status" data-role="frame-info"></span>
-            <label class="sprite-editor-inline-field">倍率 <input class="sprite-editor-input" data-role="sheet-scale" type="number" min="1" max="8" value="1" /></label>
+            <label class="sprite-editor-inline-field">倍率 <input class="sprite-editor-input" data-role="sheet-scale" type="number" min="0.25" max="8" step="0.25" value="1" /></label>
             <label class="sprite-editor-inline-field">幅(px) <input class="sprite-editor-input" data-role="frame-width" type="number" min="8" max="248" step="8" value="16" /></label>
             <label class="sprite-editor-inline-field">高さ(px) <input class="sprite-editor-input" data-role="frame-height" type="number" min="8" max="248" step="8" value="16" /></label>
-            <button class="sprite-editor-secondary" data-role="range-pick" type="button" aria-pressed="false">範囲指定</button>
           </div>
-          <div class="sprite-editor-canvas-wrap"><canvas data-role="sheet-canvas" width="128" height="128"></canvas></div>
+          <div class="sprite-editor-canvas-wrap" data-role="sheet-wrap"><canvas data-role="sheet-canvas" width="128" height="128"></canvas></div>
+          <div class="sprite-editor-animation-rows">
+            <div class="sprite-editor-row-title">Animation Rows</div>
+            <div class="sprite-editor-row-list" data-role="row-list"></div>
+          </div>
         </section>
       </main>
       <aside class="sprite-editor-pane sprite-editor-props">
@@ -837,8 +1014,12 @@ function bindUi(root) {
     fileFilter: pick('file-filter'),
     keyword: pick('keyword'),
     tree: pick('tree'),
+    center: root.querySelector('.sprite-editor-center'),
     previewScale: pick('preview-scale'),
     sheetScale: pick('sheet-scale'),
+    previewWrap: pick('preview-wrap'),
+    sheetWrap: pick('sheet-wrap'),
+    splitter: pick('splitter'),
     gridToggle: pick('grid-toggle'),
     first: pick('first'),
     play: pick('play'),
@@ -848,9 +1029,9 @@ function bindUi(root) {
     frameInput: pick('frame-input'),
     frameTime: pick('frame-time'),
     frameInfo: pick('frame-info'),
+    rowList: pick('row-list'),
     frameWidth: pick('frame-width'),
     frameHeight: pick('frame-height'),
-    rangePick: pick('range-pick'),
     previewCanvas: pick('preview-canvas'),
     sheetCanvas: pick('sheet-canvas'),
     propsDisabled: pick('props-disabled'),
@@ -895,6 +1076,29 @@ function numberInRange(value, min, max, fallback) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function normalizeZoom(value, fallback, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.max(0.25, Math.min(max, Math.round(n * 4) / 4));
+}
+
+function nextZoom(current, direction, max) {
+  const zoom = normalizeZoom(current, 1, max);
+  if (direction > 0) {
+    if (zoom < 0.5) return 0.5;
+    if (zoom < 1) return 1;
+    return Math.min(max, zoom + 1);
+  }
+  if (zoom <= 0.25) return 0.25;
+  if (zoom <= 0.5) return 0.25;
+  if (zoom <= 1) return 0.5;
+  return Math.max(1, zoom - 1);
+}
+
+function formatZoom(value) {
+  return String(Number(value.toFixed(2)));
 }
 
 function snapUpTo8(value) {

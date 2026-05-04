@@ -276,7 +276,7 @@ npm start
 
 `npm start` は以下を順に実行します。
 
-1. `npm run copy-pkg` で `frontend/pkg/` と `frontend/md-emulator.js` を `md-game-editor/` 配下へコピー
+1. `npm run copy-pkg` で `frontend/pkg/` と `frontend/md-emulator.js` を `md-game-editor/plugins/standard-emulator/` 配下へコピー
 2. Electron アプリを起動
 
 ### 使い方
