@@ -329,6 +329,13 @@ test('channel allocator trims tracks that exceed FM/PSG/noise profile', () => {
 
 test('VGM writer emits Mega Drive header, YM2612, PSG, waits, and end command', () => {
   const song = core.createDefaultSong({ symbol: 'test_bgm' });
+  song.instruments[0].algorithm = 7;
+  song.instruments[0].feedback = 5;
+  song.instruments[0].ams = 2;
+  song.instruments[0].fms = 3;
+  song.instruments[0].operators[0] = {
+    tl: 11, ar: 22, dr: 9, sr: 4, rr: 7, sl: 3, detune: 2, multiple: 5, rs: 1, am: 1, ssgEg: 8,
+  };
   song.patterns[0].rows[0].cells.FM1 = { note: 'C4', midiNote: 60, instrument: 'fm_bell', volume: 12 };
   song.patterns[0].rows[1].cells.PSG1 = { note: 'E4', midiNote: 64, instrument: 'psg_square', volume: 10 };
   song.patterns[0].rows[2].cells.NOISE = { note: 'N', instrument: 'noise_kit', volume: 10 };
@@ -340,6 +347,17 @@ test('VGM writer emits Mega Drive header, YM2612, PSG, waits, and end command', 
   assert.ok(vgm.includes(0x52));
   assert.ok(vgm.includes(0x50));
   assert.ok(vgm.includes(0x61) || vgm.includes(0x62));
+  assert.ok(vgm.includes(Buffer.from([0x52, 0x30, 0x25])), 'FM operator DT/MUL register is exported');
+  assert.ok(vgm.includes(Buffer.from([0x52, 0x50, 0x56])), 'FM operator RS/AR register is exported');
+  assert.ok(vgm.includes(Buffer.from([0x52, 0x60, 0x89])), 'FM operator AM/D1R register is exported');
+  assert.ok(vgm.includes(Buffer.from([0x52, 0x70, 0x04])), 'FM operator D2R register is exported');
+  assert.ok(vgm.includes(Buffer.from([0x52, 0x80, 0x37])), 'FM operator D1L/RR register is exported');
+  assert.ok(vgm.includes(Buffer.from([0x52, 0x90, 0x08])), 'FM operator SSG-EG register is exported');
+  assert.ok(vgm.includes(Buffer.from([0x52, 0xB0, 0x2F])), 'FM algorithm/feedback register is exported');
+  assert.ok(vgm.includes(Buffer.from([0x52, 0xB4, 0xE3])), 'FM pan/AMS/FMS register is exported');
+  assert.ok(vgm.includes(Buffer.from([0x52, 0x28, 0xF0])), 'FM key-on is exported');
+  assert.ok(vgm.includes(Buffer.from([0x52, 0x28, 0x00])), 'FM key-off is exported');
+  assert.ok(vgm.includes(Buffer.from([0x50, 0x9F])), 'PSG volume-off is exported');
   assert.equal(vgm[vgm.length - 1], 0x66);
 });
 

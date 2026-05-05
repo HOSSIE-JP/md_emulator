@@ -60,6 +60,45 @@ test('VGM preview parser reports unsupported commands and canPreview only accept
   assert.equal(preview.canPreviewVgmEntry({ type: 'XGM', sourcePath: 'music/theme.xgm' }), false);
 });
 
+test('VGM preview player exposes high-accuracy engine fallback warning', async () => {
+  const preview = await loadPreviewModule();
+  const player = preview.createVgmPreviewPlayer();
+  const dataUrl = `data:audio/vgm;base64,${makeVgmFixture().toString('base64')}`;
+  const loaded = player.load({ dataUrl });
+
+  assert.equal(loaded.ok, true, loaded.error);
+  assert.ok(loaded.warnings.some((warning) => warning.includes('高精度WASM')));
+  const highAccuracy = await player.loadHighAccuracyEngine();
+  assert.equal(highAccuracy.ok, false);
+  assert.match(highAccuracy.warning, /高精度WASM/);
+});
+
+test('VGM preview player loads optional Nuked-OPN2 WASM engine payload', async () => {
+  const preview = await loadPreviewModule();
+  const moduleSource = 'export default async function(){ return { renderVgmEvents(){ return { ok: true, pcm: [new Float32Array([0]), new Float32Array([0])], channels: 2, sampleRate: 44100, warnings: [] }; } }; }';
+  const previousElectronAPI = globalThis.electronAPI;
+  const previousCandidate = globalThis.__MD_NUKED_OPN2_PREVIEW__;
+  delete globalThis.__MD_NUKED_OPN2_PREVIEW__;
+  globalThis.electronAPI = {
+    loadOptionalAudioEngine: async (engineId) => ({
+      ok: engineId === 'nuked-opn2',
+      jsDataUrl: `data:text/javascript;base64,${Buffer.from(moduleSource).toString('base64')}`,
+      wasmDataUrl: 'data:application/wasm;base64,AGFzbQ==',
+      buildInfo: { source: 'nukeykt/Nuked-OPN2' },
+    }),
+  };
+
+  try {
+    const player = preview.createVgmPreviewPlayer();
+    const highAccuracy = await player.loadHighAccuracyEngine();
+    assert.equal(highAccuracy.ok, true, highAccuracy.warning);
+    assert.equal(typeof highAccuracy.engine.renderVgmEvents, 'function');
+  } finally {
+    globalThis.electronAPI = previousElectronAPI;
+    if (previousCandidate) globalThis.__MD_NUKED_OPN2_PREVIEW__ = previousCandidate;
+  }
+});
+
 test('XGM metadata parser reads header, frame duration, clocks proxy stats, and warnings', async () => {
   const preview = await loadPreviewModule();
   const header = Buffer.alloc(0x108);

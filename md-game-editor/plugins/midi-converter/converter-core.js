@@ -1,5 +1,7 @@
 'use strict';
 
+const mdAudio = require('../shared/md-audio-engine');
+
 const VGM_VERSION = 0x00000151;
 const VGM_SAMPLE_RATE = 44100;
 const YM2612_CLOCK = 7670454;
@@ -477,10 +479,10 @@ function convertMidiBufferToVgm(buffer) {
     return { ok: false, error: '変換対象のMIDIチャンネルがありません', warnings: [], diagnostics: [] };
   }
 
-  const writer = new VgmWriter();
+  const writer = new mdAudio.MdVgmWriter();
   writer.initYm2612();
   for (let index = 0; index < FM_CHANNELS; index += 1) {
-    writer.loadPatch(index, FM_PATCHES.strings);
+    writer.loadPatch(index, mdAudio.FM_PATCHES.strings);
     writer.fmChannels[index].patchName = 'strings';
   }
   writer.markLoopPoint();
@@ -527,11 +529,11 @@ function convertMidiBufferToVgm(buffer) {
       }
       const patchName = midiState.patchName;
       if (fmChannel.patchName !== patchName) {
-        writer.loadPatch(fmIndex, FM_PATCHES[patchName] || FM_PATCHES.strings);
+        writer.loadPatch(fmIndex, mdAudio.FM_PATCHES[patchName] || mdAudio.FM_PATCHES.strings);
         fmChannel.patchName = patchName;
         patchSwitch += 1;
       }
-      writer.noteOn(fmIndex, event.note, effectiveVelocity, FM_PATCHES[patchName] || FM_PATCHES.strings, currentTick);
+      writer.noteOn(fmIndex, event.note, effectiveVelocity, mdAudio.FM_PATCHES[patchName] || mdAudio.FM_PATCHES.strings, currentTick);
       fmChannel.midiChannel = event.channel;
       writer.noteChannelMap.set(`${event.channel}:${event.note}`, fmIndex);
       noteOn += 1;

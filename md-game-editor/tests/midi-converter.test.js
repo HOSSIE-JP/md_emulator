@@ -89,6 +89,10 @@ test('midi-converter manifest exposes main hook and renderer capability', () => 
   assert.match(rendererSource, /addResEntry/);
   assert.match(rendererSource, /XGM2/);
   assert.match(rendererSource, /XGM/);
+  const converterCoreSource = fs.readFileSync(path.join(pluginDir, 'converter-core.js'), 'utf-8');
+  const sharedAudioSource = fs.readFileSync(path.join(pluginDir, '..', 'shared', 'md-audio-engine.js'), 'utf-8');
+  assert.match(converterCoreSource, /shared\/md-audio-engine/);
+  assert.doesNotMatch(`${converterCoreSource}\n${sharedAudioSource}`, /furnace|tildearrow/i);
   assert.doesNotMatch(fs.readFileSync(path.join(pluginDir, 'index.js'), 'utf-8'), /python|midi2vgm\.py|runPython/i);
   assert.doesNotMatch(rendererSource, /window\.prompt|window\.alert|window\.confirm/);
   assert.doesNotMatch(rendererSource, /MIDI 変換ウィザードを開きました|設定を確認して Convert/);
@@ -101,7 +105,7 @@ test('JS converter core reads MIDI and emits Mega Drive VGM data', () => {
   assert.equal(parsed.format, 1);
   assert.equal(result.ok, true);
   assert.equal(result.vgm.toString('ascii', 0, 4), 'Vgm ');
-  assert.equal(result.vgm.readUInt32LE(0x08), 0x00000151);
+  assert.equal(result.vgm.readUInt32LE(0x08), 0x00000170);
   assert.equal(result.vgm.readUInt32LE(0x0C), 3579545);
   assert.equal(result.vgm.readUInt32LE(0x2C), 7670454);
   assert.ok(result.vgm.includes(0x52));

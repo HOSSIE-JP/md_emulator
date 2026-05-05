@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFileAsDataUrl: (sourcePath) => ipcRenderer.invoke('res:readFileAsDataUrl', sourcePath),
   readTempFileAsDataUrl: (sourcePath, options) => ipcRenderer.invoke('res:readTempFileAsDataUrl', sourcePath, options || {}),
   deleteTempFile: (sourcePath) => ipcRenderer.invoke('res:deleteTempFile', sourcePath),
+  loadOptionalAudioEngine: (engineId) => ipcRenderer.invoke('setup:loadOptionalAudioEngine', engineId),
   writeAssetFile: (payload) => ipcRenderer.invoke('res:writeAssetFile', payload),
   getCurrentProject: () => ipcRenderer.invoke('project:getCurrent'),
   getProjectStartupState: () => ipcRenderer.invoke('project:getStartupState'),

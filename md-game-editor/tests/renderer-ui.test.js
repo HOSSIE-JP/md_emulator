@@ -34,6 +34,23 @@ test('header project chips are actionable buttons wired to project actions', () 
   assert.match(renderer, /window\.electronAPI\.openPathInExplorer\(state\.project\.dir\)/);
 });
 
+test('setup page exposes optional Nuked-OPN2 user download flow', () => {
+  const html = readRendererFile('setup.html');
+
+  assert.match(html, /id="emsdkCard"/);
+  assert.match(html, /id="btnDownloadEmsdk"/);
+  assert.match(html, /downloadEmsdk\(\)/);
+  assert.match(html, /id="nukedOpn2Card"/);
+  assert.match(html, /id="btnDownloadNukedOpn2"/);
+  assert.match(html, /id="btnBuildNukedOpn2"/);
+  assert.match(html, /Nuked-OPN2/);
+  assert.match(html, /LGPL-2\.1-or-later/);
+  assert.match(html, /downloadNukedOpn2\(\)/);
+  assert.match(html, /buildNukedOpn2Wasm\(\)/);
+  assert.match(html, /audioEngines\.nukedOpn2/);
+  assert.match(html, /audioEngines\.nukedOpn2Wasm/);
+});
+
 test('plugin role accordion starts collapsed by default', () => {
   const html = readRendererFile('index.html');
   const renderer = readRendererFile('renderer.js');

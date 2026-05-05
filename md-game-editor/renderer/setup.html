@@ -110,6 +110,50 @@
       <p class="desc" id="gccDesc">環境に応じて利用するツールチェーンが異なります。</p>
     </div>
 
+    <!-- Emscripten SDK -->
+    <div class="card" id="emsdkCard">
+      <div class="card-header">
+        <span class="card-title">Emscripten SDK (WASM C コンパイラ)</span>
+        <span id="emsdkBadge" class="badge warn">任意</span>
+      </div>
+      <p class="path-text" id="emsdkPath">-</p>
+      <p class="desc" id="emsdkDesc">
+        Nuked-OPN2 を WASM にビルドするための任意コンポーネントです。アプリ本体には同梱せず、ユーザー操作で公式 GitHub から取得します。<br>
+        GitHub (MIT / University of Illinois/NCSA): <code>emscripten-core/emsdk</code>
+      </p>
+      <div class="row">
+        <button class="btn primary" id="btnDownloadEmsdk">emsdk latest を取得して有効化</button>
+      </div>
+      <div class="progress-wrap" id="emsdkProgress">
+        <div class="progress-bar-bg"><div class="progress-bar" id="emsdkBar"></div></div>
+        <div class="progress-msg" id="emsdkMsg">...</div>
+      </div>
+    </div>
+
+    <!-- Optional audio engine -->
+    <div class="card" id="nukedOpn2Card">
+      <div class="card-header">
+        <span class="card-title">Nuked-OPN2 (高精度 YM2612 プレビュー候補)</span>
+        <span id="nukedOpn2Badge" class="badge warn">任意</span>
+      </div>
+      <p class="path-text" id="nukedOpn2Path">-</p>
+      <p class="desc" id="nukedOpn2Desc">
+        BGM/VGM プレビュー精度向上のための任意コンポーネントです。アプリ本体には同梱せず、ユーザー操作で公式 GitHub から取得します。<br>
+        GitHub (LGPL-2.1-or-later): <code>nukeykt/Nuked-OPN2</code>
+      </p>
+      <div class="row">
+        <button class="btn primary" id="btnDownloadNukedOpn2">Nuked-OPN2 ソースを取得</button>
+        <button class="btn" id="btnBuildNukedOpn2">Nuked-OPN2 WASM をビルド</button>
+      </div>
+      <div class="platform-note">
+        WASM ビルドには Emscripten SDK と Nuked-OPN2 ソースが必要です。生成物は userData/tools 配下に作成され、アプリ本体には同梱されません。
+      </div>
+      <div class="progress-wrap" id="nukedOpn2Progress">
+        <div class="progress-bar-bg"><div class="progress-bar" id="nukedOpn2Bar"></div></div>
+        <div class="progress-msg" id="nukedOpn2Msg">...</div>
+      </div>
+    </div>
+
     <div id="statusMsg"></div>
 
     <div class="footer">
@@ -315,6 +359,47 @@
           gccDesc.innerHTML = 'Marsdev をセットアップするか、システムのクロスコンパイラをインストールしてください。<br><code style="color:#4aa3ff">brew install gcc-m68k-elf binutils-m68k-elf</code>';
         }
       }
+
+      // Optional audio engines
+      const emsdk = s.emsdk || {};
+      const emsdkBadge = document.getElementById('emsdkBadge');
+      const emsdkPath = document.getElementById('emsdkPath');
+      const emsdkDesc = document.getElementById('emsdkDesc');
+      if (emsdk.emccInstalled) {
+        emsdkBadge.textContent = '✓ emcc 利用可';
+        emsdkBadge.className = 'badge ok';
+        emsdkPath.textContent = emsdk.emccPath;
+        emsdkDesc.innerHTML = `Nuked-OPN2 を WASM にビルドするための任意コンポーネントです。<br>emcc: <code>${emsdk.emccVersion || 'detected'}</code>`;
+      } else if (emsdk.installed) {
+        emsdkBadge.textContent = 'SDK 取得済み / emcc 未検出';
+        emsdkBadge.className = 'badge warn';
+        emsdkPath.textContent = emsdk.path;
+        emsdkDesc.innerHTML = 'emsdk は取得済みですが emcc が見つかりません。再度取得・有効化してください。';
+      } else {
+        emsdkBadge.textContent = '任意 / 未取得';
+        emsdkBadge.className = 'badge warn';
+        emsdkPath.textContent = '—';
+        emsdkDesc.innerHTML = 'Nuked-OPN2 を WASM にビルドするための任意コンポーネントです。アプリ本体には同梱せず、ユーザー操作で公式 GitHub から取得します。<br>GitHub (MIT / University of Illinois/NCSA): <code>emscripten-core/emsdk</code>';
+      }
+
+      const nuked = s.audioEngines && s.audioEngines.nukedOpn2 ? s.audioEngines.nukedOpn2 : {};
+      const nukedWasm = s.audioEngines && s.audioEngines.nukedOpn2Wasm ? s.audioEngines.nukedOpn2Wasm : {};
+      const nukedBadge = document.getElementById('nukedOpn2Badge');
+      const nukedPath = document.getElementById('nukedOpn2Path');
+      const nukedDesc = document.getElementById('nukedOpn2Desc');
+      const buildBtn = document.getElementById('btnBuildNukedOpn2');
+      if (nuked.installed) {
+        nukedBadge.textContent = nukedWasm.installed ? '✓ WASM 検出' : '✓ ソース取得済み';
+        nukedBadge.className = nukedWasm.installed ? 'badge ok' : 'badge warn';
+        nukedPath.textContent = nukedWasm.installed ? nukedWasm.wasmPath : nuked.sourcePath;
+        nukedDesc.innerHTML = `BGM/VGM プレビュー精度向上のための任意コンポーネントです。<br>取得元: <code>${nuked.source || 'nukeykt/Nuked-OPN2'}</code> / License: <code>${nuked.license || 'LGPL-2.1-or-later'}</code>`;
+      } else {
+        nukedBadge.textContent = '任意 / 未取得';
+        nukedBadge.className = 'badge warn';
+        nukedPath.textContent = '—';
+        nukedDesc.innerHTML = 'BGM/VGM プレビュー精度向上のための任意コンポーネントです。アプリ本体には同梱せず、ユーザー操作で公式 GitHub から取得します。<br>GitHub (LGPL-2.1-or-later): <code>nukeykt/Nuked-OPN2</code>';
+      }
+      buildBtn.disabled = !(nuked.installed && emsdk.emccInstalled);
     }
 
     function setProgress(id, barId, msgId, pct, msg) {
@@ -391,7 +476,76 @@
       }
     }
 
+    async function installEmsdk() {
+      const btn = document.getElementById('btnDownloadEmsdk');
+      btn.disabled = true;
+      document.getElementById('statusMsg').textContent = '';
+      try {
+        window.electronSetup.onProgress((p) => {
+          setProgress('emsdkProgress', 'emsdkBar', 'emsdkMsg', p.percent, p.message);
+        });
+        const result = await window.electronSetup.downloadEmsdk();
+        if (result.ok) {
+          document.getElementById('statusMsg').textContent = 'Emscripten SDK の取得と有効化が完了しました';
+          await loadStatus();
+        } else {
+          document.getElementById('statusMsg').textContent = `エラー: ${result.error}`;
+        }
+      } catch (e) {
+        document.getElementById('statusMsg').textContent = `エラー: ${e.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function installNukedOpn2() {
+      const btn = document.getElementById('btnDownloadNukedOpn2');
+      btn.disabled = true;
+      document.getElementById('statusMsg').textContent = '';
+      try {
+        window.electronSetup.onProgress((p) => {
+          setProgress('nukedOpn2Progress', 'nukedOpn2Bar', 'nukedOpn2Msg', p.percent, p.message);
+        });
+        const result = await window.electronSetup.downloadNukedOpn2();
+        if (result.ok) {
+          document.getElementById('statusMsg').textContent = `Nuked-OPN2 ソースの取得が完了しました (${result.license})`;
+          await loadStatus();
+        } else {
+          document.getElementById('statusMsg').textContent = `エラー: ${result.error}`;
+        }
+      } catch (e) {
+        document.getElementById('statusMsg').textContent = `エラー: ${e.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function buildNukedOpn2() {
+      const btn = document.getElementById('btnBuildNukedOpn2');
+      btn.disabled = true;
+      document.getElementById('statusMsg').textContent = '';
+      try {
+        window.electronSetup.onProgress((p) => {
+          setProgress('nukedOpn2Progress', 'nukedOpn2Bar', 'nukedOpn2Msg', p.percent, p.message);
+        });
+        const result = await window.electronSetup.buildNukedOpn2Wasm();
+        if (result.ok) {
+          document.getElementById('statusMsg').textContent = 'Nuked-OPN2 WASM のビルドが完了しました';
+          await loadStatus();
+        } else {
+          document.getElementById('statusMsg').textContent = `エラー: ${result.error}`;
+        }
+      } catch (e) {
+        document.getElementById('statusMsg').textContent = `エラー: ${e.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
     document.getElementById('btnDownloadSgdk').addEventListener('click', installSgdk);
+    document.getElementById('btnDownloadEmsdk').addEventListener('click', installEmsdk);
+    document.getElementById('btnDownloadNukedOpn2').addEventListener('click', installNukedOpn2);
+    document.getElementById('btnBuildNukedOpn2').addEventListener('click', buildNukedOpn2);
     document.getElementById('btnReloadVersions').addEventListener('click', async () => {
       await loadSgdkVersions();
       document.getElementById('statusMsg').textContent = 'SGDK バージョン一覧を更新しました';

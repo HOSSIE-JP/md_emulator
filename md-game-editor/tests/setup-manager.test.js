@@ -78,3 +78,91 @@ test('Marsdev path resolution accepts either the root or m68k-elf directory', ()
   assert.equal(status.path, gdkDir);
   assert.equal(typeof status.version, 'string');
 });
+
+test('optional Nuked-OPN2 source is detected outside the bundled app payload', () => {
+  const userData = makeTempUserData();
+  const sourceDir = path.join(userData, 'tools', 'audio-engines', 'nuked-opn2', 'Nuked-OPN2-master');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'ym3438.c'), '', 'utf-8');
+  fs.writeFileSync(path.join(sourceDir, 'ym3438.h'), '', 'utf-8');
+  fs.writeFileSync(path.join(sourceDir, 'LICENSE'), 'LGPL-2.1', 'utf-8');
+
+  const setupManager = loadSetupManager(userData);
+  const status = setupManager.checkNukedOpn2();
+  const fullStatus = setupManager.getStatus();
+
+  assert.equal(status.installed, true);
+  assert.equal(status.wasmInstalled, false);
+  assert.equal(status.sourcePath, sourceDir);
+  assert.equal(status.license, 'LGPL-2.1-or-later');
+  assert.deepEqual(fullStatus.audioEngines.nukedOpn2, status);
+});
+
+test('emsdk and emcc are detected from the user tools directory', () => {
+  const userData = makeTempUserData();
+  const emsdkDir = path.join(userData, 'tools', 'emsdk', 'emsdk-main');
+  const emccDir = path.join(emsdkDir, 'upstream', 'emscripten');
+  fs.mkdirSync(emccDir, { recursive: true });
+  fs.writeFileSync(path.join(emsdkDir, process.platform === 'win32' ? 'emsdk.bat' : 'emsdk'), '', 'utf-8');
+  fs.writeFileSync(path.join(emccDir, process.platform === 'win32' ? 'emcc.bat' : 'emcc'), '', 'utf-8');
+  fs.mkdirSync(path.join(userData, 'tools'), { recursive: true });
+  fs.writeFileSync(path.join(userData, 'tools', 'settings.json'), JSON.stringify({ emsdkPath: emsdkDir, emccVersion: 'emcc test version' }), 'utf-8');
+
+  const setupManager = loadSetupManager(userData);
+  const status = setupManager.checkEmsdk();
+  const fullStatus = setupManager.getStatus();
+
+  assert.equal(status.installed, true);
+  assert.equal(status.emccInstalled, true);
+  assert.equal(status.path, emsdkDir);
+  assert.equal(status.emccVersion, 'emcc test version');
+  assert.equal(fullStatus.emsdk.path, emsdkDir);
+  assert.equal(fullStatus.emcc.installed, true);
+});
+
+test('Nuked-OPN2 build plan wires emcc, wrapper source, ym3438.c, and wasm outputs', () => {
+  const userData = makeTempUserData();
+  const toolsDir = path.join(userData, 'tools');
+  const emsdkDir = path.join(toolsDir, 'emsdk', 'emsdk-main');
+  const emccDir = path.join(emsdkDir, 'upstream', 'emscripten');
+  const sourceDir = path.join(toolsDir, 'audio-engines', 'nuked-opn2', 'Nuked-OPN2-master');
+  fs.mkdirSync(emccDir, { recursive: true });
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.writeFileSync(path.join(emsdkDir, process.platform === 'win32' ? 'emsdk.bat' : 'emsdk'), '', 'utf-8');
+  fs.writeFileSync(path.join(emccDir, process.platform === 'win32' ? 'emcc.bat' : 'emcc'), '', 'utf-8');
+  fs.writeFileSync(path.join(sourceDir, 'ym3438.c'), '', 'utf-8');
+  fs.writeFileSync(path.join(sourceDir, 'ym3438.h'), '', 'utf-8');
+  fs.writeFileSync(path.join(sourceDir, 'LICENSE'), 'LGPL-2.1', 'utf-8');
+  fs.writeFileSync(path.join(toolsDir, 'settings.json'), JSON.stringify({ emsdkPath: emsdkDir, emccVersion: 'emcc test version' }), 'utf-8');
+
+  const setupManager = loadSetupManager(userData);
+  const plan = setupManager.getNukedOpn2BuildPlan();
+
+  assert.equal(plan.ok, true);
+  assert.equal(plan.command, path.join(emccDir, process.platform === 'win32' ? 'emcc.bat' : 'emcc'));
+  assert.ok(plan.args.includes(path.join(sourceDir, 'ym3438.c')));
+  assert.ok(plan.args.includes(path.join(sourceDir, 'build', 'md_nuked_opn2_wrapper.c')));
+  assert.ok(plan.args.includes(path.join(sourceDir, 'build', 'dist', 'nuked-opn2.js')));
+  assert.ok(plan.args.includes('EXPORTED_FUNCTIONS=["_nuke_init","_nuke_reset","_nuke_write","_nuke_render","_malloc","_free"]'));
+});
+
+test('optional Nuked-OPN2 WASM engine payload is loaded only from user tools', () => {
+  const userData = makeTempUserData();
+  const sourceDir = path.join(userData, 'tools', 'audio-engines', 'nuked-opn2', 'Nuked-OPN2-master');
+  const distDir = path.join(sourceDir, 'build', 'dist');
+  fs.mkdirSync(distDir, { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, 'ym3438.c'), '', 'utf-8');
+  fs.writeFileSync(path.join(sourceDir, 'ym3438.h'), '', 'utf-8');
+  fs.writeFileSync(path.join(sourceDir, 'LICENSE'), 'LGPL-2.1', 'utf-8');
+  fs.writeFileSync(path.join(distDir, 'nuked-opn2.js'), 'export default async () => ({ renderVgmEvents() {} });', 'utf-8');
+  fs.writeFileSync(path.join(distDir, 'nuked-opn2.wasm'), Buffer.from([0, 97, 115, 109]));
+  fs.writeFileSync(path.join(distDir, 'BUILD_INFO.json'), JSON.stringify({ source: 'nukeykt/Nuked-OPN2' }), 'utf-8');
+
+  const setupManager = loadSetupManager(userData);
+  const payload = setupManager.loadOptionalAudioEngine('nuked-opn2');
+
+  assert.equal(payload.ok, true, payload.error);
+  assert.match(payload.jsDataUrl, /^data:text\/javascript;base64,/);
+  assert.match(payload.wasmDataUrl, /^data:application\/wasm;base64,/);
+  assert.equal(payload.buildInfo.source, 'nukeykt/Nuked-OPN2');
+});

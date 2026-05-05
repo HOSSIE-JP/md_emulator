@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const mdAudio = require('../shared/md-audio-engine');
 
 const ROWS_PER_PATTERN = 64;
 const DEFAULT_TICKS_PER_ROW = 6;
@@ -55,7 +56,7 @@ function noteNameToMidi(noteName) {
 }
 
 function createDefaultFmInstrument(id = 'fm_bell') {
-  return {
+  return mdAudio.normalizeInstrument({
     id,
     name: 'FM Bell',
     type: 'fm',
@@ -71,8 +72,11 @@ function createDefaultFmInstrument(id = 'fm_bell') {
       sl: 4,
       detune: 0,
       multiple: 1,
+      rs: 0,
+      am: 0,
+      ssgEg: 0,
     })),
-  };
+  });
 }
 
 function createDefaultPsgInstrument(id = 'psg_square') {
@@ -94,7 +98,7 @@ function createEmptyRows() {
 function createDefaultSong(options = {}) {
   const symbol = normalizeSymbolName(options.symbol || 'bgm_001');
   return {
-    version: 1,
+    version: 2,
     title: String(options.title || 'New BGM'),
     artist: String(options.artist || ''),
     symbol,
@@ -573,44 +577,11 @@ function pushPsgNote(commands, channelId, cell) {
 }
 
 function buildVgmData(song) {
-  const commands = [];
-  const waitSamples = rowWaitSamples(song);
-  pushYmWrite(commands, 0, 0x22, 0x00);
-  pushYmWrite(commands, 0, 0x27, 0x00);
-  pushYmWrite(commands, 0, 0x2B, 0x00);
-
-  const patternMap = new Map((song.patterns || []).map((pattern) => [pattern.id, pattern]));
-  for (const patternId of song.order || []) {
-    const pattern = patternMap.get(patternId);
-    for (const row of pattern?.rows || []) {
-      for (const channel of CHANNELS) {
-        const cell = row.cells?.[channel.id];
-        if (!cell?.note) continue;
-        if (channel.type === 'fm') pushFmNote(commands, channel.id, cell);
-        else pushPsgNote(commands, channel.id, cell);
-      }
-      pushWaitSamples(commands, waitSamples);
-    }
-  }
-  commands.push(0x66);
-  return Buffer.from(commands);
+  return mdAudio.buildVgmEvents(song).data;
 }
 
 function writeVgm(song) {
-  const data = buildVgmData(song);
-  const headerSize = 0x100;
-  const out = Buffer.alloc(headerSize + data.length, 0);
-  const totalRows = Math.max(1, (song.order || []).length * ROWS_PER_PATTERN);
-  const totalSamples = totalRows * rowWaitSamples(song);
-  out.write('Vgm ', 0, 'ascii');
-  writeU32LE(out, 0x04, out.length - 4);
-  writeU32LE(out, 0x08, 0x00000170);
-  writeU32LE(out, 0x0C, 3579545);
-  writeU32LE(out, 0x2C, 7670454);
-  writeU32LE(out, 0x34, headerSize - 0x34);
-  writeU32LE(out, 0x18, totalSamples);
-  data.copy(out, headerSize);
-  return out;
+  return mdAudio.writeVgm(song);
 }
 
 function ensureProjectPath(projectDir, relPath) {
@@ -670,7 +641,7 @@ function exportMusic(payload, context = {}) {
   const vgmPath = ensureProjectPath(projectDir, vgmRel);
   const xgmPath = ensureProjectPath(projectDir, xgmRel);
 
-  fs.writeFileSync(jsonPath, JSON.stringify({ ...song, symbol }, null, 2), 'utf-8');
+  fs.writeFileSync(jsonPath, JSON.stringify({ ...mdAudio.normalizeSong(song), symbol }, null, 2), 'utf-8');
   fs.writeFileSync(vgmPath, writeVgm({ ...song, symbol }));
 
   const result = {

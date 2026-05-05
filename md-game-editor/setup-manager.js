@@ -9,13 +9,18 @@
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const { app } = require('electron');
 
 const SGDK_OWNER = 'Stephane-D';
 const SGDK_REPO = 'SGDK';
 const MARSDEV_OWNER = 'andwn';
 const MARSDEV_REPO = 'marsdev';
+const NUKED_OPN2_OWNER = 'nukeykt';
+const NUKED_OPN2_REPO = 'Nuked-OPN2';
+const EMSDK_OWNER = 'emscripten-core';
+const EMSDK_REPO = 'emsdk';
+const EMSDK_BRANCH = 'main';
 
 // ------------------------------------------------------------------ paths --
 
@@ -33,6 +38,18 @@ function getJreBaseDir() {
 
 function getMarsdevBaseDir() {
   return path.join(getToolsDir(), 'marsdev');
+}
+
+function getEmsdkBaseDir() {
+  return path.join(getToolsDir(), 'emsdk');
+}
+
+function getAudioEngineBaseDir() {
+  return path.join(getToolsDir(), 'audio-engines');
+}
+
+function getNukedOpn2BaseDir() {
+  return path.join(getAudioEngineBaseDir(), 'nuked-opn2');
 }
 
 function getSettingsPath() {
@@ -259,6 +276,156 @@ function getMarsdevPath() {
 
 function setMarsdevPath(p) {
   saveSettings({ marsdevPath: p });
+}
+
+// ------------------------------------------------------------- Emscripten --
+
+function findExtractedEmsdkDir() {
+  const base = getEmsdkBaseDir();
+  if (!fs.existsSync(base)) return null;
+  const candidates = [base, ...fs.readdirSync(base).map((entry) => path.join(base, entry))];
+  for (const candidate of candidates) {
+    try {
+      if (!fs.statSync(candidate).isDirectory()) continue;
+      const command = getEmsdkCommand(candidate);
+      if (command && fs.existsSync(command)) return candidate;
+    } catch {
+      // ignore invalid entries
+    }
+  }
+  return null;
+}
+
+function getEmsdkPath() {
+  const settings = loadSettings();
+  if (settings.emsdkPath && fs.existsSync(settings.emsdkPath)) return settings.emsdkPath;
+  return findExtractedEmsdkDir();
+}
+
+function getEmsdkCommand(emsdkPath = getEmsdkPath()) {
+  if (!emsdkPath) return null;
+  return path.join(emsdkPath, process.platform === 'win32' ? 'emsdk.bat' : 'emsdk');
+}
+
+function getEmccPath(emsdkPath = getEmsdkPath()) {
+  if (!emsdkPath) return null;
+  return path.join(emsdkPath, 'upstream', 'emscripten', process.platform === 'win32' ? 'emcc.bat' : 'emcc');
+}
+
+function getEmsdkEnv(emsdkPath = getEmsdkPath()) {
+  if (!emsdkPath) return { ...process.env };
+  const emscriptenDir = path.join(emsdkPath, 'upstream', 'emscripten');
+  const binaryenDir = path.join(emsdkPath, 'upstream', 'bin');
+  const nodeDir = path.join(emsdkPath, 'node');
+  return {
+    ...process.env,
+    EMSDK: emsdkPath,
+    EM_CONFIG: path.join(emsdkPath, '.emscripten'),
+    PATH: [emscriptenDir, binaryenDir, nodeDir, process.env.PATH || ''].filter(Boolean).join(path.delimiter),
+  };
+}
+
+function getCommandVersion(command, args = ['-v'], options = {}) {
+  if (!command || !fs.existsSync(command)) return null;
+  try {
+    const result = require('child_process').spawnSync(command, args, {
+      cwd: options.cwd || path.dirname(command),
+      env: options.env || process.env,
+      encoding: 'utf-8',
+      windowsHide: true,
+      timeout: options.timeout || 10000,
+    });
+    const out = `${result.stdout || ''}${result.stderr || ''}`.trim();
+    return out.split(/\r?\n/).find(Boolean) || null;
+  } catch {
+    return null;
+  }
+}
+
+function checkEmsdk() {
+  const emsdkPath = getEmsdkPath();
+  const command = getEmsdkCommand(emsdkPath);
+  const emccPath = getEmccPath(emsdkPath);
+  const installed = !!(emsdkPath && command && fs.existsSync(command));
+  const emccInstalled = !!(emccPath && fs.existsSync(emccPath));
+  const settings = loadSettings();
+  const emccVersion = emccInstalled
+    ? (settings.emccVersion || getCommandVersion(emccPath, ['-v'], { cwd: emsdkPath, env: getEmsdkEnv(emsdkPath) }))
+    : null;
+  return {
+    installed,
+    path: installed ? emsdkPath : null,
+    command: installed ? command : null,
+    emccPath: emccInstalled ? emccPath : null,
+    emccInstalled,
+    emccVersion,
+    source: `${EMSDK_OWNER}/${EMSDK_REPO}`,
+  };
+}
+
+// ------------------------------------------------------ optional audio cores --
+
+function findExtractedNukedOpn2Dir() {
+  const base = getNukedOpn2BaseDir();
+  if (!fs.existsSync(base)) return null;
+  const candidates = [base, ...fs.readdirSync(base).map((entry) => path.join(base, entry))];
+  for (const candidate of candidates) {
+    try {
+      const stat = fs.statSync(candidate);
+      if (!stat.isDirectory()) continue;
+      if (
+        fs.existsSync(path.join(candidate, 'ym3438.c'))
+        && fs.existsSync(path.join(candidate, 'ym3438.h'))
+        && fs.existsSync(path.join(candidate, 'LICENSE'))
+      ) {
+        return candidate;
+      }
+    } catch {
+      // ignore invalid entries
+    }
+  }
+  return null;
+}
+
+function getNukedOpn2Path() {
+  const settings = loadSettings();
+  if (settings.nukedOpn2Path && fs.existsSync(settings.nukedOpn2Path)) {
+    return settings.nukedOpn2Path;
+  }
+  return findExtractedNukedOpn2Dir();
+}
+
+function checkNukedOpn2() {
+  const sourcePath = getNukedOpn2Path();
+  if (!sourcePath) {
+    return {
+      installed: false,
+      sourcePath: null,
+      wasmPath: null,
+      wasmInstalled: false,
+      license: 'LGPL-2.1-or-later',
+      source: `${NUKED_OPN2_OWNER}/${NUKED_OPN2_REPO}`,
+    };
+  }
+  const wasmCandidates = [
+    path.join(sourcePath, 'build', 'dist', 'nuked-opn2.wasm'),
+    path.join(sourcePath, 'dist', 'nuked-opn2.wasm'),
+    path.join(sourcePath, 'nuked-opn2.wasm'),
+  ];
+  const wasmPath = wasmCandidates.find((candidate) => fs.existsSync(candidate)) || null;
+  const jsPath = wasmPath ? path.join(path.dirname(wasmPath), 'nuked-opn2.js') : null;
+  const buildInfoPath = wasmPath ? path.join(path.dirname(wasmPath), 'BUILD_INFO.json') : null;
+  return {
+    installed: true,
+    sourcePath,
+    jsPath: jsPath && fs.existsSync(jsPath) ? jsPath : null,
+    wasmPath,
+    wasmInstalled: !!wasmPath,
+    buildInfoPath: buildInfoPath && fs.existsSync(buildInfoPath) ? buildInfoPath : null,
+    licensePath: fs.existsSync(path.join(sourcePath, 'LICENSE')) ? path.join(sourcePath, 'LICENSE') : null,
+    license: 'LGPL-2.1-or-later',
+    source: `${NUKED_OPN2_OWNER}/${NUKED_OPN2_REPO}`,
+  };
 }
 
 function checkSgdk() {
@@ -691,6 +858,31 @@ function downloadToFile(url, destPath, onProgress) {
   });
 }
 
+function runProcess(command, args, options = {}, onProgress) {
+  return new Promise((resolve) => {
+    const proc = spawn(command, args, {
+      cwd: options.cwd || undefined,
+      env: options.env || process.env,
+      windowsHide: true,
+      shell: false,
+    });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout?.on('data', (chunk) => {
+      const text = chunk.toString();
+      stdout += text;
+      onProgress && onProgress({ phase: options.phase || 'run', message: text.trim().slice(-200) || options.message || command, percent: options.percent || 0 });
+    });
+    proc.stderr?.on('data', (chunk) => {
+      const text = chunk.toString();
+      stderr += text;
+      onProgress && onProgress({ phase: options.phase || 'run', message: text.trim().slice(-200) || options.message || command, percent: options.percent || 0 });
+    });
+    proc.on('error', (error) => resolve({ ok: false, code: -1, stdout, stderr, error: error.message }));
+    proc.on('exit', (code) => resolve({ ok: code === 0, code, stdout, stderr, error: code === 0 ? null : `${path.basename(command)} exited with code ${code}` }));
+  });
+}
+
 async function getLatestSgdkRelease() {
   const url = `https://api.github.com/repos/${SGDK_OWNER}/${SGDK_REPO}/releases/latest`;
   const res = await httpsGet(url);
@@ -936,6 +1128,250 @@ async function downloadJava(onProgress) {
   return { ok: true };
 }
 
+async function downloadEmsdk(onProgress) {
+  const zipUrl = `https://github.com/${EMSDK_OWNER}/${EMSDK_REPO}/archive/refs/heads/${EMSDK_BRANCH}.zip`;
+  const toolsDir = getToolsDir();
+  if (!fs.existsSync(toolsDir)) fs.mkdirSync(toolsDir, { recursive: true });
+  const zipPath = path.join(toolsDir, `emsdk-${EMSDK_BRANCH}.zip`);
+
+  onProgress && onProgress({ phase: 'download', message: `Downloading emsdk (${EMSDK_BRANCH})...`, percent: 0 });
+  await downloadToFile(zipUrl, zipPath, (received, total) => {
+    onProgress && onProgress({ phase: 'download', message: `Downloading emsdk (${EMSDK_BRANCH})...`, percent: Math.round((received / total) * 35) });
+  });
+
+  onProgress && onProgress({ phase: 'extract', message: 'Extracting emsdk...', percent: 40 });
+  const base = getEmsdkBaseDir();
+  if (fs.existsSync(base)) fs.rmSync(base, { recursive: true, force: true });
+  await extractZip(zipPath, base);
+  fs.unlink(zipPath, () => {});
+
+  const emsdkPath = findExtractedEmsdkDir();
+  if (!emsdkPath) return { ok: false, error: 'emsdk command was not found after extraction.' };
+  const command = getEmsdkCommand(emsdkPath);
+  if (process.platform !== 'win32') {
+    try { fs.chmodSync(command, 0o755); } catch {}
+  }
+  saveSettings({ emsdkPath, emsdkSource: `${EMSDK_OWNER}/${EMSDK_REPO}`, emsdkBranch: EMSDK_BRANCH });
+
+  onProgress && onProgress({ phase: 'install', message: 'Installing Emscripten SDK latest...', percent: 48 });
+  const install = await runProcess(command, ['install', 'latest'], { cwd: emsdkPath, phase: 'install', percent: 65 }, onProgress);
+  if (!install.ok) return { ok: false, error: install.error, stdout: install.stdout, stderr: install.stderr };
+
+  onProgress && onProgress({ phase: 'activate', message: 'Activating Emscripten SDK latest...', percent: 82 });
+  const activate = await runProcess(command, ['activate', 'latest'], { cwd: emsdkPath, phase: 'activate', percent: 90 }, onProgress);
+  if (!activate.ok) return { ok: false, error: activate.error, stdout: activate.stdout, stderr: activate.stderr };
+
+  const emccPath = getEmccPath(emsdkPath);
+  const emccVersion = getCommandVersion(emccPath, ['-v'], { cwd: emsdkPath, env: getEmsdkEnv(emsdkPath) });
+  saveSettings({ emsdkPath, emccVersion });
+  onProgress && onProgress({ phase: 'done', message: 'Emscripten SDK installed', percent: 100 });
+  return { ok: true, path: emsdkPath, emccPath, emccVersion };
+}
+
+async function downloadNukedOpn2(onProgress) {
+  const apiUrl = `https://api.github.com/repos/${NUKED_OPN2_OWNER}/${NUKED_OPN2_REPO}`;
+  onProgress && onProgress({ phase: 'fetch', message: 'Fetching Nuked-OPN2 repository metadata...', percent: 5 });
+  const res = await httpsGet(apiUrl);
+  if (res.statusCode !== 200) throw new Error(`GitHub API returned ${res.statusCode}`);
+  const repo = JSON.parse(res.body);
+  const branch = repo.default_branch || 'master';
+  const zipUrl = `https://github.com/${NUKED_OPN2_OWNER}/${NUKED_OPN2_REPO}/archive/refs/heads/${branch}.zip`;
+
+  const toolsDir = getToolsDir();
+  if (!fs.existsSync(toolsDir)) fs.mkdirSync(toolsDir, { recursive: true });
+  const zipPath = path.join(toolsDir, `nuked-opn2-${branch}.zip`);
+
+  onProgress && onProgress({ phase: 'download', message: `Downloading Nuked-OPN2 (${branch})...`, percent: 10 });
+  await downloadToFile(zipUrl, zipPath, (received, total) => {
+    onProgress && onProgress({ phase: 'download', message: `Downloading Nuked-OPN2 (${branch})...`, percent: 10 + Math.round((received / total) * 60) });
+  });
+
+  onProgress && onProgress({ phase: 'extract', message: 'Extracting Nuked-OPN2 source...', percent: 75 });
+  const base = getNukedOpn2BaseDir();
+  if (fs.existsSync(base)) fs.rmSync(base, { recursive: true, force: true });
+  await extractZip(zipPath, base);
+  fs.unlink(zipPath, () => {});
+
+  const installedPath = findExtractedNukedOpn2Dir();
+  if (!installedPath) {
+    return { ok: false, error: 'Nuked-OPN2 source files were not found after extraction.' };
+  }
+  saveSettings({ nukedOpn2Path: installedPath, nukedOpn2Source: `${NUKED_OPN2_OWNER}/${NUKED_OPN2_REPO}`, nukedOpn2Branch: branch });
+
+  onProgress && onProgress({ phase: 'done', message: 'Nuked-OPN2 source installed', percent: 100 });
+  return { ok: true, path: installedPath, branch, license: 'LGPL-2.1-or-later' };
+}
+
+function getNukedOpn2WrapperSource() {
+  return `#include <stdint.h>
+#include "ym3438.h"
+
+static ym3438_t chip;
+static double clocks_per_sample = 173.0;
+static double clock_fraction = 0.0;
+
+void nuke_init(int sample_rate, int chip_type) {
+  if (sample_rate <= 0) sample_rate = 44100;
+  OPN2_SetChipType(chip_type ? (uint32_t)chip_type : ym3438_mode_ym2612);
+  OPN2_Reset(&chip);
+  clocks_per_sample = 7670454.0 / (double)sample_rate;
+  clock_fraction = 0.0;
+}
+
+void nuke_reset(void) {
+  OPN2_Reset(&chip);
+  clock_fraction = 0.0;
+}
+
+void nuke_write(int port, int address, int value) {
+  OPN2_Write(&chip, (uint32_t)(port * 2), (uint8_t)(address & 0xff));
+  OPN2_Write(&chip, (uint32_t)(port * 2 + 1), (uint8_t)(value & 0xff));
+}
+
+void nuke_render(int samples, int16_t *out) {
+  if (!out || samples <= 0) return;
+  for (int i = 0; i < samples; i++) {
+    Bit16s frame[2] = { 0, 0 };
+    int clocks = (int)clocks_per_sample;
+    clock_fraction += clocks_per_sample - (double)clocks;
+    if (clock_fraction >= 1.0) {
+      clocks++;
+      clock_fraction -= 1.0;
+    }
+    if (clocks < 1) clocks = 1;
+    for (int c = 0; c < clocks; c++) {
+      OPN2_Clock(&chip, frame);
+    }
+    out[i * 2] = frame[0];
+    out[i * 2 + 1] = frame[1];
+  }
+}
+`;
+}
+
+function getNukedOpn2BuildPlan() {
+  const emsdk = checkEmsdk();
+  const nuked = checkNukedOpn2();
+  const sourcePath = nuked.sourcePath;
+  const buildDir = sourcePath ? path.join(sourcePath, 'build') : null;
+  const distDir = buildDir ? path.join(buildDir, 'dist') : null;
+  const wrapperPath = buildDir ? path.join(buildDir, 'md_nuked_opn2_wrapper.c') : null;
+  const outputJs = distDir ? path.join(distDir, 'nuked-opn2.js') : null;
+  const outputWasm = distDir ? path.join(distDir, 'nuked-opn2.wasm') : null;
+  const sourceC = sourcePath ? path.join(sourcePath, 'ym3438.c') : null;
+  const emccPath = emsdk.emccPath;
+  const args = emccPath && sourcePath ? [
+    wrapperPath,
+    sourceC,
+    '-O3',
+    '--no-entry',
+    '-I', sourcePath,
+    '-s', 'MODULARIZE=1',
+    '-s', 'EXPORT_ES6=1',
+    '-s', 'EXPORT_NAME=createNukedOpn2Module',
+    '-s', 'ENVIRONMENT=web',
+    '-s', 'ALLOW_MEMORY_GROWTH=1',
+    '-s', 'EXPORTED_FUNCTIONS=["_nuke_init","_nuke_reset","_nuke_write","_nuke_render","_malloc","_free"]',
+    '-s', 'EXPORTED_RUNTIME_METHODS=["cwrap"]',
+    '-o', outputJs,
+  ] : [];
+  return {
+    ok: !!(emsdk.emccInstalled && nuked.installed),
+    emsdk,
+    nuked,
+    emccPath,
+    sourcePath,
+    buildDir,
+    distDir,
+    wrapperPath,
+    outputJs,
+    outputWasm,
+    args,
+    command: emccPath,
+  };
+}
+
+async function buildNukedOpn2Wasm(onProgress) {
+  const plan = getNukedOpn2BuildPlan();
+  if (!plan.nuked.installed) return { ok: false, error: 'Nuked-OPN2 source is not installed.' };
+  if (!plan.emsdk.emccInstalled) return { ok: false, error: 'Emscripten emcc is not installed.' };
+  fs.mkdirSync(plan.buildDir, { recursive: true });
+  fs.mkdirSync(plan.distDir, { recursive: true });
+  fs.writeFileSync(plan.wrapperPath, getNukedOpn2WrapperSource(), 'utf-8');
+
+  onProgress && onProgress({ phase: 'build', message: 'Building Nuked-OPN2 WASM with emcc...', percent: 20 });
+  const result = await runProcess(plan.command, plan.args, {
+    cwd: plan.sourcePath,
+    env: getEmsdkEnv(plan.emsdk.path),
+    phase: 'build',
+    percent: 60,
+  }, onProgress);
+  if (!result.ok) return { ok: false, error: result.error, stdout: result.stdout, stderr: result.stderr };
+  if (!fs.existsSync(plan.outputJs) || !fs.existsSync(plan.outputWasm)) {
+    return { ok: false, error: 'emcc completed but nuked-opn2.js/wasm was not generated.' };
+  }
+
+  const licenseSource = path.join(plan.sourcePath, 'LICENSE');
+  const licenseTarget = path.join(plan.distDir, 'LICENSE');
+  if (fs.existsSync(licenseSource)) fs.copyFileSync(licenseSource, licenseTarget);
+  fs.writeFileSync(path.join(plan.distDir, 'SOURCE.txt'), [
+    `Source: https://github.com/${NUKED_OPN2_OWNER}/${NUKED_OPN2_REPO}`,
+    `Local source: ${plan.sourcePath}`,
+    'License: LGPL-2.1-or-later',
+    '',
+  ].join('\n'), 'utf-8');
+  const emccVersion = getCommandVersion(plan.emccPath, ['-v'], { cwd: plan.emsdk.path, env: getEmsdkEnv(plan.emsdk.path) });
+  const buildInfo = {
+    source: `${NUKED_OPN2_OWNER}/${NUKED_OPN2_REPO}`,
+    license: 'LGPL-2.1-or-later',
+    sourcePath: plan.sourcePath,
+    emsdkPath: plan.emsdk.path,
+    emccPath: plan.emccPath,
+    emccVersion,
+    builtAt: new Date().toISOString(),
+    outputJs: plan.outputJs,
+    outputWasm: plan.outputWasm,
+  };
+  fs.writeFileSync(path.join(plan.distDir, 'BUILD_INFO.json'), JSON.stringify(buildInfo, null, 2), 'utf-8');
+  saveSettings({ nukedOpn2WasmPath: plan.outputWasm, nukedOpn2JsPath: plan.outputJs, emccVersion });
+  onProgress && onProgress({ phase: 'done', message: 'Nuked-OPN2 WASM built', percent: 100 });
+  return { ok: true, jsPath: plan.outputJs, wasmPath: plan.outputWasm, buildInfo };
+}
+
+function isPathInside(parent, candidate) {
+  const rel = path.relative(path.resolve(parent), path.resolve(candidate));
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+function readJsonFile(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+function loadOptionalAudioEngine(engineId) {
+  if (engineId !== 'nuked-opn2') return { ok: false, error: `Unknown audio engine: ${engineId}` };
+  const status = checkNukedOpn2();
+  if (!status.wasmInstalled || !status.jsPath || !status.wasmPath) {
+    return { ok: false, error: 'Nuked-OPN2 WASM is not built.' };
+  }
+  const toolsDir = getToolsDir();
+  if (!isPathInside(toolsDir, status.jsPath) || !isPathInside(toolsDir, status.wasmPath)) {
+    return { ok: false, error: 'audio engine path is outside the tools directory' };
+  }
+  return {
+    ok: true,
+    id: engineId,
+    jsDataUrl: `data:text/javascript;base64,${fs.readFileSync(status.jsPath).toString('base64')}`,
+    wasmDataUrl: `data:application/wasm;base64,${fs.readFileSync(status.wasmPath).toString('base64')}`,
+    buildInfo: status.buildInfoPath ? readJsonFile(status.buildInfoPath) : null,
+    license: status.license,
+    source: status.source,
+  };
+}
+
 // ------------------------------------------------------------------ status --
 
 function getStatus() {
@@ -943,7 +1379,18 @@ function getStatus() {
   const marsdev = checkMarsdev();
   const java = checkJava();
   const gcc = checkM68kGcc();
-  return { sgdk, marsdev, java, gcc, platform: process.platform };
+  const emsdk = checkEmsdk();
+  const nukedOpn2 = checkNukedOpn2();
+  const audioEngines = {
+    nukedOpn2,
+    nukedOpn2Wasm: {
+      installed: !!(nukedOpn2.wasmInstalled && nukedOpn2.jsPath),
+      jsPath: nukedOpn2.jsPath || null,
+      wasmPath: nukedOpn2.wasmPath || null,
+      buildInfoPath: nukedOpn2.buildInfoPath || null,
+    },
+  };
+  return { sgdk, marsdev, java, gcc, emsdk, emcc: { installed: emsdk.emccInstalled, path: emsdk.emccPath, version: emsdk.emccVersion }, audioEngines, platform: process.platform };
 }
 
 function getToolchainDir() {
@@ -967,6 +1414,13 @@ module.exports = {
   setSgdkPath,
   getMarsdevPath,
   setMarsdevPath,
+  getEmsdkPath,
+  getEmsdkCommand,
+  getEmccPath,
+  getEmsdkEnv,
+  getNukedOpn2Path,
+  getNukedOpn2BuildPlan,
+  loadOptionalAudioEngine,
   getToolchainDir,
   getSgdkBundledTools,
   getMarsdevBundledTools,
@@ -976,7 +1430,12 @@ module.exports = {
   checkMarsdev,
   checkJava,
   checkM68kGcc,
+  checkEmsdk,
+  checkNukedOpn2,
   downloadSgdk,
   downloadMarsdev,
   downloadJava,
+  downloadEmsdk,
+  downloadNukedOpn2,
+  buildNukedOpn2Wasm,
 };

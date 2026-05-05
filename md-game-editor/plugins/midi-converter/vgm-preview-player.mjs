@@ -305,6 +305,132 @@ function scheduleNoise(ctx, destination, start, stop, gainValue) {
   source.stop(stop + 0.02);
 }
 
+function audioBufferFromRendered(ctx, rendered) {
+  if (rendered?.audioBuffer?.numberOfChannels && rendered.audioBuffer?.sampleRate) return rendered.audioBuffer;
+  const pcm = rendered?.pcm || rendered?.samples;
+  if (!pcm) return null;
+  const channels = Math.max(1, Math.min(2, Number(rendered.channels || (Array.isArray(pcm) ? pcm.length : 1)) || 1));
+  const sampleRate = Math.max(8000, Number(rendered.sampleRate || ctx.sampleRate) || ctx.sampleRate);
+  const channelData = Array.isArray(pcm) ? pcm : [pcm];
+  const length = Math.max(1, channelData.reduce((max, data) => Math.max(max, data?.length || 0), 0));
+  const buffer = ctx.createBuffer(channels, length, sampleRate);
+  for (let channel = 0; channel < channels; channel += 1) {
+    const source = channelData[channel] || channelData[0];
+    const target = buffer.getChannelData(channel);
+    for (let i = 0; i < target.length; i += 1) {
+      const sample = source?.[i] ?? 0;
+      target[i] = source instanceof Int16Array ? Math.max(-1, Math.min(1, sample / 32768)) : Math.max(-1, Math.min(1, sample));
+    }
+  }
+  return buffer;
+}
+
+async function createNukedOpn2Engine(moduleFactory, wasmDataUrl, metadata = {}) {
+  const module = await moduleFactory({
+    locateFile: (file) => (String(file).endsWith('.wasm') ? wasmDataUrl : file),
+  });
+  if (module?.renderVgmEvents) return module;
+  if (!module?.cwrap || !module?._malloc || !module?._free || !module?.HEAP16) {
+    throw new Error('Nuked-OPN2 WASM module does not expose the expected runtime API.');
+  }
+  const nukeInit = module.cwrap('nuke_init', null, ['number', 'number']);
+  const nukeReset = module.cwrap('nuke_reset', null, []);
+  const nukeWrite = module.cwrap('nuke_write', null, ['number', 'number', 'number']);
+  const nukeRender = module.cwrap('nuke_render', null, ['number', 'number']);
+
+  function createPsgState() {
+    return {
+      latched: { type: 'tone', channel: 0 },
+      channels: Array.from({ length: 4 }, () => ({ tone: 0, volume: 15, phase: 0, noise: false, lfsr: 0x4000 })),
+    };
+  }
+
+  function handlePsgWrite(state, value) {
+    if (value & 0x80) {
+      const channel = (value >> 5) & 0x03;
+      const isVolume = !!(value & 0x10);
+      state.latched = { type: isVolume ? 'volume' : 'tone', channel };
+      if (isVolume) {
+        state.channels[channel].volume = value & 0x0f;
+      } else {
+        state.channels[channel].tone = (state.channels[channel].tone & 0x3f0) | (value & 0x0f);
+        state.channels[channel].noise = channel === 3;
+      }
+      return;
+    }
+    const channel = state.latched.channel;
+    if (state.latched.type === 'tone') {
+      state.channels[channel].tone = (state.channels[channel].tone & 0x0f) | ((value & 0x3f) << 4);
+    }
+  }
+
+  function renderPsgSample(state, sampleRate) {
+    let mixed = 0;
+    for (let index = 0; index < state.channels.length; index += 1) {
+      const channel = state.channels[index];
+      if (channel.volume >= 15) continue;
+      const gain = ((15 - channel.volume) / 15) * 0.08;
+      if (index === 3 || channel.noise) {
+        channel.lfsr ^= channel.lfsr << 7;
+        channel.lfsr ^= channel.lfsr >> 9;
+        mixed += (channel.lfsr & 1 ? 1 : -1) * gain;
+        continue;
+      }
+      const period = Math.max(1, channel.tone || 1);
+      const freq = Math.max(20, Math.min(12000, 3579545 / (32 * period)));
+      channel.phase = (channel.phase + (freq / sampleRate)) % 1;
+      mixed += (channel.phase < 0.5 ? 1 : -1) * gain;
+    }
+    return mixed;
+  }
+
+  return {
+    metadata,
+    async renderVgmEvents({ events, meta, sampleRate = 44100 }) {
+      const durationSamples = Math.max(1, Math.ceil((meta?.durationSec || 0.1) * sampleRate) + 1);
+      const left = new Float32Array(durationSamples);
+      const right = new Float32Array(durationSamples);
+      const chunkSamples = 1024;
+      const ptr = module._malloc(chunkSamples * 2 * 2);
+      const psg = createPsgState();
+      let cursor = 0;
+
+      function renderUntil(targetSample) {
+        const clampedTarget = Math.max(cursor, Math.min(durationSamples, targetSample));
+        while (cursor < clampedTarget) {
+          const count = Math.min(chunkSamples, clampedTarget - cursor);
+          nukeRender(count, ptr);
+          const base = ptr >> 1;
+          for (let i = 0; i < count; i += 1) {
+            const psgSample = renderPsgSample(psg, sampleRate);
+            left[cursor + i] = Math.max(-1, Math.min(1, (module.HEAP16[base + i * 2] / 32768) + psgSample));
+            right[cursor + i] = Math.max(-1, Math.min(1, (module.HEAP16[base + i * 2 + 1] / 32768) + psgSample));
+          }
+          cursor += count;
+        }
+      }
+
+      try {
+        nukeInit(sampleRate, 1);
+        nukeReset();
+        for (const event of events || []) {
+          const targetSample = Math.round((event.timeSamples || 0) * sampleRate / VGM_SAMPLE_RATE);
+          renderUntil(targetSample);
+          if (event.type === 'ym2612') {
+            nukeWrite(event.port || 0, event.address & 0xff, event.value & 0xff);
+          } else if (event.type === 'psg') {
+            handlePsgWrite(psg, event.value & 0xff);
+          }
+        }
+        renderUntil(durationSamples);
+      } finally {
+        module._free(ptr);
+      }
+      return { ok: true, pcm: [left, right], channels: 2, sampleRate, warnings: [] };
+    },
+  };
+}
+
 export function createVgmPreviewPlayer() {
   let parsed = null;
   let audioContext = null;
@@ -312,6 +438,36 @@ export function createVgmPreviewPlayer() {
   let timeTimer = 0;
   let startedAt = 0;
   let playing = false;
+  let highAccuracyEngine = null;
+  let highAccuracyWarning = '高精度WASMプレビューエンジンが読み込まれていないため、簡易プレビューへフォールバックします。';
+
+  async function loadHighAccuracyEngine() {
+    if (highAccuracyEngine) return { ok: true, engine: highAccuracyEngine };
+    const candidate = globalThis.__MD_NUKED_OPN2_PREVIEW__;
+    if (candidate?.renderVgmEvents) {
+      highAccuracyEngine = candidate;
+      highAccuracyWarning = '';
+      return { ok: true, engine: highAccuracyEngine };
+    }
+    const loader = globalThis.electronAPI?.loadOptionalAudioEngine;
+    if (loader) {
+      try {
+        const result = await loader('nuked-opn2');
+        if (result?.ok && result.jsDataUrl && result.wasmDataUrl) {
+          const imported = await import(result.jsDataUrl);
+          const factory = imported.default || imported.createNukedOpn2Module;
+          if (typeof factory !== 'function') throw new Error('Nuked-OPN2 JS module does not export a module factory.');
+          highAccuracyEngine = await createNukedOpn2Engine(factory, result.wasmDataUrl, result.buildInfo || {});
+          highAccuracyWarning = '';
+          return { ok: true, engine: highAccuracyEngine };
+        }
+        if (result?.error) highAccuracyWarning = `高精度WASMプレビュー不可: ${result.error}`;
+      } catch (error) {
+        highAccuracyWarning = `高精度WASMプレビュー不可: ${error?.message || error}`;
+      }
+    }
+    return { ok: false, warning: highAccuracyWarning };
+  }
 
   function stop() {
     if (stopTimer) clearTimeout(stopTimer);
@@ -333,7 +489,7 @@ export function createVgmPreviewPlayer() {
       return result;
     }
     parsed = result;
-    return { ok: true, meta: result.meta, warnings: result.warnings };
+    return { ok: true, meta: result.meta, warnings: [highAccuracyWarning, ...result.warnings].filter(Boolean) };
   }
 
   function parseVgm({ dataUrl } = {}) {
@@ -351,11 +507,42 @@ export function createVgmPreviewPlayer() {
     if (!Ctor) return { ok: false, error: 'Web Audio が利用できません。' };
 
     try {
+      const highAccuracy = await loadHighAccuracyEngine();
       audioContext = new Ctor();
       const master = audioContext.createGain();
       master.gain.value = 0.55;
       master.connect(audioContext.destination);
       const startAt = audioContext.currentTime + 0.08;
+      if (highAccuracy.ok) {
+        const rendered = await highAccuracy.engine.renderVgmEvents({
+          events: parsed.events,
+          meta: parsed.meta,
+          sampleRate: audioContext.sampleRate,
+          audioContext,
+        });
+        const renderedBuffer = rendered?.ok === false ? null : audioBufferFromRendered(audioContext, rendered);
+        if (renderedBuffer) {
+          const source = audioContext.createBufferSource();
+          source.buffer = renderedBuffer;
+          source.connect(master);
+          source.start(startAt);
+          const duration = renderedBuffer.duration;
+          startedAt = startAt;
+          playing = true;
+          if (audioContext.state === 'suspended') await audioContext.resume();
+          timeTimer = setInterval(() => {
+            if (!playing) return;
+            onTime?.(Math.min(duration, Math.max(0, audioContext.currentTime - startedAt)));
+          }, 100);
+          stopTimer = setTimeout(() => {
+            stop();
+            onTime?.(0);
+            onEnded?.();
+          }, Math.ceil((duration + 0.15) * 1000));
+          return { ok: true, durationSec: duration, warnings: [...(rendered?.warnings || []), ...parsed.warnings].filter(Boolean) };
+        }
+        highAccuracyWarning = rendered?.warning || rendered?.error || '高精度WASMプレビューに失敗したため、簡易プレビューへフォールバックします。';
+      }
       const fm = Array.from({ length: YM2612_CHANNELS }, () => ({
         fnumLsb: 0,
         fnumMsb: 0,
@@ -465,7 +652,7 @@ export function createVgmPreviewPlayer() {
         onTime?.(0);
         onEnded?.();
       }, Math.ceil((duration + 0.15) * 1000));
-      return { ok: true, durationSec: duration, warnings: parsed.warnings };
+      return { ok: true, durationSec: duration, warnings: [highAccuracyWarning, ...parsed.warnings].filter(Boolean) };
     } catch (error) {
       stop();
       onError?.(error);
@@ -478,6 +665,7 @@ export function createVgmPreviewPlayer() {
     load,
     parseVgm,
     parseXgm,
+    loadHighAccuracyEngine,
     play,
     stop,
     isPlaying: () => playing,

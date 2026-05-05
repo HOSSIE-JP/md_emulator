@@ -248,8 +248,10 @@ function createDefaultInstrument(type, id, name) {
       ...base,
       algorithm: 4,
       feedback: 2,
+      ams: 0,
+      fms: 0,
       operators: Array.from({ length: 4 }, () => ({
-        tl: 32, ar: 31, dr: 12, sr: 0, rr: 8, sl: 4, detune: 0, multiple: 1,
+        tl: 32, ar: 31, dr: 12, sr: 0, rr: 8, sl: 4, detune: 0, multiple: 1, rs: 0, am: 0, ssgEg: 0,
       })),
     };
   }
@@ -262,10 +264,22 @@ function normalizeInstrument(instrument) {
   const defaults = createDefaultInstrument(instrument.type || 'fm', instrument.id || 'instrument', instrument.name || instrument.id || 'Instrument');
   Object.assign(instrument, { ...defaults, ...instrument });
   if (instrument.type === 'fm') {
+    instrument.ams = Number.isFinite(Number(instrument.ams)) ? Math.max(0, Math.min(3, Number(instrument.ams))) : 0;
+    instrument.fms = Number.isFinite(Number(instrument.fms)) ? Math.max(0, Math.min(7, Number(instrument.fms))) : 0;
     instrument.operators = Array.from({ length: 4 }, (_, index) => ({
       ...defaults.operators[index],
       ...((instrument.operators || [])[index] || {}),
     }));
+    instrument.operators.forEach((op) => {
+      op.rs = Number.isFinite(Number(op.rs)) ? Math.max(0, Math.min(3, Number(op.rs))) : 0;
+      op.am = Number.isFinite(Number(op.am)) ? Math.max(0, Math.min(1, Number(op.am))) : 0;
+      op.ssgEg = Number.isFinite(Number(op.ssgEg)) ? Math.max(0, Math.min(15, Number(op.ssgEg))) : 0;
+      op.detune = Number.isFinite(Number(op.detune ?? op.dt1)) ? Number(op.detune ?? op.dt1) : 0;
+      op.multiple = Number.isFinite(Number(op.multiple ?? op.mul)) ? Number(op.multiple ?? op.mul) : 1;
+      op.dr = Number.isFinite(Number(op.dr ?? op.d1r)) ? Number(op.dr ?? op.d1r) : 12;
+      op.sr = Number.isFinite(Number(op.sr ?? op.d2r)) ? Number(op.sr ?? op.d2r) : 0;
+      op.sl = Number.isFinite(Number(op.sl ?? op.d1l)) ? Number(op.sl ?? op.d1l) : 4;
+    });
   }
   return instrument;
 }
@@ -1625,10 +1639,14 @@ function renderFmInstrumentFields(selected) {
       <label>Algorithm<input data-inst-field="algorithm" type="number" min="0" max="7" value="${Number(selected.algorithm) || 0}"></label>
       <label>Feedback<input data-inst-field="feedback" type="number" min="0" max="7" value="${Number(selected.feedback) || 0}"></label>
     </div>
+    <div class="md-bgm-pair">
+      <label>AMS<input data-inst-field="ams" type="number" min="0" max="3" value="${Number(selected.ams) || 0}"></label>
+      <label>FMS<input data-inst-field="fms" type="number" min="0" max="7" value="${Number(selected.fms) || 0}"></label>
+    </div>
     <table class="md-bgm-operator-table">
-      <thead><tr><th>OP</th><th>TL</th><th>AR</th><th>DR</th><th>SR</th><th>RR</th><th>SL</th><th>DT</th><th>MUL</th></tr></thead>
+      <thead><tr><th>OP</th><th>TL</th><th>AR</th><th>DR</th><th>SR</th><th>RR</th><th>SL</th><th>DT</th><th>MUL</th><th>RS</th><th>AM</th><th>SSG</th></tr></thead>
       <tbody>${selected.operators.map((op, index) => `
-        <tr><th>${index + 1}</th>${['tl', 'ar', 'dr', 'sr', 'rr', 'sl', 'detune', 'multiple'].map((field) => `
+        <tr><th>${index + 1}</th>${['tl', 'ar', 'dr', 'sr', 'rr', 'sl', 'detune', 'multiple', 'rs', 'am', 'ssgEg'].map((field) => `
           <td><input data-op="${index}" data-op-field="${field}" type="number" value="${Number(op[field]) || 0}"></td>
         `).join('')}</tr>
       `).join('')}</tbody>

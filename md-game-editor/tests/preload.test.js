@@ -23,6 +23,7 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.equal(typeof api.openLogWindow, 'function');
   assert.equal(typeof api.syncLogWindow, 'function');
   assert.equal(typeof api.appendLogWindowEntry, 'function');
+  assert.equal(typeof api.loadOptionalAudioEngine, 'function');
   assert.equal(typeof api.exportHtml, 'function');
   assert.equal(typeof api.getProjectStartupState, 'function');
   assert.equal(typeof api.quitApp, 'function');
@@ -34,6 +35,7 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   await api.saveProjectConfig({ title: 'Saved' });
   await api.getPluginRendererAssets('asset-manager');
   await api.invokePluginHook('audio-converter', 'convertAudio', { sourcePath: 'in.wav' });
+  await api.loadOptionalAudioEngine('nuked-opn2');
   await api.openLogWindow({ entries: [] });
   await api.appendLogWindowEntry({ source: 'app', text: 'hello' });
   await api.createCodeEntry({ path: 'src/new.c', type: 'file' });
@@ -52,6 +54,10 @@ test('main preload exposes renderer API methods with the expected IPC channels',
     channel: 'build:saveProjectConfig',
     args: [{ title: 'Saved' }],
   });
+  assert.deepEqual(invocations.find((entry) => entry.channel === 'setup:loadOptionalAudioEngine'), {
+    channel: 'setup:loadOptionalAudioEngine',
+    args: ['nuked-opn2'],
+  });
 
   let received = null;
   api.onBuildLog((payload) => { received = payload; });
@@ -65,11 +71,17 @@ test('setup preload exposes setup IPC helpers and progress listener', async () =
 
   await api.getStatus();
   await api.downloadSgdk('v2.11');
+  await api.downloadEmsdk();
+  await api.downloadNukedOpn2();
+  await api.buildNukedOpn2Wasm();
   await api.setMarsdevPath('C:/marsdev');
 
   assert.deepEqual(invocations, [
     { channel: 'setup:getStatus', args: [] },
     { channel: 'setup:downloadSgdk', args: ['v2.11'] },
+    { channel: 'setup:downloadEmsdk', args: [] },
+    { channel: 'setup:downloadNukedOpn2', args: [] },
+    { channel: 'setup:buildNukedOpn2Wasm', args: [] },
     { channel: 'setup:setMarsdevPath', args: ['C:/marsdev'] },
   ]);
 

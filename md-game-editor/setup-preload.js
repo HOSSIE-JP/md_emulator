@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld('electronSetup', {
   downloadMarsdev: (tag) => ipcRenderer.invoke('setup:downloadMarsdev', tag),
   setMarsdevPath: (p) => ipcRenderer.invoke('setup:setMarsdevPath', p),
   downloadJava: () => ipcRenderer.invoke('setup:downloadJava'),
+  downloadEmsdk: () => ipcRenderer.invoke('setup:downloadEmsdk'),
+  downloadNukedOpn2: () => ipcRenderer.invoke('setup:downloadNukedOpn2'),
+  buildNukedOpn2Wasm: () => ipcRenderer.invoke('setup:buildNukedOpn2Wasm'),
 
   onProgress: (callback) => {
     ipcRenderer.on('setup-progress', (_event, payload) => callback(payload));

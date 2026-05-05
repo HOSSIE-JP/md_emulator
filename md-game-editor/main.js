@@ -1376,6 +1376,28 @@ ipcMain.handle('setup:downloadJava', async () => {
   });
 });
 
+ipcMain.handle('setup:downloadEmsdk', async () => {
+  return setupManager.downloadEmsdk((progress) => {
+    sendToSetupWindow('setup-progress', progress);
+  });
+});
+
+ipcMain.handle('setup:downloadNukedOpn2', async () => {
+  return setupManager.downloadNukedOpn2((progress) => {
+    sendToSetupWindow('setup-progress', progress);
+  });
+});
+
+ipcMain.handle('setup:buildNukedOpn2Wasm', async () => {
+  return setupManager.buildNukedOpn2Wasm((progress) => {
+    sendToSetupWindow('setup-progress', progress);
+  });
+});
+
+ipcMain.handle('setup:loadOptionalAudioEngine', async (_event, engineId) => {
+  return setupManager.loadOptionalAudioEngine(engineId);
+});
+
 ipcMain.handle('setup:setSgdkPath', async (_event, p) => {
   return setupManager.setSgdkPath(p);
 });
