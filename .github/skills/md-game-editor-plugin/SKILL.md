@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-05 / Plugin Runtime v2.4
+> § Last Updated: 2026-05 / Plugin Runtime v2.4 / AI Control API
 
 ---
 
@@ -328,6 +328,7 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `md-bgm-composer` | `editor`, `converter`, `asset` | Mega Drive 向け BGM tracker、MIDI import、VGM/XGM export、XGM2 アセット登録 |
 | `standard-emulator` | `emulator` | WASM Mega Drive エミュレーター |
 | `standard-api-emulator` | `emulator`, `tool` | REST API Mega Drive エミュレーター |
+| `ai-control` | `editor`, `tool` | 外部 AI ツール向け localhost REST / MCP bridge |
 
 > 新しいプラグインが追加されたら、このテーブルに追記し § Last Updated を更新すること。
 

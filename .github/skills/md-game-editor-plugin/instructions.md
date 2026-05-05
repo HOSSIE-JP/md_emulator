@@ -275,4 +275,4 @@ TYPE   name   "ファイルパス"   [追加パラメータ]
 
 ---
 
-*Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.4*
+*Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.4 / AI Control API*

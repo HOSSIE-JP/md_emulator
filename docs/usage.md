@@ -1,5 +1,40 @@
 # 実行して試す
 
+## MD Game Editor AI Control を使う
+
+1. MD Game Editor を起動し、`AI Control` タブで `Start` を押します。
+2. 表示された token を使って localhost REST API または MCP sidecar から接続します。
+
+PowerShell 例:
+
+```powershell
+$token = "<AI Control tab token>"
+Invoke-RestMethod `
+  -Method Get `
+  -Uri http://127.0.0.1:17777/v1/tools `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+tool 呼び出し例:
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:17777/v1/tools/call `
+  -Headers @{ Authorization = "Bearer $token" } `
+  -ContentType 'application/json' `
+  -Body '{"name":"asset_list","arguments":{}}'
+```
+
+MCP sidecar 例:
+
+```powershell
+$env:MD_EDITOR_CONTROL_URL = "http://127.0.0.1:17777"
+$env:MD_EDITOR_CONTROL_TOKEN = $token
+cd md-game-editor
+npm run mcp
+```
+
 ## 1) APIサーバーを起動
 
 プロジェクトルートで実行:

@@ -272,3 +272,20 @@ test('sprite-editor declares plugin-local page and uses v2.4 capabilities', () =
   assert.match(rendererSource, /data-role="actions"[\s\S]*data-role="save"[\s\S]*#icon-save[\s\S]*保存[\s\S]*data-role="delete"[\s\S]*#icon-trash[\s\S]*削除/);
   assert.doesNotMatch(rendererSource, /window\.prompt|window\.alert|window\.confirm/);
 });
+
+test('ai-control declares plugin-local page and control capability', () => {
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'ai-control', 'manifest.json'),
+    'utf-8',
+  ));
+  const rendererSource = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'ai-control', 'renderer.js'),
+    'utf-8',
+  );
+
+  assert.deepEqual(manifest.types, ['editor', 'tool']);
+  assert.equal(manifest.renderer.page, 'ai-control');
+  assert.deepEqual(manifest.renderer.capabilities, ['page', 'ai-control']);
+  assert.match(rendererSource, /registerCapability\('ai-control'/);
+  assert.match(rendererSource, /startAiControlServer/);
+});

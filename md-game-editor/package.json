@@ -7,6 +7,7 @@
   "scripts": {
     "copy-pkg": "node scripts/copy-pkg.js",
     "inject-build-meta": "node scripts/inject-build-meta.js",
+    "mcp": "node scripts/md-game-editor-mcp.js",
     "prepare:dist": "node scripts/prepare-dist.js",
     "test": "node tests/run-tests.js",
     "start": "npm run inject-build-meta && npm run copy-pkg && electron .",

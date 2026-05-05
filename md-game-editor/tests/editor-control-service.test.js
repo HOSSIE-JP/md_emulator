@@ -1,0 +1,136 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { once } = require('node:events');
+const { spawn } = require('node:child_process');
+const path = require('node:path');
+const test = require('node:test');
+const {
+  createEditorControlService,
+  createEditorControlServer,
+} = require('../editor-control-service');
+
+function makeService() {
+  const calls = [];
+  const service = createEditorControlService({
+    editor_status: async () => ({ ready: true }),
+    asset_list: async () => ({ files: [] }),
+    code_write: async (args) => {
+      calls.push(['code_write', args]);
+      return { path: args.path };
+    },
+  });
+  return { service, calls };
+}
+
+async function requestJson(url, options = {}) {
+  const result = await fetch(url, {
+    method: options.method || 'GET',
+    headers: options.headers || {},
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  const text = await result.text();
+  return {
+    status: result.status,
+    data: text ? JSON.parse(text) : null,
+  };
+}
+
+test('editor control lists tools and requires confirm for mutating commands', async () => {
+  const { service, calls } = makeService();
+  const tools = service.listTools();
+
+  assert.ok(tools.some((tool) => tool.name === 'editor_status' && !tool.mutates));
+  assert.ok(tools.some((tool) => tool.name === 'code_write' && tool.mutates));
+
+  const rejected = await service.callTool('code_write', { path: 'src/main.c', content: 'x' });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error.code, 'CONFIRM_REQUIRED');
+  assert.deepEqual(calls, []);
+
+  const dryRun = await service.callTool('code_write', { path: 'src/main.c' }, { dryRun: true });
+  assert.equal(dryRun.ok, true);
+  assert.equal(dryRun.result.dryRun, true);
+
+  const written = await service.callTool('code_write', { path: 'src/main.c', content: 'x' }, { confirm: true });
+  assert.equal(written.ok, true);
+  assert.deepEqual(calls, [['code_write', { path: 'src/main.c', content: 'x' }]]);
+});
+
+test('editor control REST server enforces token and localhost origin', async () => {
+  const { service } = makeService();
+  const server = createEditorControlServer(service, { token: 'test-token' });
+  const status = await server.start({ port: 0 });
+  const baseUrl = status.baseUrl;
+
+  try {
+    const unauthorized = await requestJson(`${baseUrl}/v1/tools`);
+    assert.equal(unauthorized.status, 401);
+
+    const rejectedOrigin = await requestJson(`${baseUrl}/v1/tools`, {
+      headers: {
+        Authorization: 'Bearer test-token',
+        Origin: 'https://example.com',
+      },
+    });
+    assert.equal(rejectedOrigin.status, 403);
+
+    const tools = await requestJson(`${baseUrl}/v1/tools`, {
+      headers: { Authorization: 'Bearer test-token' },
+    });
+    assert.equal(tools.status, 200);
+    assert.ok(tools.data.result.tools.some((tool) => tool.name === 'asset_list'));
+
+    const call = await requestJson(`${baseUrl}/v1/tools/call`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-token',
+        'Content-Type': 'application/json',
+      },
+      body: { name: 'asset_list', arguments: {} },
+    });
+    assert.equal(call.status, 200);
+    assert.deepEqual(call.data.result, { files: [] });
+  } finally {
+    await server.stop();
+  }
+});
+
+test('editor control MCP sidecar writes only JSON-RPC messages to stdout', async () => {
+  const { service } = makeService();
+  const server = createEditorControlServer(service, { token: 'sidecar-token' });
+  const status = await server.start({ port: 0 });
+  const sidecarPath = path.join(__dirname, '..', 'scripts', 'md-game-editor-mcp.js');
+  const child = spawn(process.execPath, [sidecarPath], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      MD_EDITOR_CONTROL_URL: status.baseUrl,
+      MD_EDITOR_CONTROL_TOKEN: 'sidecar-token',
+    },
+  });
+
+  const stdoutLines = [];
+  child.stdout.setEncoding('utf-8');
+  child.stdout.on('data', (chunk) => {
+    chunk.split(/\r?\n/).filter(Boolean).forEach((line) => stdoutLines.push(line));
+  });
+
+  try {
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }) + '\n');
+
+    while (stdoutLines.length < 2) {
+      await once(child.stdout, 'data');
+    }
+
+    const messages = stdoutLines.map((line) => JSON.parse(line));
+    assert.equal(messages[0].id, 1);
+    assert.equal(messages[0].result.serverInfo.name, 'md-game-editor-mcp');
+    assert.equal(messages[1].id, 2);
+    assert.ok(messages[1].result.tools.some((tool) => tool.name === 'editor_status'));
+  } finally {
+    child.kill();
+    await server.stop();
+  }
+});

@@ -26,6 +26,9 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.equal(typeof api.loadOptionalAudioEngine, 'function');
   assert.equal(typeof api.exportHtml, 'function');
   assert.equal(typeof api.getProjectStartupState, 'function');
+  assert.equal(typeof api.startAiControlServer, 'function');
+  assert.equal(typeof api.getAiControlStatus, 'function');
+  assert.equal(typeof api.listAiControlTools, 'function');
   assert.equal(typeof api.quitApp, 'function');
 
   await api.readRomFile('game.bin');
@@ -39,13 +42,14 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   await api.openLogWindow({ entries: [] });
   await api.appendLogWindowEntry({ source: 'app', text: 'hello' });
   await api.createCodeEntry({ path: 'src/new.c', type: 'file' });
+  await api.startAiControlServer({ port: 17777 });
   await api.getProjectStartupState();
   await api.quitApp();
 
   assert.deepEqual(invocations.slice(-5), [
-    { channel: 'log:openWindow', args: [{ entries: [] }] },
     { channel: 'log:appendEntry', args: [{ source: 'app', text: 'hello' }] },
     { channel: 'codefs:create', args: [{ path: 'src/new.c', type: 'file' }] },
+    { channel: 'ai-control:start', args: [{ port: 17777 }] },
     { channel: 'project:getStartupState', args: [] },
     { channel: 'app:quit', args: [] },
   ]);
@@ -63,6 +67,11 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   api.onBuildLog((payload) => { received = payload; });
   listeners.get('build-log')({}, { line: 'ok' });
   assert.deepEqual(received, { line: 'ok' });
+
+  let aiControlLog = null;
+  api.onAiControlLog((payload) => { aiControlLog = payload; });
+  listeners.get('ai-control-log')({}, { message: 'started' });
+  assert.deepEqual(aiControlLog, { message: 'started' });
 });
 
 test('setup preload exposes setup IPC helpers and progress listener', async () => {

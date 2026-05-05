@@ -5,6 +5,49 @@
 
 ベースURL: `http://127.0.0.1:8080`
 
+## MD Game Editor AI Control API
+
+MD Game Editor には、外部 AI ツールが Editor を操作するための opt-in API があります。  
+`md-api` はエミュレーター操作用、AI Control は Editor 操作用です。
+
+- 起動: MD Game Editor の `AI Control` タブで `Start`
+- 既定 URL: `http://127.0.0.1:17777`
+- 認証: `Authorization: Bearer <token>` または `X-MD-Editor-Token: <token>`
+- 安全策: `127.0.0.1` bind、localhost Origin のみ許可、書き込み系 tool は `dryRun: true` または `confirm: true` 必須
+
+### REST
+
+- `GET /v1/status`
+- `GET /v1/tools`
+- `GET /v1/resources`
+- `GET /v1/prompts`
+- `POST /v1/resources/read`
+- `POST /v1/tools/call`
+
+`POST /v1/tools/call`:
+
+```json
+{
+  "name": "asset_list",
+  "arguments": {},
+  "dryRun": false,
+  "confirm": false
+}
+```
+
+### MCP
+
+MCP stdio sidecar は `md-game-editor/scripts/md-game-editor-mcp.js` です。`MD_EDITOR_CONTROL_URL` と `MD_EDITOR_CONTROL_TOKEN` を設定して起動します。
+
+公開 tools:
+
+- `editor_status`, `project_list`, `project_open`, `project_create`
+- `project_config_get`, `project_config_update`
+- `asset_list`, `asset_add`, `asset_update`, `asset_delete`
+- `code_tree`, `code_read`, `code_write`
+- `plugin_list`, `plugin_set_role`, `plugin_run_generator`
+- `build_run`, `testplay_open`, `export_rom`, `export_html`
+
 ## Electron Desktop IPC (Plugin Runtime v2, draft)
 
 この章は Electron デスクトップ版 (`md-game-editor/main.js` と `md-game-editor/preload.js`) の IPC API を示します。

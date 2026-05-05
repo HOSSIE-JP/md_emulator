@@ -7,6 +7,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startApiServer: (options) => ipcRenderer.invoke('api:startServer', options),
   stopApiServer: () => ipcRenderer.invoke('api:stopServer'),
   isApiServerRunning: () => ipcRenderer.invoke('api:isRunning'),
+  startAiControlServer: (options) => ipcRenderer.invoke('ai-control:start', options || {}),
+  stopAiControlServer: () => ipcRenderer.invoke('ai-control:stop'),
+  getAiControlStatus: () => ipcRenderer.invoke('ai-control:status'),
+  listAiControlTools: () => ipcRenderer.invoke('ai-control:listTools'),
   openDebugWindow: (options) => ipcRenderer.invoke('window:openDebug', options),
   onRomSelected: (callback) => {
     ipcRenderer.on('rom-selected', (_event, payload) => callback(payload));
@@ -16,6 +20,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onApiExit: (callback) => {
     ipcRenderer.on('api-exit', (_event, payload) => callback(payload));
+  },
+  onAiControlLog: (callback) => {
+    ipcRenderer.on('ai-control-log', (_event, payload) => callback(payload));
   },
   // --- エディタ追加 ---
   openSetupWindow: () => ipcRenderer.invoke('window:openSetup'),

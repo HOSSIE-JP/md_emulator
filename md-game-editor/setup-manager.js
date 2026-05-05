@@ -858,9 +858,28 @@ function downloadToFile(url, destPath, onProgress) {
   });
 }
 
+function quoteCmdArg(value) {
+  const text = String(value);
+  if (!/[\s"&|<>^]/.test(text)) return text;
+  return `"${text.replace(/"/g, '\\"')}"`;
+}
+
+function normalizeSpawnCommand(command, args) {
+  if (process.platform !== 'win32' || !/\.bat$/i.test(command)) {
+    return { command, args };
+  }
+  const line = [quoteCmdArg(command), ...args.map(quoteCmdArg)].join(' ');
+  return { command: 'cmd.exe', args: ['/d', '/s', '/c', line] };
+}
+
 function runProcess(command, args, options = {}, onProgress) {
   return new Promise((resolve) => {
-    const proc = spawn(command, args, {
+    const normalized = normalizeSpawnCommand(command, args);
+    let settled = false;
+    let lastProgressAt = Date.now();
+    const timeoutMs = options.timeoutMs || 45 * 60 * 1000;
+    const heartbeatMs = options.heartbeatMs || 15000;
+    const proc = spawn(normalized.command, normalized.args, {
       cwd: options.cwd || undefined,
       env: options.env || process.env,
       windowsHide: true,
@@ -871,15 +890,42 @@ function runProcess(command, args, options = {}, onProgress) {
     proc.stdout?.on('data', (chunk) => {
       const text = chunk.toString();
       stdout += text;
+      lastProgressAt = Date.now();
       onProgress && onProgress({ phase: options.phase || 'run', message: text.trim().slice(-200) || options.message || command, percent: options.percent || 0 });
     });
     proc.stderr?.on('data', (chunk) => {
       const text = chunk.toString();
       stderr += text;
+      lastProgressAt = Date.now();
       onProgress && onProgress({ phase: options.phase || 'run', message: text.trim().slice(-200) || options.message || command, percent: options.percent || 0 });
     });
-    proc.on('error', (error) => resolve({ ok: false, code: -1, stdout, stderr, error: error.message }));
-    proc.on('exit', (code) => resolve({ ok: code === 0, code, stdout, stderr, error: code === 0 ? null : `${path.basename(command)} exited with code ${code}` }));
+    const heartbeat = setInterval(() => {
+      if (Date.now() - lastProgressAt >= heartbeatMs) {
+        onProgress && onProgress({ phase: options.phase || 'run', message: options.message || `${path.basename(command)} is still running...`, percent: options.percent || 0 });
+        lastProgressAt = Date.now();
+      }
+    }, heartbeatMs);
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      clearInterval(heartbeat);
+      proc.kill();
+      resolve({ ok: false, code: -1, stdout, stderr, error: `${path.basename(command)} timed out` });
+    }, timeoutMs);
+    proc.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(heartbeat);
+      clearTimeout(timeout);
+      resolve({ ok: false, code: -1, stdout, stderr, error: error.message });
+    });
+    proc.on('exit', (code) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(heartbeat);
+      clearTimeout(timeout);
+      resolve({ ok: code === 0, code, stdout, stderr, error: code === 0 ? null : `${path.basename(command)} exited with code ${code}` });
+    });
   });
 }
 
@@ -1129,23 +1175,29 @@ async function downloadJava(onProgress) {
 }
 
 async function downloadEmsdk(onProgress) {
-  const zipUrl = `https://github.com/${EMSDK_OWNER}/${EMSDK_REPO}/archive/refs/heads/${EMSDK_BRANCH}.zip`;
+  let emsdkPath = findExtractedEmsdkDir();
   const toolsDir = getToolsDir();
   if (!fs.existsSync(toolsDir)) fs.mkdirSync(toolsDir, { recursive: true });
-  const zipPath = path.join(toolsDir, `emsdk-${EMSDK_BRANCH}.zip`);
 
-  onProgress && onProgress({ phase: 'download', message: `Downloading emsdk (${EMSDK_BRANCH})...`, percent: 0 });
-  await downloadToFile(zipUrl, zipPath, (received, total) => {
-    onProgress && onProgress({ phase: 'download', message: `Downloading emsdk (${EMSDK_BRANCH})...`, percent: Math.round((received / total) * 35) });
-  });
+  if (!emsdkPath) {
+    const zipUrl = `https://github.com/${EMSDK_OWNER}/${EMSDK_REPO}/archive/refs/heads/${EMSDK_BRANCH}.zip`;
+    const zipPath = path.join(toolsDir, `emsdk-${EMSDK_BRANCH}.zip`);
 
-  onProgress && onProgress({ phase: 'extract', message: 'Extracting emsdk...', percent: 40 });
-  const base = getEmsdkBaseDir();
-  if (fs.existsSync(base)) fs.rmSync(base, { recursive: true, force: true });
-  await extractZip(zipPath, base);
-  fs.unlink(zipPath, () => {});
+    onProgress && onProgress({ phase: 'download', message: `Downloading emsdk (${EMSDK_BRANCH})...`, percent: 0 });
+    await downloadToFile(zipUrl, zipPath, (received, total) => {
+      onProgress && onProgress({ phase: 'download', message: `Downloading emsdk (${EMSDK_BRANCH})...`, percent: Math.round((received / total) * 35) });
+    });
 
-  const emsdkPath = findExtractedEmsdkDir();
+    onProgress && onProgress({ phase: 'extract', message: 'Extracting emsdk...', percent: 40 });
+    const base = getEmsdkBaseDir();
+    if (fs.existsSync(base)) fs.rmSync(base, { recursive: true, force: true });
+    await extractZip(zipPath, base);
+    fs.unlink(zipPath, () => {});
+    emsdkPath = findExtractedEmsdkDir();
+  } else {
+    onProgress && onProgress({ phase: 'install', message: 'Using existing emsdk source. Installing latest toolchain...', percent: 45 });
+  }
+
   if (!emsdkPath) return { ok: false, error: 'emsdk command was not found after extraction.' };
   const command = getEmsdkCommand(emsdkPath);
   if (process.platform !== 'win32') {
@@ -1154,11 +1206,11 @@ async function downloadEmsdk(onProgress) {
   saveSettings({ emsdkPath, emsdkSource: `${EMSDK_OWNER}/${EMSDK_REPO}`, emsdkBranch: EMSDK_BRANCH });
 
   onProgress && onProgress({ phase: 'install', message: 'Installing Emscripten SDK latest...', percent: 48 });
-  const install = await runProcess(command, ['install', 'latest'], { cwd: emsdkPath, phase: 'install', percent: 65 }, onProgress);
+  const install = await runProcess(command, ['install', 'latest'], { cwd: emsdkPath, phase: 'install', percent: 65, message: 'Installing Emscripten SDK latest...' }, onProgress);
   if (!install.ok) return { ok: false, error: install.error, stdout: install.stdout, stderr: install.stderr };
 
   onProgress && onProgress({ phase: 'activate', message: 'Activating Emscripten SDK latest...', percent: 82 });
-  const activate = await runProcess(command, ['activate', 'latest'], { cwd: emsdkPath, phase: 'activate', percent: 90 }, onProgress);
+  const activate = await runProcess(command, ['activate', 'latest'], { cwd: emsdkPath, phase: 'activate', percent: 90, message: 'Activating Emscripten SDK latest...' }, onProgress);
   if (!activate.ok) return { ok: false, error: activate.error, stdout: activate.stdout, stderr: activate.stderr };
 
   const emccPath = getEmccPath(emsdkPath);

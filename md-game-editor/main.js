@@ -48,6 +48,10 @@ const setupManager = require('./setup-manager');
 const buildSystem = require('./build-system');
 const rescompManager = require('./rescomp-manager');
 const pluginManager = require('./plugin-manager');
+const {
+  createEditorControlService,
+  createEditorControlServer,
+} = require('./editor-control-service');
 
 let mainWindow = null;
 let debugWindow = null;
@@ -57,6 +61,8 @@ let testPlaySettingsWindow = null;
 let logWindow = null;
 let apiServerProcess = null;
 let apiServerPort = null;
+let editorControlService = null;
+let editorControlServer = null;
 let latestLogSnapshot = { entries: [] };
 
 const MAIN_WINDOW_DEFAULT_BOUNDS = { width: 1280, height: 860 };
@@ -664,6 +670,152 @@ function readCodeTree(absDir, codeRoot) {
   });
 }
 
+function resultOrThrow(result) {
+  if (result && result.ok === false) {
+    throw new Error(result.error || result.message || 'operation failed');
+  }
+  return result;
+}
+
+async function runPluginGeneratorAndWrite(id) {
+  const projectDir = buildSystem.getProjectDir();
+  const allAssets = collectProjectAssets(projectDir);
+  const genResult = await pluginManager.runGenerator(id, allAssets, {
+    projectDir,
+    assets: allAssets,
+    logger: createPluginLogger(id),
+  });
+  if (!genResult.ok) {
+    return genResult;
+  }
+  if (typeof genResult.sourceCode === 'string') {
+    const srcPath = path.join(projectDir, 'src', 'main.c');
+    fs.mkdirSync(path.dirname(srcPath), { recursive: true });
+    fs.writeFileSync(srcPath, genResult.sourceCode, 'utf-8');
+    return { ok: true, srcPath, ...genResult };
+  }
+  return { ok: true, ...genResult };
+}
+
+async function openTestPlayWithPlugin(romPath) {
+  const emulatorPluginId = resolvePluginForRole('testplay');
+  if (!emulatorPluginId) {
+    return { opened: false, error: '有効な Emulator プラグインが未設定です' };
+  }
+  if (!pluginManager.isPluginEnabled(emulatorPluginId)) {
+    return { opened: false, error: `Emulator プラグイン "${emulatorPluginId}" は無効です` };
+  }
+  const emulatorMeta = pluginManager.listPlugins().find((p) => p.id === emulatorPluginId);
+  if (!pluginSupportsRole(emulatorMeta, 'testplay')) {
+    return { opened: false, error: `Emulator プラグイン "${emulatorPluginId}" は testplay role ではありません` };
+  }
+
+  const hookResult = await invokePluginHookSafe(
+    emulatorPluginId,
+    'onTestPlay',
+    {
+      romPath: romPath || null,
+      projectDir: buildSystem.getProjectDir(),
+    },
+    {
+      projectDir: buildSystem.getProjectDir(),
+      logger: createPluginLogger(emulatorPluginId),
+      testPlay: createTestPlayHostApi(emulatorPluginId),
+    }
+  );
+
+  if (hookResult.ok && hookResult.result && hookResult.result.handled) {
+    return { opened: true, reused: false, handledByPlugin: emulatorPluginId };
+  }
+  if (!hookResult.ok) {
+    return { opened: false, error: hookResult.error || 'Emulator フック実行に失敗しました' };
+  }
+
+  return openWasmTestPlayWindow({
+    romPath: romPath || null,
+    pluginId: emulatorPluginId,
+  });
+}
+
+function getEditorControlService() {
+  if (editorControlService) return editorControlService;
+  editorControlService = createEditorControlService({
+    editor_status: async () => ({
+      app: {
+        name: app.getName(),
+        version: app.getVersion(),
+        platform: process.platform,
+      },
+      project: buildSystem.getProjectInfo(),
+      aiControl: editorControlServer ? editorControlServer.status() : { running: false },
+    }),
+    project_list: async () => buildSystem.listProjects(),
+    project_open: async ({ projectName }) => {
+      const info = buildSystem.openProjectByName(String(projectName || '').trim());
+      return { ...info, pluginRoleSync: syncProjectPluginRoleState() };
+    },
+    project_create: async ({ projectName, config, sourceCode }) => {
+      const created = buildSystem.createProjectInRoot(String(projectName || '').trim(), config || {}, sourceCode || null);
+      return {
+        projectDir: created.projectDir,
+        projectName: path.basename(created.projectDir),
+        pluginRoleSync: syncProjectPluginRoleState(),
+      };
+    },
+    project_config_get: async () => buildSystem.loadProjectConfig(),
+    project_config_update: async ({ patch }) => ({ config: buildSystem.saveProjectConfig(patch || {}) }),
+    asset_list: async () => rescompManager.listResDefinitions(buildSystem.getProjectDir()),
+    asset_add: async ({ file, entry }) => rescompManager.addResEntry(buildSystem.getProjectDir(), file || 'resources.res', entry || {}),
+    asset_update: async ({ file, lineNumber, entry }) => rescompManager.updateResEntry(buildSystem.getProjectDir(), file || 'resources.res', lineNumber, entry || {}),
+    asset_delete: async ({ file, lineNumber }) => rescompManager.deleteResEntry(buildSystem.getProjectDir(), file || 'resources.res', lineNumber),
+    code_tree: async ({ path: relPath }) => {
+      const { codeRoot, absPath } = resolveUnderCodeRoot(relPath || '');
+      if (!fs.existsSync(absPath)) throw new Error(`path not found: ${relPath || ''}`);
+      if (!fs.statSync(absPath).isDirectory()) throw new Error('directory path is required');
+      return {
+        root: codeRoot,
+        path: path.relative(codeRoot, absPath).replace(/\\/g, '/'),
+        entries: readCodeTree(absPath, codeRoot),
+      };
+    },
+    code_read: async ({ path: relPath }) => {
+      const { absPath } = resolveUnderCodeRoot(relPath || '');
+      if (!fs.existsSync(absPath)) throw new Error(`file not found: ${relPath || ''}`);
+      if (!fs.statSync(absPath).isFile()) throw new Error('file path is required');
+      return { path: relPath || '', content: fs.readFileSync(absPath, 'utf-8') };
+    },
+    code_write: async ({ path: relPath, content }) => {
+      const { absPath } = resolveUnderCodeRoot(relPath || '');
+      fs.mkdirSync(path.dirname(absPath), { recursive: true });
+      fs.writeFileSync(absPath, String(content ?? ''), 'utf-8');
+      return { path: relPath || '' };
+    },
+    plugin_list: async () => ({ plugins: pluginManager.listPlugins(), roles: buildSystem.getPluginRoles() }),
+    plugin_set_role: async ({ roleId, id }) => {
+      const syncResult = pluginManager.setExclusiveRoleSelection(roleId, id || null);
+      resultOrThrow(syncResult);
+      buildSystem.setPluginRole(roleId, id || null);
+      return syncResult;
+    },
+    plugin_run_generator: async ({ id }) => runPluginGeneratorAndWrite(id),
+    build_run: async () => runBuildFull(),
+    testplay_open: async () => openTestPlayWithPlugin(buildSystem.getLastRomPath()),
+    export_rom: async () => handleExportRom(),
+    export_html: async () => handleExportHtml(),
+  });
+  return editorControlService;
+}
+
+function getEditorControlServer() {
+  if (editorControlServer) return editorControlServer;
+  editorControlServer = createEditorControlServer(getEditorControlService(), {
+    onLog(entry) {
+      sendToRenderer('ai-control-log', entry);
+    },
+  });
+  return editorControlServer;
+}
+
 function createMenu() {
   const template = [
     {
@@ -1209,6 +1361,35 @@ ipcMain.handle('api:isRunning', async () => {
   return { running: !!apiServerProcess, port: apiServerPort };
 });
 
+ipcMain.handle('ai-control:start', async (_event, options = {}) => {
+  try {
+    return { ok: true, ...(await getEditorControlServer().start(options || {})) };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('ai-control:stop', async () => {
+  try {
+    if (!editorControlServer) return { ok: true, stopped: false, running: false };
+    return { ok: true, ...(await editorControlServer.stop()) };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('ai-control:status', async () => {
+  try {
+    return { ok: true, ...(editorControlServer ? editorControlServer.status() : { running: false }) };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('ai-control:listTools', async () => {
+  return { ok: true, tools: getEditorControlService().listTools() };
+});
+
 ipcMain.handle('window:openDebug', async (_event, options) => {
   return openDebugWindow(options || {});
 });
@@ -1276,23 +1457,7 @@ ipcMain.handle('plugins:invokeHook', async (_event, { id, hook, payload }) => {
 });
 
 ipcMain.handle('plugins:runGenerator', async (_event, { id }) => {
-  const projectDir = buildSystem.getProjectDir();
-  const allAssets = collectProjectAssets(projectDir);
-  const genResult = await pluginManager.runGenerator(id, allAssets, {
-    projectDir,
-    logger: createPluginLogger(id),
-  });
-  if (!genResult.ok) return genResult;
-
-  // src/main.c に書き込む
-  const srcPath = path.join(projectDir, 'src', 'main.c');
-  try {
-    fs.mkdirSync(path.dirname(srcPath), { recursive: true });
-    fs.writeFileSync(srcPath, genResult.sourceCode, 'utf-8');
-  } catch (err) {
-    return { ok: false, error: `main.c の書き込みに失敗: ${err.message}` };
-  }
-  return { ok: true, srcPath };
+  return runPluginGeneratorAndWrite(id);
 });
 
 ipcMain.handle('testplay:getSettings', async () => {
@@ -1418,45 +1583,7 @@ ipcMain.handle('setup:setMarsdevPath', async (_event, p) => {
 
 // ---- Test play window ----
 ipcMain.handle('window:openTestPlay', async (_event, romPath) => {
-  const emulatorPluginId = resolvePluginForRole('testplay');
-  if (!emulatorPluginId) {
-    return { opened: false, error: '有効な Emulator プラグインが未設定です' };
-  }
-  if (!pluginManager.isPluginEnabled(emulatorPluginId)) {
-    return { opened: false, error: `Emulator プラグイン "${emulatorPluginId}" は無効です` };
-  }
-  const emulatorMeta = pluginManager.listPlugins().find((p) => p.id === emulatorPluginId);
-  if (!pluginSupportsRole(emulatorMeta, 'testplay')) {
-    return { opened: false, error: `Emulator プラグイン "${emulatorPluginId}" は testplay role ではありません` };
-  }
-
-  if (emulatorPluginId) {
-    const hookResult = await invokePluginHookSafe(
-      emulatorPluginId,
-      'onTestPlay',
-      {
-        romPath: romPath || null,
-        projectDir: buildSystem.getProjectDir(),
-      },
-      {
-        projectDir: buildSystem.getProjectDir(),
-        logger: createPluginLogger(emulatorPluginId),
-        testPlay: createTestPlayHostApi(emulatorPluginId),
-      }
-    );
-
-    if (hookResult.ok && hookResult.result && hookResult.result.handled) {
-      return { opened: true, reused: false, handledByPlugin: emulatorPluginId };
-    }
-    if (!hookResult.ok) {
-      return { opened: false, error: hookResult.error || 'Emulator フック実行に失敗しました' };
-    }
-  }
-
-  return openWasmTestPlayWindow({
-    romPath: romPath || null,
-    pluginId: emulatorPluginId,
-  });
+  return openTestPlayWithPlugin(romPath);
 });
 
 // ---- Build IPC ----
@@ -2247,6 +2374,9 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   stopApiServer();
+  if (editorControlServer) {
+    void editorControlServer.stop();
+  }
   if (debugWindow && !debugWindow.isDestroyed()) {
     debugWindow.close();
     debugWindow = null;
@@ -2267,4 +2397,6 @@ module.exports.__test = {
   normalizeLogEntry,
   normalizeLogSnapshot,
   syncProjectPluginRoleState,
+  getEditorControlService,
+  resolveUnderCodeRoot,
 };

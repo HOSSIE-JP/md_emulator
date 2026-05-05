@@ -116,3 +116,15 @@ test('project plugin roles restore exclusive plugin enabled state in main proces
   assert.notEqual(pluginState['block-stage-editor']?.enabled, false);
   assert.equal(pluginState.slideshow.enabled, false);
 });
+
+test('main code root resolver rejects project path traversal', () => {
+  const userData = makeTempUserData();
+  const { main, buildSystem } = loadMainWithBuildSystem(userData);
+  const projectDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'md-editor-code-root-')), 'demo');
+  buildSystem.createProject(projectDir, { title: 'Code Root' }, 'int main(void) { return 0; }\n');
+
+  assert.throws(
+    () => main.resolveUnderCodeRoot('../outside.c'),
+    /project 配下のみアクセス可能|project path escapes project/,
+  );
+});
