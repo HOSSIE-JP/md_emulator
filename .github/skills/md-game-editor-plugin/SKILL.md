@@ -320,6 +320,7 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `code-editor` | `editor` | src/ ファイルツリー + コードエディタ |
 | `asset-manager` | `editor`, `asset` | resources.res アセット管理 |
 | `sprite-editor` | `editor`, `asset` | SPRITE 定義編集 + スプライトシート/フレームプレビュー |
+| `tilemap-editor` | `editor`, `asset` | Tiled 互換 TMX/TSX サブセット編集 + SGDK TILESET/MAP/TILEMAP 登録 |
 | `image-resize-converter` | `converter` | 8px 境界リサイズ |
 | `image-quantize-converter` | `converter` | 16 色減色変換 |
 | `audio-converter` | `converter` | WAV/MP3/OGG 変換と音声変換 UI |

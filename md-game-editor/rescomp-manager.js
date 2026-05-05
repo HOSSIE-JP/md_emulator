@@ -99,11 +99,13 @@ function normalizeCommentText(value) {
 function parseEntryByType(type, tokens) {
   const name = tokens[1] || '';
   const args = tokens.slice(2);
+  const sourcePath = args[0] || '';
+  const isTmxInput = String(sourcePath).toLowerCase().endsWith('.tmx');
 
   const out = {
     type,
     name,
-    sourcePath: args[0] || '',
+    sourcePath,
     args,
     extras: [],
   };
@@ -164,17 +166,31 @@ function parseEntryByType(type, tokens) {
     case 'MAP':
       out.tileset = args[1] || '';
       out.compression = args[2] || 'NONE';
-      out.mapBase = args[3] || '0';
-      out.ordering = args[4] || 'ROW';
-      out.extras = args.slice(5);
+      if (isTmxInput) {
+        out.mapCompression = args[3] || 'NONE';
+        out.mapBase = args[4] || '0';
+        out.ordering = args[5] || 'ROW';
+        out.extras = args.slice(6);
+      } else {
+        out.mapBase = args[3] || '0';
+        out.ordering = args[4] || 'ROW';
+        out.extras = args.slice(5);
+      }
       break;
     case 'TILEMAP':
       out.tileset = args[1] || '';
       out.compression = args[2] || 'NONE';
-      out.mapOpt = args[3] || 'ALL';
-      out.mapBase = args[4] || '0';
-      out.ordering = args[5] || 'ROW';
-      out.extras = args.slice(6);
+      if (isTmxInput) {
+        out.mapCompression = args[3] || 'NONE';
+        out.mapBase = args[4] || '0';
+        out.ordering = args[5] || 'ROW';
+        out.extras = args.slice(6);
+      } else {
+        out.mapOpt = args[3] || 'ALL';
+        out.mapBase = args[4] || '0';
+        out.ordering = args[5] || 'ROW';
+        out.extras = args.slice(6);
+      }
       break;
     case 'TILESET':
       out.compression = args[1] || 'NONE';
@@ -250,11 +266,19 @@ function entryToResLine(entry) {
       if (entry.far) parts.push(String(entry.far));
       break;
     case 'MAP':
-      parts.push(source, entry.tileset || '', entry.compression || 'NONE', entry.mapBase || '0');
+      if (String(entry.sourcePath || '').toLowerCase().endsWith('.tmx')) {
+        parts.push(source, entry.tileset || '', entry.compression || 'NONE', entry.mapCompression || 'NONE', entry.mapBase || '0');
+      } else {
+        parts.push(source, entry.tileset || '', entry.compression || 'NONE', entry.mapBase || '0');
+      }
       if (entry.ordering) parts.push(entry.ordering);
       break;
     case 'TILEMAP':
-      parts.push(source, entry.tileset || '', entry.compression || 'NONE', entry.mapOpt || 'ALL', entry.mapBase || '0');
+      if (String(entry.sourcePath || '').toLowerCase().endsWith('.tmx')) {
+        parts.push(source, entry.tileset || '', entry.compression || 'NONE', entry.mapCompression || 'NONE', entry.mapBase || '0');
+      } else {
+        parts.push(source, entry.tileset || '', entry.compression || 'NONE', entry.mapOpt || 'ALL', entry.mapBase || '0');
+      }
       if (entry.ordering) parts.push(entry.ordering);
       break;
     case 'TILESET':

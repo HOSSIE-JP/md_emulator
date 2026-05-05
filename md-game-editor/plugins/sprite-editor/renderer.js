@@ -332,6 +332,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const entry = selected?.entry;
     ui.propsDisabled.hidden = Boolean(entry);
     ui.form.hidden = !entry;
+    ui.actions.hidden = !entry;
     if (!entry) return;
 
     ui.name.value = entry.name || '';
@@ -979,7 +980,19 @@ function buildShell() {
         </section>
       </main>
       <aside class="sprite-editor-pane sprite-editor-props">
-        <div class="sprite-editor-toolbar"><h2>Properties</h2></div>
+        <div class="sprite-editor-toolbar">
+          <h2>Properties</h2>
+          <div class="sprite-editor-actions" data-role="actions" hidden>
+            <button class="sprite-editor-primary sprite-editor-action-button" data-role="save" type="button">
+              <svg class="icon"><use href="#icon-save"></use></svg>
+              <span>保存</span>
+            </button>
+            <button class="sprite-editor-danger sprite-editor-action-button" data-role="delete" type="button">
+              <svg class="icon"><use href="#icon-trash"></use></svg>
+              <span>削除</span>
+            </button>
+          </div>
+        </div>
         <div class="sprite-editor-empty" data-role="props-disabled">SPRITE を選択してください</div>
         <form class="sprite-editor-form-grid" data-role="form" hidden>
           <label class="sprite-editor-field">name <input class="sprite-editor-input" data-role="name" /></label>
@@ -995,10 +1008,6 @@ function buildShell() {
           </div>
           <label class="sprite-editor-field">opt_duplicate <select class="sprite-editor-select" data-role="opt-duplicate"><option>FALSE</option><option>TRUE</option></select></label>
           <label class="sprite-editor-field">comment <textarea class="sprite-editor-textarea" data-role="comment"></textarea></label>
-          <div class="sprite-editor-actions">
-            <button class="sprite-editor-danger" data-role="delete" type="button">削除</button>
-            <button class="sprite-editor-primary" data-role="save" type="button">保存</button>
-          </div>
         </form>
         <p class="sprite-editor-status" data-role="status"></p>
       </aside>
@@ -1036,6 +1045,7 @@ function bindUi(root) {
     sheetCanvas: pick('sheet-canvas'),
     propsDisabled: pick('props-disabled'),
     form: pick('form'),
+    actions: pick('actions'),
     name: pick('name'),
     sourcePath: pick('source-path'),
     compression: pick('compression'),

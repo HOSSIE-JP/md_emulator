@@ -743,6 +743,21 @@ RESCOMP の `SPRITE` 定義を `.res` ファイル単位でツリー表示し、
 
 ---
 
+### `tilemap-editor` — TileMap エディタ
+
+| 項目 | 値 |
+|---|---|
+| タイプ | `editor`, `asset` |
+| バージョン | 0.1.0 |
+| 依存 | `asset-manager`, `image-resize-converter`, `image-quantize-converter` |
+| renderer capability | `page`, `tilemap-editor` |
+
+Tiled 互換の `.tmx` / `.tsx` サブセットを編集し、SGDK ResComp の `TILESET` + `MAP` / `TILEMAP` 定義として `resources.res` へ登録します。v1 は orthogonal / fixed-size / CSV tile layer / single image tileset を対象にし、priority は `<layer> priority` 形式の補助 layer で表現します。
+
+TMX 入力の `MAP` / `TILEMAP` 定義では、ResComp 構文に合わせて Asset Manager の `tileset_id` 欄を `layer_id` として扱います。画像入力の `MAP` / `TILEMAP` では従来どおり `tileset_id` です。
+
+---
+
 ### `image-resize-converter` — 画像リサイズコンバーター
 
 | 項目 | 値 |

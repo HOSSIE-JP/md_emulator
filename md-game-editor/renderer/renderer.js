@@ -2777,9 +2777,15 @@ function createDefaultEntry(type, sourcePath, fileName) {
     return { ...base, driver: 'DEFAULT', outRate: '', far: 'TRUE' };
   }
   if (type === 'MAP') {
+    if (String(sourcePath || '').toLowerCase().endsWith('.tmx')) {
+      return { ...base, tileset: 'Ground', compression: 'NONE', mapCompression: 'NONE', mapBase: '0', ordering: 'ROW' };
+    }
     return { ...base, tileset: 'tileset_main', compression: 'NONE', mapBase: '0', ordering: 'ROW' };
   }
   if (type === 'TILEMAP') {
+    if (String(sourcePath || '').toLowerCase().endsWith('.tmx')) {
+      return { ...base, tileset: 'Ground', compression: 'NONE', mapCompression: 'NONE', mapBase: '0', ordering: 'ROW' };
+    }
     return { ...base, tileset: 'tileset_main', compression: 'NONE', mapOpt: 'ALL', mapBase: '0', ordering: 'ROW' };
   }
   if (type === 'TILESET') {
@@ -3618,6 +3624,36 @@ function createFieldInput(field, value) {
   return input;
 }
 
+function getAssetFieldLabel(entry, field) {
+  if ((entry?.type === 'MAP' || entry?.type === 'TILEMAP')
+    && field.key === 'tileset'
+    && String(entry?.sourcePath || '').toLowerCase().endsWith('.tmx')) {
+    return 'layer_id';
+  }
+  return field.label;
+}
+
+function getAssetFieldsForEntry(entry) {
+  const type = String(entry?.type || '').toUpperCase();
+  const isTmxInput = (type === 'MAP' || type === 'TILEMAP')
+    && String(entry?.sourcePath || '').toLowerCase().endsWith('.tmx');
+  if (isTmxInput) {
+    return [
+      { key: 'name', label: 'シンボル名', type: 'text' },
+      { key: 'sourcePath', label: '入力TMX', type: 'text' },
+      { key: 'tileset', label: 'layer_id', type: 'text' },
+      { key: 'compression', label: 'tileset圧縮', type: 'select', options: COMPRESSION_OPTIONS },
+      { key: 'mapCompression', label: 'map圧縮', type: 'select', options: COMPRESSION_OPTIONS },
+      { key: 'mapBase', label: 'map_base', type: 'text' },
+      { key: 'ordering', label: 'ordering', type: 'select', options: ORDERING_OPTIONS },
+    ];
+  }
+  return FORM_FIELDS_BY_TYPE[type] || [
+    { key: 'name', label: 'シンボル名', type: 'text' },
+    { key: 'sourcePath', label: '入力ファイル', type: 'text' },
+  ];
+}
+
 function isWavOutRateSupportedDriver(driver) {
   const normalized = String(driver || '').toUpperCase();
   return Object.prototype.hasOwnProperty.call(WAV_OUT_RATE_OPTIONS_BY_DRIVER, normalized);
@@ -3707,10 +3743,7 @@ function renderAssetEditor(entry) {
   setAccordionOpen('params', state.preview.paramsOpen);
   setAccordionOpen('preview', state.preview.previewOpen);
 
-  const fields = FORM_FIELDS_BY_TYPE[entry.type] || [
-    { key: 'name', label: 'シンボル名', type: 'text' },
-    { key: 'sourcePath', label: '入力ファイル', type: 'text' },
-  ];
+  const fields = getAssetFieldsForEntry(entry);
 
   el.assetEditForm.innerHTML = '';
   const grid = document.createElement('div');
@@ -3718,7 +3751,7 @@ function renderAssetEditor(entry) {
 
   fields.forEach((field) => {
     const label = document.createElement('label');
-    label.textContent = field.label;
+    label.textContent = getAssetFieldLabel(entry, field);
     const input = createFieldInput(field, entry[field.key]);
     grid.appendChild(label);
     grid.appendChild(input);

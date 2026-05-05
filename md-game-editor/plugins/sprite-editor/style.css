@@ -259,7 +259,17 @@
   gap: 8px;
   align-items: center;
   justify-content: flex-end;
-  padding-top: 4px;
+}
+
+.sprite-editor-actions[hidden] {
+  display: none !important;
+}
+
+.sprite-editor-action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 
 .sprite-editor-primary,

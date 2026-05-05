@@ -21,9 +21,16 @@ function validateSong(payload) {
   };
 }
 
+function analyzeVgm(payload, context = {}) {
+  const result = core.analyzeVgm(payload || {}, context);
+  context?.logger?.info?.(`[md-bgm-composer] analyze VGM: ${result.ok ? 'ok' : result.error}`);
+  return result;
+}
+
 module.exports = {
   importMidi,
   exportMusic,
   validateSong,
+  analyzeVgm,
   _core: core,
 };

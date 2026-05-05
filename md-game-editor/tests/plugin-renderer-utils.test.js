@@ -259,5 +259,6 @@ test('sprite-editor declares plugin-local page and uses v2.4 capabilities', () =
   assert.match(rendererSource, /addResEntry/);
   assert.match(rendererSource, /updateResEntry/);
   assert.match(rendererSource, /deleteResEntry/);
+  assert.match(rendererSource, /data-role="actions"[\s\S]*data-role="save"[\s\S]*#icon-save[\s\S]*保存[\s\S]*data-role="delete"[\s\S]*#icon-trash[\s\S]*削除/);
   assert.doesNotMatch(rendererSource, /window\.prompt|window\.alert|window\.confirm/);
 });

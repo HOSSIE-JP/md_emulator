@@ -18,6 +18,8 @@ extern const u8 bgm_001[362496];
 extern const u8 bgm_002[313088];
 extern const u8 bgm_003[392960];
 extern const u8 bgm_004[320000];
+extern const u8 bgm_27[11264];
+extern const u8 bgm_19[40960];
 extern const SpriteDefinition spr_ball;
 extern const SpriteDefinition spr_paddle;
 extern const SpriteDefinition spr_powerup_multi_ball;

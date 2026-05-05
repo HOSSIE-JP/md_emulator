@@ -512,6 +512,29 @@ function pushWaitFrame(commands) {
   commands.push(0x62);
 }
 
+function rowDurationMs(song) {
+  const tempo = Math.max(30, Number(song?.tempo) || 150);
+  const speed = Math.max(1, Math.min(31, Number(song?.speed) || DEFAULT_TICKS_PER_ROW));
+  return (60000 / tempo / 4) * (speed / DEFAULT_TICKS_PER_ROW);
+}
+
+function rowWaitSamples(song) {
+  return Math.max(1, Math.round(SAMPLE_RATE_NTSC * rowDurationMs(song) / 1000));
+}
+
+function pushWaitSamples(commands, samples) {
+  let remaining = Math.max(1, Math.round(Number(samples) || 1));
+  while (remaining > 0) {
+    const chunk = Math.min(0xFFFF, remaining);
+    if (chunk === 735) {
+      pushWaitFrame(commands);
+    } else {
+      commands.push(0x61, chunk & 0xFF, (chunk >> 8) & 0xFF);
+    }
+    remaining -= chunk;
+  }
+}
+
 function pushFmNote(commands, channelId, cell) {
   const mapped = ymPortForChannel(channelId);
   const midiNote = cell.midiNote ?? noteNameToMidi(cell.note);
@@ -551,6 +574,7 @@ function pushPsgNote(commands, channelId, cell) {
 
 function buildVgmData(song) {
   const commands = [];
+  const waitSamples = rowWaitSamples(song);
   pushYmWrite(commands, 0, 0x22, 0x00);
   pushYmWrite(commands, 0, 0x27, 0x00);
   pushYmWrite(commands, 0, 0x2B, 0x00);
@@ -565,7 +589,7 @@ function buildVgmData(song) {
         if (channel.type === 'fm') pushFmNote(commands, channel.id, cell);
         else pushPsgNote(commands, channel.id, cell);
       }
-      pushWaitFrame(commands);
+      pushWaitSamples(commands, waitSamples);
     }
   }
   commands.push(0x66);
@@ -576,13 +600,15 @@ function writeVgm(song) {
   const data = buildVgmData(song);
   const headerSize = 0x100;
   const out = Buffer.alloc(headerSize + data.length, 0);
+  const totalRows = Math.max(1, (song.order || []).length * ROWS_PER_PATTERN);
+  const totalSamples = totalRows * rowWaitSamples(song);
   out.write('Vgm ', 0, 'ascii');
   writeU32LE(out, 0x04, out.length - 4);
   writeU32LE(out, 0x08, 0x00000170);
   writeU32LE(out, 0x0C, 3579545);
   writeU32LE(out, 0x2C, 7670454);
   writeU32LE(out, 0x34, headerSize - 0x34);
-  writeU32LE(out, 0x18, Math.max(1, (song.order || []).length * ROWS_PER_PATTERN) * 735);
+  writeU32LE(out, 0x18, totalSamples);
   data.copy(out, headerSize);
   return out;
 }
@@ -622,12 +648,24 @@ function exportMusic(payload, context = {}) {
   const symbol = normalizeSymbolName(payload?.symbol || song.symbol || song.title);
   const outputs = payload?.outputs || {};
   const diagnostics = validateSong(song);
-  const musicDir = ensureProjectPath(projectDir, 'res/music');
+  const targetSourcePath = String(payload?.sourcePath || '').replace(/\\/g, '/');
+  const sourceDir = targetSourcePath && targetSourcePath.includes('/')
+    ? targetSourcePath.slice(0, targetSourcePath.lastIndexOf('/'))
+    : 'music';
+  const outputSubdir = String(payload?.targetSubdir || sourceDir || 'music')
+    .replace(/\\/g, '/')
+    .replace(/[^A-Za-z0-9_./-]+/g, '_')
+    .replace(/^\.+\/?/, '') || 'music';
+  const sourceBase = targetSourcePath
+    ? path.basename(targetSourcePath, path.extname(targetSourcePath))
+    : symbol;
+  const outputBase = normalizeSymbolName(payload?.targetFileName || sourceBase || symbol);
+  const musicDir = ensureProjectPath(projectDir, `res/${outputSubdir}`);
   fs.mkdirSync(musicDir, { recursive: true });
 
-  const jsonRel = `res/music/${symbol}.mdbgm.json`;
-  const vgmRel = `res/music/${symbol}.vgm`;
-  const xgmRel = `res/music/${symbol}.xgm`;
+  const jsonRel = `res/${outputSubdir}/${outputBase}.mdbgm.json`;
+  const vgmRel = `res/${outputSubdir}/${outputBase}.vgm`;
+  const xgmRel = `res/${outputSubdir}/${outputBase}.xgm`;
   const jsonPath = ensureProjectPath(projectDir, jsonRel);
   const vgmPath = ensureProjectPath(projectDir, vgmRel);
   const xgmPath = ensureProjectPath(projectDir, xgmRel);
@@ -661,13 +699,196 @@ function exportMusic(payload, context = {}) {
     result.asset = {
       type: 'XGM2',
       name: symbol,
-      sourcePath: `music/${symbol}.vgm`,
-      files: [`music/${symbol}.vgm`],
+      sourcePath: `${outputSubdir}/${outputBase}.vgm`,
+      files: [`${outputSubdir}/${outputBase}.vgm`],
       options: '',
     };
   }
 
   return result;
+}
+
+function readU16LE(buffer, offset) {
+  return (buffer[offset] || 0) | ((buffer[offset + 1] || 0) << 8);
+}
+
+function readU32LE(buffer, offset) {
+  return (buffer[offset] || 0)
+    | ((buffer[offset + 1] || 0) << 8)
+    | ((buffer[offset + 2] || 0) << 16)
+    | ((buffer[offset + 3] || 0) << 24);
+}
+
+function fnumBlockToMidi(fnum, block) {
+  const base = [617, 654, 693, 734, 778, 824, 873, 925, 980, 1038, 1100, 1165];
+  let best = 0;
+  let bestDistance = Infinity;
+  base.forEach((value, index) => {
+    const distance = Math.abs(value - fnum);
+    if (distance < bestDistance) {
+      best = index;
+      bestDistance = distance;
+    }
+  });
+  return Math.max(24, Math.min(96, (Math.max(0, Math.min(7, block)) + 1) * 12 + best));
+}
+
+function psgPeriodToMidi(period) {
+  const frequency = 3579545 / (32 * Math.max(1, Number(period) || 1));
+  return Math.max(24, Math.min(96, Math.round(69 + (12 * Math.log2(frequency / 440)))));
+}
+
+function setSongCellFromVgm(song, absoluteRow, channelId, midiNote, diagnostics, instrument) {
+  const patternIndex = Math.floor(absoluteRow / ROWS_PER_PATTERN);
+  while (song.patterns.length <= patternIndex) {
+    const id = song.patterns.length;
+    song.patterns.push({ id, name: `Pattern ${String(id).padStart(2, '0')}`, rows: createEmptyRows() });
+    song.order.push(id);
+  }
+  const row = song.patterns[patternIndex].rows[absoluteRow % ROWS_PER_PATTERN];
+  if (row.cells[channelId]) {
+    diagnostics.push(makeDiagnostic('warn', 'vgm-polyphony-trimmed', `${channelId} row ${absoluteRow} の重複音を 1 音に丸めました。`, { row: absoluteRow, channelId }));
+    return;
+  }
+  row.cells[channelId] = {
+    note: channelId === 'NOISE' ? 'N' : midiNoteToName(midiNote),
+    midiNote,
+    instrument,
+    volume: 12,
+    effect: '',
+  };
+}
+
+function analyzeVgm(payload, context = {}) {
+  const sourcePath = String(payload?.sourcePath || '');
+  if (!sourcePath || !fs.existsSync(sourcePath)) {
+    return { ok: false, error: 'VGM/XGM ファイルが見つかりません。' };
+  }
+  if (/\.xgm$/i.test(sourcePath) && !payload?.forceVgm) {
+    return analyzeXgm(payload, context);
+  }
+  const symbol = normalizeSymbolName(payload?.symbol || path.basename(sourcePath, path.extname(sourcePath)));
+  const song = createDefaultSong({ title: symbol, symbol });
+  const diagnostics = [makeDiagnostic('info', 'vgm-approximation', 'VGM から近似復元しました。音色・長さ・effect は完全再現ではありません。')];
+  const buffer = fs.readFileSync(sourcePath);
+  if (buffer.length < 0x40 || buffer.toString('ascii', 0, 4) !== 'Vgm ') {
+    return { ok: false, error: 'VGM header が見つかりません。' };
+  }
+  let offset = readU32LE(buffer, 0x34) ? 0x34 + readU32LE(buffer, 0x34) : 0x40;
+  if (offset < 0x40 || offset >= buffer.length) offset = 0x40;
+  let samples = 0;
+  const fm = Array.from({ length: 6 }, () => ({ fnum: 0, block: 4 }));
+  const psg = Array.from({ length: 4 }, () => ({ tone: 0, volume: 15 }));
+  let psgLatch = { type: 'tone', channel: 0 };
+  const sampleToRow = () => Math.max(0, Math.round(samples / 735));
+
+  while (offset < buffer.length) {
+    const command = buffer[offset++];
+    if (command === 0x66) break;
+    if (command === 0x52 || command === 0x53) {
+      const port = command === 0x53 ? 1 : 0;
+      const address = buffer[offset++];
+      const value = buffer[offset++];
+      const localChannel = address & 0x03;
+      const index = port * 3 + localChannel;
+      if (index >= 0 && index < 6 && address >= 0xA0 && address <= 0xA2) {
+        fm[index].fnum = (fm[index].fnum & 0x700) | value;
+      } else if (index >= 0 && index < 6 && address >= 0xA4 && address <= 0xA6) {
+        fm[index].fnum = (fm[index].fnum & 0xFF) | ((value & 0x07) << 8);
+        fm[index].block = (value >> 3) & 0x07;
+      } else if (address === 0x28 && (value & 0xF0)) {
+        const keyChannel = (value & 0x03) + ((value & 0x04) ? 3 : 0);
+        const channelId = `FM${keyChannel + 1}`;
+        const midiNote = fnumBlockToMidi(fm[keyChannel]?.fnum || 0, fm[keyChannel]?.block || 4);
+        setSongCellFromVgm(song, sampleToRow(), channelId, midiNote, diagnostics, 'fm_bell');
+      }
+      continue;
+    }
+    if (command === 0x50) {
+      const value = buffer[offset++];
+      if (value & 0x80) {
+        const channel = (value >> 5) & 0x03;
+        const isVolume = Boolean(value & 0x10);
+        psgLatch = { type: isVolume ? 'volume' : 'tone', channel };
+        if (isVolume) {
+          psg[channel].volume = value & 0x0F;
+        } else {
+          psg[channel].tone = (psg[channel].tone & 0x3F0) | (value & 0x0F);
+          if (channel === 3) {
+            setSongCellFromVgm(song, sampleToRow(), 'NOISE', 60, diagnostics, 'noise_kit');
+          } else if (psg[channel].volume < 15) {
+            setSongCellFromVgm(song, sampleToRow(), `PSG${channel + 1}`, psgPeriodToMidi(psg[channel].tone), diagnostics, 'psg_square');
+          }
+        }
+      } else if (psgLatch.type === 'tone') {
+        const channel = psgLatch.channel;
+        psg[channel].tone = (psg[channel].tone & 0x0F) | ((value & 0x3F) << 4);
+        if (channel < 3 && psg[channel].volume < 15) {
+          setSongCellFromVgm(song, sampleToRow(), `PSG${channel + 1}`, psgPeriodToMidi(psg[channel].tone), diagnostics, 'psg_square');
+        }
+      }
+      continue;
+    }
+    if (command === 0x61) {
+      samples += readU16LE(buffer, offset);
+      offset += 2;
+      continue;
+    }
+    if (command === 0x62) {
+      samples += 735;
+      continue;
+    }
+    if (command === 0x63) {
+      samples += 882;
+      continue;
+    }
+    if (command >= 0x70 && command <= 0x7F) {
+      samples += (command & 0x0F) + 1;
+      continue;
+    }
+    if (command === 0x67 && buffer[offset] === 0x66) {
+      const size = readU32LE(buffer, offset + 2);
+      offset += 6 + size;
+      continue;
+    }
+    diagnostics.push(makeDiagnostic('warn', 'vgm-command-unsupported', `未対応 VGM command 0x${command.toString(16)} で解析を打ち切りました。`));
+    break;
+  }
+
+  return { ok: true, song, diagnostics };
+}
+
+function analyzeXgm(payload, context = {}) {
+  const sourcePath = String(payload?.sourcePath || '');
+  if (!sourcePath || !fs.existsSync(sourcePath)) {
+    return { ok: false, error: 'XGM ファイルが見つかりません。' };
+  }
+  const symbol = normalizeSymbolName(payload?.symbol || path.basename(sourcePath, path.extname(sourcePath)));
+  const buffer = fs.readFileSync(sourcePath);
+  if (buffer.length >= 4 && buffer.toString('ascii', 0, 4) === 'Vgm ') {
+    return analyzeVgm({ ...payload, sourcePath, forceVgm: true }, context);
+  }
+  const song = createDefaultSong({ title: symbol, symbol });
+  const diagnostics = [
+    makeDiagnostic('warn', 'xgm-approximation', 'XGM から近似復元しました。音色・effect・細かなタイミングは完全再現ではありません。'),
+  ];
+
+  // XGM is a packed command stream, not an editable project format. For now,
+  // recover a sparse timing scaffold from byte transitions so the editor can
+  // create a sidecar and let the user rebuild the song intentionally.
+  let row = 0;
+  for (let offset = 0; offset < buffer.length && row < ROWS_PER_PATTERN; offset += 1) {
+    const value = buffer[offset];
+    if (value === 0 || value === 0xff) continue;
+    if ((value & 0xf0) === 0x90 || (value & 0xf0) === 0x80) {
+      setSongCellFromVgm(song, row, 'FM1', 60 + (value % 12), diagnostics, 'fm_bell');
+      row += 4;
+    }
+  }
+  if (row === 0) {
+    diagnostics.push(makeDiagnostic('warn', 'xgm-empty-scaffold', '音程を推定できなかったため、空の編集データとして復元しました。'));
+  }
+  return { ok: true, song, diagnostics };
 }
 
 function importMidi(payload) {
@@ -700,4 +921,5 @@ module.exports = {
   findXgmTool,
   exportMusic,
   importMidi,
+  analyzeVgm,
 };

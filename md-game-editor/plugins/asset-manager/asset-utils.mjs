@@ -32,9 +32,9 @@ export function defaultSubDirForType(type) {
     case 'SPRITE': return 'sprite';
     case 'IMAGE':
     case 'BITMAP':
-    case 'TILESET':
+    case 'TILESET': return 'tilesets';
     case 'TILEMAP':
-    case 'MAP': return 'gfx';
+    case 'MAP': return 'maps';
     case 'XGM':
     case 'XGM2': return 'music';
     case 'WAV': return 'sfx';

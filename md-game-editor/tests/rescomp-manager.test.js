@@ -75,6 +75,23 @@ test('entryToResLine writes XGM2 WAV rate settings', () => {
   assert.equal(line, 'WAV bgm_stage bgm/stage.wav XGM2 6650 TRUE');
 });
 
+test('TMX MAP and TILEMAP entries round-trip layer_id through the tileset field', () => {
+  const parsed = rescomp.parseResContent([
+    'MAP stage_map maps/stage.tmx Ground FAST NONE 0 ROW',
+    'TILEMAP hud_map maps/stage.tmx HUD NONE ALL TILE_ATTR_FULL(PAL0,FALSE,FALSE,FALSE,0) COLUMN',
+    'TILESET stage_tiles tilesets/stage.tsx NONE ALL ROW FALSE',
+  ].join('\n'));
+
+  assert.equal(parsed.entries[0].type, 'MAP');
+  assert.equal(parsed.entries[0].sourcePath, 'maps/stage.tmx');
+  assert.equal(parsed.entries[0].tileset, 'Ground');
+  assert.equal(parsed.entries[1].type, 'TILEMAP');
+  assert.equal(parsed.entries[1].tileset, 'HUD');
+  assert.equal(parsed.entries[2].sourcePath, 'tilesets/stage.tsx');
+  assert.equal(rescomp.entryToResLine(parsed.entries[0]), 'MAP stage_map maps/stage.tmx Ground FAST NONE 0 ROW');
+  assert.equal(rescomp.entryToResLine(parsed.entries[1]), 'TILEMAP hud_map maps/stage.tmx HUD NONE ALL TILE_ATTR_FULL(PAL0,FALSE,FALSE,FALSE,0) COLUMN');
+});
+
 test('SPRITE entries parse pixel size suffix and write SGDK tile counts', () => {
   const parsed = rescomp.parseResContent(
     'SPRITE hero sprite/hero.png 32p 16p FAST [[3,4][5,6]] BOX TILE MEDIUM TRUE\n',
