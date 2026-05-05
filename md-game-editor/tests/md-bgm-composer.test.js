@@ -148,6 +148,9 @@ test('md-bgm-composer shell aligns with sprite editor panes and uses collapsible
   assert.match(rendererSource, /state\.expandedFiles\.delete/);
   assert.match(rendererSource, /state\.expandedFiles\.add/);
   assert.match(styleSource, /\.md-bgm-composer-shell\s*\{[^}]*margin:\s*-20px -24px;/s);
+  assert.match(styleSource, /\.md-bgm-composer-shell\s*\{[^}]*overflow:\s*hidden;/s);
+  assert.match(styleSource, /\.md-bgm-layout\s*\{[^}]*overflow:\s*hidden;/s);
+  assert.match(styleSource, /\.md-bgm-main\s*\{[^}]*overflow:\s*hidden;/s);
   assert.match(styleSource, /\.md-bgm-sidebar\.right\s*\{[^}]*padding:\s*12px;/s);
   assert.match(styleSource, /\.md-bgm-res-title\s*\{[^}]*grid-template-columns:\s*16px minmax\(0,\s*1fr\) auto;/s);
 });
@@ -236,6 +239,7 @@ test('md-bgm-composer editor modes expose layer, keyboard, sticky scroll, and pa
   assert.match(rendererSource, /pattern-preset-truncated/);
 
   assert.match(styleSource, /\.md-bgm-piano-scroll\s*\{[^}]*overflow:\s*auto;/s);
+  assert.match(styleSource, /\.md-bgm-piano-scroll\s*\{[^}]*flex:\s*1 1 0;/s);
   assert.match(styleSource, /\.md-bgm-piano-channel-tabs\s*\{/);
   assert.match(styleSource, /\.md-bgm-piano-tools\s*\{/);
   assert.match(styleSource, /\.md-bgm-piano-tool\.active\s*\{/);
@@ -259,7 +263,11 @@ test('md-bgm-composer editor modes expose layer, keyboard, sticky scroll, and pa
   assert.match(styleSource, /\.md-bgm-piano-key\.is-hover-row\s*\{/);
   assert.match(styleSource, /\.md-bgm-piano-row\.header button\.is-hover-col::before\s*\{/);
   assert.match(styleSource, /\.md-bgm-piano-ghost\s*\{/);
+  assert.match(styleSource, /\.md-bgm-pattern-strip\s*\{[^}]*flex:\s*0 0 auto;/s);
+  assert.match(styleSource, /\.md-bgm-editor-pane\s*\{[^}]*display:\s*flex;[^}]*overflow:\s*hidden;/s);
   assert.match(styleSource, /\.md-bgm-tracker-wrap\s*\{[^}]*overflow:\s*auto;/s);
+  assert.match(styleSource, /\.md-bgm-tracker-wrap\s*\{[^}]*max-height:\s*100%;/s);
+  assert.match(styleSource, /\.md-bgm-tracker-wrap\[hidden\],\s*\.md-bgm-piano-wrap\[hidden\]\s*\{[^}]*display:\s*none !important;/s);
   assert.match(styleSource, /\.md-bgm-tracker thead th\s*\{[^}]*position:\s*sticky;/s);
   assert.match(styleSource, /\.md-bgm-tracker th:first-child\s*\{[^}]*position:\s*sticky;[^}]*left:\s*0;/s);
   assert.match(styleSource, /\.md-bgm-cell-note\s*\{[^}]*color:\s*#16c8d8;/s);

@@ -2859,10 +2859,28 @@ function getVgmPreviewSourcePath(entry) {
   return resRoot ? `${resRoot}/${firstFile.replace(/^\/+/, '')}` : firstFile;
 }
 
+function getMusicMetaSourcePath(entry) {
+  const vgmPath = getVgmPreviewSourcePath(entry);
+  if (vgmPath) return vgmPath;
+  if (!entry) return '';
+  if (['.vgm', '.xgm'].includes(pathExt(entry.sourcePath))) return entry.sourceAbsolutePath || entry.sourcePath || '';
+  const files = Array.isArray(entry.files) ? entry.files : [];
+  const musicFile = files.find((file) => ['.vgm', '.xgm'].includes(pathExt(file)));
+  if (!musicFile) return '';
+  const resRoot = String(state.rescomp.resRoot || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  return resRoot ? `${resRoot}/${String(musicFile).replace(/^\/+/, '')}` : String(musicFile);
+}
+
 function isVgmPreviewEntry(entry) {
   if (!entry || !getVgmPreviewSourcePath(entry)) return false;
   const player = getPluginCapability('vgm-preview-player');
   return typeof player?.canPreview === 'function' ? player.canPreview(entry) : false;
+}
+
+function isBgmMetaEntry(entry) {
+  if (!entry || !getMusicMetaSourcePath(entry)) return false;
+  const type = String(entry.type || '').toUpperCase();
+  return ['XGM', 'XGM2'].includes(type) || ['.vgm', '.xgm'].includes(pathExt(entry.sourcePath));
 }
 
 function pathExt(value) {
@@ -3031,6 +3049,49 @@ function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatHex(value) {
+  if (value == null || value === '') return '-';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  return `0x${Math.max(0, n >>> 0).toString(16).toUpperCase()}`;
+}
+
+function renderBgmMetaRows(entry, meta = {}, warnings = [], { preview = false } = {}) {
+  const format = String(meta.format || pathExt(getMusicMetaSourcePath(entry)).replace('.', '').toUpperCase() || 'BGM');
+  const rows = [
+    ['形式', preview ? `${format} / FM+PSG 近似プレビュー` : format],
+    ['ファイル', entry.sourcePath || entry.files?.[0] || '-'],
+    ['サイズ', formatFileSize(meta.fileSizeBytes)],
+    ['再生時間', formatDuration(Number(meta.durationSec || 0))],
+  ];
+  if (format === 'VGM') {
+    rows.push(
+      ['VGM version', formatHex(meta.version)],
+      ['Data offset', formatHex(meta.dataOffset)],
+      ['YM2612 clock', meta.ym2612Clock ? `${meta.ym2612Clock} Hz` : '-'],
+      ['SN76489 clock', meta.sn76489Clock ? `${meta.sn76489Clock} Hz` : '-'],
+      ['Writes', `YM2612 ${meta.ym2612Writes || 0} / PSG ${meta.psgWrites || 0}`],
+      ['Wait samples', String(meta.waitSamples || 0)],
+    );
+  } else if (format === 'XGM') {
+    rows.push(
+      ['XGM version', formatHex(meta.version)],
+      ['Timing', `${meta.timing || '-'}${meta.frameRate ? ` / ${meta.frameRate} fps` : ''}`],
+      ['Frames', String(meta.durationFrames || 0)],
+      ['Samples', `${meta.sampleCount || 0} / block ${formatFileSize(meta.sampleBlockSize)}`],
+      ['Music data', `${formatFileSize(meta.musicDataSize)} @ ${formatHex(meta.musicDataOffset)}`],
+      ['Writes', `YM2612 ${meta.ym2612Writes || 0} / PSG ${meta.psgWrites || 0} / PCM ${meta.pcmCommands || 0}`],
+      ['Flags', `GD3 ${meta.hasGd3 ? 'yes' : 'no'} / Multi ${meta.multiTrack ? 'yes' : 'no'}`],
+    );
+  }
+  if (meta.headerHex) rows.push(['Header', meta.headerHex]);
+  const allWarnings = [...(Array.isArray(warnings) ? warnings : []), ...(Array.isArray(meta.warnings) ? meta.warnings : [])];
+  if (allWarnings.length) rows.push(['Warning', allWarnings.slice(0, 3).join(' / ')]);
+  return rows.map(([label, value]) => (
+    `<div class="audio-meta-row"><span class="audio-meta-label">${escHtml(label)}</span><span>${escHtml(value)}</span></div>`
+  )).join('');
 }
 
 function parseSpritePreviewSizeToken(value, imageDimension = 0) {
@@ -3239,6 +3300,7 @@ async function syncInlinePreview(entry) {
   if (!entry) {
     if (el.inlineImagePreview) el.inlineImagePreview.hidden = true;
     if (el.inlineAudioPreview) el.inlineAudioPreview.hidden = true;
+    if (el.audioPlayer) el.audioPlayer.hidden = false;
     if (el.inlineNoPreview) el.inlineNoPreview.hidden = false;
     return;
   }
@@ -3247,6 +3309,7 @@ async function syncInlinePreview(entry) {
     if (el.inlineImagePreview) el.inlineImagePreview.hidden = true;
     if (el.inlineNoPreview) el.inlineNoPreview.hidden = true;
     if (el.inlineAudioPreview) el.inlineAudioPreview.hidden = false;
+    if (el.audioPlayer) el.audioPlayer.hidden = false;
     if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = '<span class="audio-meta-loading">VGM を読み込み中...</span>';
     syncAudioPlayer(false);
 
@@ -3269,15 +3332,45 @@ async function syncInlinePreview(entry) {
       }
       state.preview.vgmEntryId = entry.id;
       state.preview.vgmDurationSec = Number(loaded.meta?.durationSec || 0);
-      const warnings = (loaded.warnings || loaded.meta?.warnings || []).slice(0, 3);
       if (el.audioPreviewMeta) {
-        el.audioPreviewMeta.innerHTML = `
-          <div class="audio-meta-row"><span class="audio-meta-label">ファイル</span><span>${escHtml(entry.sourcePath || sourcePath)}</span></div>
-          <div class="audio-meta-row"><span class="audio-meta-label">再生時間</span><span>${formatDuration(loaded.meta?.durationSec || 0)}</span></div>
-          <div class="audio-meta-row"><span class="audio-meta-label">形式</span><span>VGM preview / FM+PSG 近似</span></div>
-          <div class="audio-meta-row"><span class="audio-meta-label">Writes</span><span>YM2612 ${Number(loaded.meta?.ym2612Writes || 0).toLocaleString()} / PSG ${Number(loaded.meta?.psgWrites || 0).toLocaleString()}</span></div>
-          ${warnings.length ? `<div class="audio-meta-row"><span class="audio-meta-label">Warning</span><span>${escHtml(warnings.join(' / '))}</span></div>` : ''}
-        `;
+        el.audioPreviewMeta.innerHTML = renderBgmMetaRows(entry, loaded.meta, loaded.warnings, { preview: true });
+      }
+    }).catch((err) => {
+      if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = `<div class="audio-meta-row"><span>${escHtml(String(err?.message || err))}</span></div>`;
+    });
+    return;
+  }
+
+  if (isBgmMetaEntry(entry)) {
+    if (el.inlineImagePreview) el.inlineImagePreview.hidden = true;
+    if (el.inlineNoPreview) el.inlineNoPreview.hidden = true;
+    if (el.inlineAudioPreview) el.inlineAudioPreview.hidden = false;
+    if (el.audioPlayer) el.audioPlayer.hidden = true;
+    if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = '<span class="audio-meta-loading">BGM メタ情報を読み込み中...</span>';
+    syncAudioPlayer(false);
+
+    const sourcePath = getMusicMetaSourcePath(entry);
+    const player = getPluginCapability('vgm-preview-player');
+    if (!sourcePath || !player?.parseXgm) {
+      if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = '<div class="audio-meta-row"><span>BGM metadata provider が利用できません</span></div>';
+      return;
+    }
+    window.electronAPI.readFileAsDataUrl(sourcePath).then((res) => {
+      if (state.rescomp.selectedEntryLine !== entry.lineNumber) return;
+      if (!res?.ok || !res.dataUrl) {
+        if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = `<div class="audio-meta-row"><span>${escHtml(entry.sourcePath || sourcePath)} を読み込めません</span></div>`;
+        return;
+      }
+      const ext = pathExt(sourcePath);
+      const parsed = ext === '.xgm'
+        ? player.parseXgm({ entry, dataUrl: res.dataUrl })
+        : player.parseVgm?.({ entry, dataUrl: res.dataUrl });
+      if (!parsed?.ok) {
+        if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = `<div class="audio-meta-row"><span>${escHtml(parsed?.error || 'BGM メタ情報を解析できません')}</span></div>`;
+        return;
+      }
+      if (el.audioPreviewMeta) {
+        el.audioPreviewMeta.innerHTML = renderBgmMetaRows(entry, parsed.meta, parsed.warnings);
       }
     }).catch((err) => {
       if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = `<div class="audio-meta-row"><span>${escHtml(String(err?.message || err))}</span></div>`;
@@ -3292,6 +3385,7 @@ async function syncInlinePreview(entry) {
 
   if (isImageEntry(entry)) {
     if (el.inlineAudioPreview) el.inlineAudioPreview.hidden = true;
+    if (el.audioPlayer) el.audioPlayer.hidden = false;
     if (el.inlineNoPreview) el.inlineNoPreview.hidden = true;
     if (el.inlineImagePreview) el.inlineImagePreview.hidden = false;
 
@@ -3360,6 +3454,7 @@ async function syncInlinePreview(entry) {
     if (el.inlineImagePreview) el.inlineImagePreview.hidden = true;
     if (el.inlineNoPreview) el.inlineNoPreview.hidden = true;
     if (el.inlineAudioPreview) el.inlineAudioPreview.hidden = false;
+    if (el.audioPlayer) el.audioPlayer.hidden = false;
     if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = '<span class="audio-meta-loading">読み込み中...</span>';
     syncAudioPlayer(false);
 

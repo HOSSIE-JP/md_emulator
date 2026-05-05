@@ -37,6 +37,10 @@ test('VGM preview parser reads YM2612, PSG, waits, data blocks, and end', async 
   assert.equal(parsed.version, 0x00000151);
   assert.equal(parsed.ym2612Clock, 7670454);
   assert.equal(parsed.sn76489Clock, 3579545);
+  assert.equal(parsed.meta.format, 'VGM');
+  assert.equal(parsed.meta.version, 0x00000151);
+  assert.equal(parsed.meta.fileSizeBytes, makeVgmFixture().length);
+  assert.equal(parsed.meta.dataOffset, 0x40);
   assert.equal(parsed.meta.ym2612Writes, 4);
   assert.equal(parsed.meta.psgWrites, 1);
   assert.equal(parsed.meta.waitSamples, 17);
@@ -54,4 +58,36 @@ test('VGM preview parser reports unsupported commands and canPreview only accept
   assert.equal(preview.canPreviewVgmEntry({ type: 'XGM2', sourcePath: 'music/theme.vgm' }), true);
   assert.equal(preview.canPreviewVgmEntry({ type: 'XGM2', files: ['music/theme.vgm'] }), true);
   assert.equal(preview.canPreviewVgmEntry({ type: 'XGM', sourcePath: 'music/theme.xgm' }), false);
+});
+
+test('XGM metadata parser reads header, frame duration, clocks proxy stats, and warnings', async () => {
+  const preview = await loadPreviewModule();
+  const header = Buffer.alloc(0x108);
+  header.write('XGM ', 0, 4, 'ascii');
+  header.writeUInt16LE(0, 0x100);
+  header[0x102] = 1;
+  header[0x103] = 0;
+  const music = Buffer.from([
+    0x10, 0x90,
+    0x20, 0x22, 0x34,
+    0x50, 0x01,
+    0x00,
+    0x00,
+    0x7f,
+  ]);
+  header.writeUInt32LE(music.length, 0x104);
+  const parsed = preview.parseXgmBytes(Buffer.concat([header, music]));
+
+  assert.equal(parsed.ok, true, parsed.error);
+  assert.equal(parsed.meta.format, 'XGM');
+  assert.equal(parsed.meta.version, 1);
+  assert.equal(parsed.meta.timing, 'NTSC');
+  assert.equal(parsed.meta.durationFrames, 2);
+  assert.equal(parsed.meta.durationSec, 2 / 60);
+  assert.equal(parsed.meta.musicDataOffset, 0x108);
+  assert.equal(parsed.meta.musicDataSize, music.length);
+  assert.equal(parsed.meta.ym2612Writes, 1);
+  assert.equal(parsed.meta.psgWrites, 1);
+  assert.equal(parsed.meta.pcmCommands, 1);
+  assert.match(parsed.meta.headerHex, /^58 47 4D 20/);
 });

@@ -155,8 +155,12 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       }
       const fillInput = event.target.closest('[data-row-default-time]');
       if (fillInput) {
-        fillInput.value = String(Math.max(0, Number.parseInt(fillInput.value, 10) || 0));
+        void applyRowDefaultTime(fillInput, { persist: true });
       }
+    });
+    ui.rowList.addEventListener('input', (event) => {
+      const fillInput = event.target.closest('[data-row-default-time]');
+      if (fillInput) applyRowDefaultTime(fillInput, { persist: false });
     });
     ui.rowList.addEventListener('click', (event) => {
       const rowButton = event.target.closest('[data-row-select]');
@@ -456,10 +460,36 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       ctx.lineTo(ctx.canvas.width, py);
       ctx.stroke();
     }
+    drawFrameTimeLabels(ctx, scale, counts);
     const frame = getCurrentFrame();
     ctx.strokeStyle = '#d2991e';
     ctx.lineWidth = 2;
     ctx.strokeRect(frame.x * scale + 1, frame.y * scale + 1, frame.width * scale - 2, frame.height * scale - 2);
+    ctx.restore();
+  }
+
+  function drawFrameTimeLabels(ctx, scale, counts = getRowFrameCounts()) {
+    const matrix = parseSpriteTime(getTimeValue(), state.grid.rows, state.grid.columns);
+    const fontSize = Math.max(10, Math.min(24, Math.floor(10 * Math.max(1, scale))));
+    const padX = Math.max(4, Math.floor(3 * Math.max(1, scale)));
+    const padY = Math.max(2, Math.floor(2 * Math.max(1, scale)));
+    ctx.save();
+    ctx.font = `700 ${fontSize}px sans-serif`;
+    ctx.textBaseline = 'top';
+    counts.forEach((count, row) => {
+      for (let frame = 0; frame < Math.min(count, state.grid.columns); frame += 1) {
+        const label = String(matrix[row]?.[frame] ?? '0');
+        const textWidth = Math.ceil(ctx.measureText(label).width);
+        const x = frame * state.grid.width * scale + Math.max(2, state.grid.width * scale - textWidth - padX * 2 - 2);
+        const y = row * state.grid.height * scale + 2;
+        const boxWidth = textWidth + padX * 2;
+        const boxHeight = fontSize + padY * 2;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.78)';
+        ctx.fillRect(x, y, boxWidth, boxHeight);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, x + padX, y + padY);
+      }
+    });
     ctx.restore();
   }
 
@@ -684,7 +714,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 
   function scheduleNextFrame() {
     if (!state.playing) return;
-    const time = Math.max(1, Number(ui.frameTime.value || 0) || 6);
+    const time = Number.parseInt(ui.frameTime.value || '0', 10) || 0;
+    if (time <= 0) {
+      stopPlayback();
+      return;
+    }
     state.playbackTimer = window.setTimeout(() => {
       const last = Math.max(0, getActiveFrameCount(state.frameRow) - 1);
       if (state.frameIndex >= last) {
@@ -781,6 +815,28 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     drawPreview();
     drawSheet();
     setStatus(`ROW ${rowIndex} の有効フレーム数を ${frameCount} にしました`);
+  }
+
+  async function applyRowDefaultTime(input, options = {}) {
+    const selected = getSelectedSprite();
+    if (!selected) return;
+    const rowIndex = numberInRange(input.dataset.rowDefaultTime, 0, Math.max(0, state.grid.rows - 1), 0);
+    const fillTime = String(Math.max(0, Number.parseInt(input.value, 10) || 0));
+    if (options.persist) input.value = fillTime;
+    const counts = getRowFrameCounts();
+    const frameCount = Math.max(1, Math.min(state.grid.columns, counts[rowIndex] || state.grid.columns));
+    let nextTime = resizeSpriteTimeRow(getTimeValue(), state.grid.rows, state.grid.columns, rowIndex, frameCount, fillTime);
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      nextTime = updateSpriteTimeCell(nextTime, state.grid.rows, state.grid.columns, rowIndex, frame, fillTime);
+    }
+    ui.time.value = nextTime;
+    if (rowIndex === state.frameRow) ui.frameTime.value = fillTime;
+    drawPreview();
+    drawSheet();
+    if (!options.persist) return;
+    await saveProperties({ silent: true });
+    syncFrameControls();
+    setStatus(`ROW ${rowIndex} の time を ${fillTime} にしました`);
   }
 
   async function readImageSize(sourcePath) {

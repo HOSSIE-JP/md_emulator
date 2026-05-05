@@ -85,6 +85,10 @@ test('asset-manager declares v2.4 asset provider capabilities', () => {
   assert.match(appRendererSource, /handleImport/);
   assert.match(appRendererSource, /vgm-preview-player/);
   assert.match(appRendererSource, /isVgmPreviewEntry/);
+  assert.match(appRendererSource, /isBgmMetaEntry/);
+  assert.match(appRendererSource, /getMusicMetaSourcePath/);
+  assert.match(appRendererSource, /renderBgmMetaRows/);
+  assert.match(appRendererSource, /parseXgm/);
   assert.match(appRendererSource, /toggleVgmPreview/);
   assert.doesNotMatch(appRendererSource, /midi-converter/);
 });
@@ -245,6 +249,12 @@ test('sprite-editor declares plugin-local page and uses v2.4 capabilities', () =
   assert.match(rendererSource, /selectFrameFromSheet/);
   assert.match(rendererSource, /data-role="row-list"/);
   assert.match(rendererSource, /resizeSpriteTimeRow/);
+  assert.match(rendererSource, /function applyRowDefaultTime\(input,\s*options = \{\}\)/);
+  assert.match(rendererSource, /ui\.time\.value = nextTime/);
+  assert.match(rendererSource, /await saveProperties\(\{ silent: true \}\)/);
+  assert.match(rendererSource, /function drawFrameTimeLabels\(ctx,\s*scale,\s*counts = getRowFrameCounts\(\)\)/);
+  assert.match(rendererSource, /ctx\.fillText\(label,\s*x \+ padX,\s*y \+ padY\)/);
+  assert.match(rendererSource, /if \(time <= 0\) \{\s*stopPlayback\(\);\s*return;\s*\}/);
   assert.match(rendererSource, /getActiveFrameCountForRow/);
   const sheetClickFn = rendererSource.slice(
     rendererSource.indexOf('function selectFrameFromSheet'),

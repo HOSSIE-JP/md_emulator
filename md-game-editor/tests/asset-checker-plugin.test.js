@@ -55,9 +55,19 @@ test('asset-checker generator renders a SGDK 2.11 single-file checker', () => {
   assert.match(result.sourceCode, /#define TILEMAP_COUNT 1/);
   assert.match(result.sourceCode, /#define BGM_COUNT 3/);
   assert.match(result.sourceCode, /int main\(bool hardReset\)/);
+  assert.match(result.sourceCode, /static u16 tile_scroll_speed = 1;/);
+  assert.match(result.sourceCode, /static bool sprite_playing = TRUE;/);
+  assert.match(result.sourceCode, /static bool bgm_playing = TRUE;/);
+  assert.match(result.sourceCode, /sprite_animation_count\(void\)/);
+  assert.match(result.sourceCode, /definition->numAnimation/);
+  assert.match(result.sourceCode, /clamp_sprite_animation\(\);/);
+  assert.match(result.sourceCode, /sprite_anim = \(u16\)\(\(sprite_anim \+ 1\) % sprite_animation_count\(\)\)/);
   assert.match(result.sourceCode, /VDP_drawImageEx\(/);
+  assert.match(result.sourceCode, /PAL_setPalette\(PAL0, palette_grey, CPU\)/);
+  assert.match(result.sourceCode, /VDP_setTextPalette\(PAL0\)/);
+  assert.match(result.sourceCode, /PAL_setPalette\(PAL1, image_entries\[image_index\]\.image->palette->data, CPU\)/);
   assert.match(result.sourceCode, /TILE_ATTR_FULL\(PAL1, FALSE, FALSE, FALSE, TILE_BASE_INDEX\)/);
-  assert.match(result.sourceCode, /,\s*0,\s*0,\s*TRUE,\s*DMA\s*\)/);
+  assert.match(result.sourceCode, /,\s*0,\s*0,\s*FALSE,\s*DMA\s*\)/);
   assert.match(result.sourceCode, /SPR_addSprite/);
   assert.match(result.sourceCode, /PAL_setPalette\(PAL2, sprite_entries\[sprite_index\]\.sprite->palette->data, CPU\)/);
   assert.match(result.sourceCode, /TILE_ATTR\(PAL2, FALSE, FALSE, FALSE\)/);
@@ -71,6 +81,7 @@ test('asset-checker generator renders a SGDK 2.11 single-file checker', () => {
   assert.match(result.sourceCode, /Z80_loadDriver\(Z80_DRIVER_XGM2, TRUE\)/);
   assert.match(result.sourceCode, /XGM2_playPCMEx\(entry->data, entry->size, SOUND_PCM_CH1, 15, entry->halfRate, bgm_loop\)/);
   assert.match(result.sourceCode, /active_bgm_kind = entry->kind/);
+  assert.match(result.sourceCode, /load_bgm_status[\s\S]*if \(bgm_playing && BGM_COUNT > 0\) play_bgm\(\);/);
   assert.doesNotMatch(result.sourceCode, /se_hit/);
 });
 

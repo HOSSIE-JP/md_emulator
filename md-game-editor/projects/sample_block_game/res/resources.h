@@ -19,7 +19,8 @@ extern const u8 bgm_002[313088];
 extern const u8 bgm_003[392960];
 extern const u8 bgm_004[320000];
 extern const u8 bgm_27[11264];
-extern const u8 bgm_19[40960];
+extern const u8 bgm_19[9728];
+extern const u8 bgm_vgm[768];
 extern const SpriteDefinition spr_ball;
 extern const SpriteDefinition spr_paddle;
 extern const SpriteDefinition spr_powerup_multi_ball;
@@ -43,5 +44,6 @@ extern const Image stage_bg_stage2;
 extern const Image stage_bg_stage3;
 extern const Image stage_bg_stage4;
 extern const Image img_game_clear_screen;
+extern const SpriteDefinition enemies;
 
 #endif // _RES_RESOURCES_H_

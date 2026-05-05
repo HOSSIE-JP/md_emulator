@@ -2,6 +2,7 @@
   height: 100%;
   min-height: 0;
   margin: -20px -24px;
+  overflow: hidden;
   background: var(--border);
   color: var(--text);
 }
@@ -12,6 +13,7 @@
   display: grid;
   grid-template-columns: 300px minmax(420px, 1fr) 320px;
   gap: 1px;
+  overflow: hidden;
   background: var(--border);
 }
 
@@ -203,6 +205,7 @@
 .md-bgm-main {
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background: #101317;
@@ -218,6 +221,7 @@
 
 .md-bgm-pattern-strip {
   display: flex;
+  flex: 0 0 auto;
   gap: 6px;
   padding: 10px;
   overflow-x: auto;
@@ -245,10 +249,19 @@
 .md-bgm-tracker-wrap,
 .md-bgm-piano-wrap {
   min-height: 0;
-  flex: 1;
+  min-width: 0;
+  flex: 1 1 0;
+  box-sizing: border-box;
+}
+
+.md-bgm-editor-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .md-bgm-tracker-wrap {
+  max-height: 100%;
   overflow: auto;
   padding: 10px;
 }
@@ -256,7 +269,13 @@
 .md-bgm-piano-wrap {
   display: flex;
   flex-direction: column;
+  max-height: 100%;
   overflow: hidden;
+}
+
+.md-bgm-tracker-wrap[hidden],
+.md-bgm-piano-wrap[hidden] {
+  display: none !important;
 }
 
 .md-bgm-tracker {
@@ -536,7 +555,10 @@
 
 .md-bgm-piano-scroll {
   min-height: 0;
-  flex: 1;
+  min-width: 0;
+  flex: 1 1 0;
+  max-height: 100%;
+  box-sizing: border-box;
   overflow: auto;
   padding: 10px;
   background: #0f151b;

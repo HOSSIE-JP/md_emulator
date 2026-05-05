@@ -1,9 +1,9 @@
 {
-  "title": "SEXY BLOCK BREAKER",
+  "title": "ASSET CHECK",
   "author": "HOSSIE",
   "serial": "GM 00000000-01",
   "region": "JUE",
-  "generatedAt": "2026-05-05T07:26:23.779Z",
+  "generatedAt": "2026-05-05T07:51:01.155Z",
   "pluginRoles": {
     "builder": "asset-checker",
     "testplay": "standard-emulator"

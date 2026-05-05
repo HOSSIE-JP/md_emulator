@@ -38,6 +38,12 @@ function u32(bytes, offset) {
     | ((bytes[offset + 3] || 0) << 24);
 }
 
+function hexBytes(bytes, offset, length) {
+  return Array.from(bytes.slice(offset, offset + length))
+    .map((value) => value.toString(16).padStart(2, '0').toUpperCase())
+    .join(' ');
+}
+
 function skipDataBlock(bytes, offset, warnings) {
   if (bytes[offset] !== 0x66) {
     warnings.push(`Unsupported VGM data block at 0x${Math.max(0, offset - 1).toString(16)}.`);
@@ -60,6 +66,7 @@ export function parseVgmBytes(input) {
   const dataOffsetValue = u32(bytes, 0x34) >>> 0;
   let offset = dataOffsetValue ? 0x34 + dataOffsetValue : 0x40;
   if (offset < 0x40 || offset >= bytes.length) offset = 0x40;
+  const dataOffset = offset;
 
   const events = [];
   let waitSamples = 0;
@@ -127,10 +134,125 @@ export function parseVgmBytes(input) {
     events,
     warnings,
     meta: {
+      format: 'VGM',
+      version,
+      fileSizeBytes: bytes.length,
+      dataOffset,
+      ym2612Clock,
+      sn76489Clock,
       durationSec: waitSamples / VGM_SAMPLE_RATE,
       ym2612Writes,
       psgWrites,
       waitSamples,
+      warnings,
+    },
+  };
+}
+
+function xgmCommandSize(command) {
+  const count = (command & 0x0f) + 1;
+  switch (command & 0xf0) {
+    case 0x10:
+    case 0x40:
+      return 1 + count;
+    case 0x20:
+    case 0x30:
+      return 1 + (count * 2);
+    case 0x50:
+      return 2;
+    case 0x70:
+      return command === 0x7e ? 4 : 1;
+    default:
+      return 1;
+  }
+}
+
+export function parseXgmBytes(input) {
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input || []);
+  const warnings = [];
+  if (bytes.length < 0x108 || readAscii(bytes, 0, 4) !== 'XGM ') {
+    return { ok: false, error: 'XGM header が見つかりません。' };
+  }
+
+  const sampleBlockSize = (u16(bytes, 0x100) << 8) >>> 0;
+  const version = bytes[0x102] || 0;
+  const flags = bytes[0x103] || 0;
+  const pal = !!(flags & 0x01);
+  const hasGd3 = !!(flags & 0x02);
+  const multiTrack = !!(flags & 0x04);
+  let sampleCount = 0;
+  for (let index = 1; index < 0x40; index += 1) {
+    const sampleOffset = u16(bytes, index * 4);
+    const sampleLength = u16(bytes, (index * 4) + 2);
+    if (sampleOffset !== 0xffff && sampleLength !== 0x0100) sampleCount += 1;
+  }
+
+  const musicSizeOffset = 0x104 + sampleBlockSize;
+  if (musicSizeOffset + 4 > bytes.length) {
+    return { ok: false, error: 'XGM music data offset がファイルサイズを超えています。' };
+  }
+  const musicDataSize = u32(bytes, musicSizeOffset) >>> 0;
+  const musicDataOffset = musicSizeOffset + 4;
+  const musicEnd = Math.min(bytes.length, musicDataOffset + musicDataSize);
+  let offset = musicDataOffset;
+  let frames = 0;
+  let ym2612Writes = 0;
+  let psgWrites = 0;
+  let pcmCommands = 0;
+  let loopOffset = null;
+  let ended = false;
+
+  while (offset < musicEnd) {
+    const commandOffset = offset;
+    const command = bytes[offset];
+    const size = xgmCommandSize(command);
+    if (offset + size > musicEnd) {
+      warnings.push(`XGM command at 0x${commandOffset.toString(16)} exceeds music data size.`);
+      break;
+    }
+
+    if (command === 0x00) frames += 1;
+    else if (command === 0x7f) {
+      ended = true;
+      offset += size;
+      break;
+    } else if (command === 0x7e) {
+      loopOffset = (bytes[offset + 1] || 0) | ((bytes[offset + 2] || 0) << 8) | ((bytes[offset + 3] || 0) << 16);
+    } else if ((command & 0xf0) === 0x10) {
+      psgWrites += (command & 0x0f) + 1;
+    } else if ((command & 0xf0) === 0x20 || (command & 0xf0) === 0x30 || (command & 0xf0) === 0x40) {
+      ym2612Writes += (command & 0x0f) + 1;
+    } else if ((command & 0xf0) === 0x50) {
+      pcmCommands += 1;
+    }
+    offset += size;
+  }
+
+  if (!ended) warnings.push('XGM end command が見つからないため、music data size の末尾まで解析しました。');
+  const frameRate = pal ? 50 : 60;
+  return {
+    ok: true,
+    warnings,
+    meta: {
+      format: 'XGM',
+      version,
+      flags,
+      timing: pal ? 'PAL' : 'NTSC',
+      frameRate,
+      hasGd3,
+      multiTrack,
+      fileSizeBytes: bytes.length,
+      sampleBlockSize,
+      sampleCount,
+      musicDataOffset,
+      musicDataSize,
+      durationFrames: frames,
+      durationSec: frames / frameRate,
+      ym2612Writes,
+      psgWrites,
+      pcmCommands,
+      loopOffset,
+      headerHex: hexBytes(bytes, 0, Math.min(32, bytes.length)),
       warnings,
     },
   };
@@ -212,6 +334,14 @@ export function createVgmPreviewPlayer() {
     }
     parsed = result;
     return { ok: true, meta: result.meta, warnings: result.warnings };
+  }
+
+  function parseVgm({ dataUrl } = {}) {
+    return parseVgmBytes(dataUrlToBytes(dataUrl));
+  }
+
+  function parseXgm({ dataUrl } = {}) {
+    return parseXgmBytes(dataUrlToBytes(dataUrl));
   }
 
   async function play({ onTime, onEnded, onError } = {}) {
@@ -346,6 +476,8 @@ export function createVgmPreviewPlayer() {
   return {
     canPreview: canPreviewVgmEntry,
     load,
+    parseVgm,
+    parseXgm,
     play,
     stop,
     isPlaying: () => playing,

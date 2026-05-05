@@ -74,5 +74,3 @@ IMAGE stage_bg_stage3 stage/stage_bg_stage3.png NONE ALL 0
 IMAGE stage_bg_stage4 stage/stage_bg_stage4.png NONE ALL 0
 // ゲームクリア画面
 IMAGE img_game_clear_screen gfx/img_game_clear_screen.png NONE ALL 0
-XGM2 bgm_27 music/bgm_27.vgm
-XGM2 bgm_19 music/bgm_19.vgm
