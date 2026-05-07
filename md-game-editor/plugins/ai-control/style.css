@@ -40,6 +40,42 @@
   border-color: #6ee7b7;
 }
 
+.nav-btn-plugin[data-plugin-id="ai-control"] {
+  position: relative;
+}
+
+.nav-btn-plugin[data-plugin-id="ai-control"]::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  right: 10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #64748b;
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.85);
+}
+
+.nav-btn-plugin[data-plugin-id="ai-control"][data-ai-control-running="true"]::after {
+  background: #22c55e;
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.85), 0 0 10px rgba(34, 197, 94, 0.55);
+}
+
+.ai-control-sidebar-status {
+  min-height: 13px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.1;
+  color: var(--muted, #94a3b8);
+  background: rgba(100, 116, 139, 0.18);
+}
+
+.nav-btn-plugin[data-plugin-id="ai-control"][data-ai-control-running="true"] .ai-control-sidebar-status {
+  color: #bbf7d0;
+  background: rgba(34, 197, 94, 0.18);
+}
+
 .ai-control-controls {
   grid-template-columns: minmax(160px, 220px) repeat(3, auto);
   align-items: end;

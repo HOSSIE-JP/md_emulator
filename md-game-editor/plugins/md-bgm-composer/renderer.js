@@ -52,6 +52,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     allocations: [],
     status: '',
     selectedOrderIndex: 0,
+    leftColumnWidth: 300,
+    rightColumnWidth: 320,
   };
 
   const wrapper = document.createElement('div');
@@ -60,9 +62,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   api.mountElement(wrapper, 'page');
 
   const els = queryElements(wrapper);
+  applyColumnWidths(state, els);
   bindEvents({ plugin, api, logger, state, els });
   renderAll(state, els);
   void refreshAssets({ state, els });
+  const pageRefreshObserver = setupPageAutoRefresh(root, state, els);
 
   registerCapability('md-bgm-composer', {
     getSong: () => structuredClone(state.song),
@@ -75,7 +79,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     },
     validate: () => validateViaMain(plugin, api, state, els),
     refreshAssets: () => refreshAssets({ state, els }),
-    selectAsset: ({ resFile, lineNumber }) => selectAsset(assetKey(resFile, { lineNumber }), { state, els }),
+    selectAsset: ({ resFile, lineNumber }) => requestSelectAsset(assetKey(resFile, { lineNumber }), { plugin, api, state, els }),
     importMidiToRes: ({ resFile, sourcePath, symbol }) => importMidiToRes({ plugin, api, state, els, sourcePath, symbol, resFile }),
     saveCurrentSong: () => saveCurrentSong({ plugin, api, state, els }),
   });
@@ -90,6 +94,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   return {
     deactivate() {
       stopPreview();
+      pageRefreshObserver?.disconnect?.();
       wrapper.remove();
     },
   };
@@ -97,16 +102,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 
 function renderShell() {
   return `
-    <div class="md-bgm-layout">
+    <div class="md-bgm-layout" data-role="layout">
       <aside class="md-bgm-sidebar left">
         <div class="md-bgm-list-toolbar">
           <h2>BGM</h2>
-          <button type="button" class="md-bgm-icon" data-action="refresh" title="更新" aria-label="更新">↻</button>
-          <button type="button" class="md-bgm-import-button" data-action="import-music-to-res" title="MIDI/VGM/XGM を登録" aria-label="MIDI/VGM/XGM を登録">
-            <svg class="icon"><use href="#icon-file-plus"></use></svg>
-            <span>Import</span>
-          </button>
-          <button type="button" class="md-bgm-icon" data-action="create-empty" title="空のBGM作成" aria-label="空のBGM作成">＋</button>
         </div>
         <div class="md-bgm-filter">
           <label>.res ファイル
@@ -116,8 +115,16 @@ function renderShell() {
             <input data-role="keyword" type="search" placeholder="keyword">
           </label>
         </div>
+        <div class="md-bgm-list-actions">
+          <button type="button" class="md-bgm-import-button" data-action="import-music-to-res" title="MIDI/VGM/XGM を登録" aria-label="MIDI/VGM/XGM を登録">
+            <svg class="icon"><use href="#icon-file-plus"></use></svg>
+            <span>Import</span>
+          </button>
+          <button type="button" class="md-bgm-icon" data-action="create-empty" title="空のBGM作成" aria-label="空のBGM作成">＋</button>
+        </div>
         <div class="md-bgm-asset-tree" data-role="asset-tree"></div>
       </aside>
+      <div class="md-bgm-column-resizer" data-resize-column="left" role="separator" aria-orientation="vertical" title="列幅を変更"></div>
       <main class="md-bgm-main">
         <div class="md-bgm-toolbar" role="toolbar" aria-label="BGM composer toolbar">
           <div class="md-bgm-segmented" role="tablist">
@@ -125,14 +132,6 @@ function renderShell() {
             <button type="button" data-view="piano">Piano Roll</button>
           </div>
           <div class="md-bgm-tool-group">
-            <button type="button" class="md-bgm-action-button md-bgm-primary" data-action="save" title="保存" aria-label="保存">
-              <svg class="icon"><use href="#icon-save"></use></svg>
-              <span>保存</span>
-            </button>
-            <button type="button" class="md-bgm-action-button md-bgm-danger" data-action="delete-current" title="削除" aria-label="削除">
-              <svg class="icon"><use href="#icon-trash"></use></svg>
-              <span>削除</span>
-            </button>
             <button type="button" class="md-bgm-icon" data-action="edit-external" data-role="edit-external" title="編集" aria-label="編集" hidden>✎</button>
             <button type="button" class="md-bgm-icon" data-action="play" title="プレビュー再生" aria-label="プレビュー再生">▶</button>
             <button type="button" class="md-bgm-icon" data-action="stop" title="停止" aria-label="停止">■</button>
@@ -163,6 +162,7 @@ function renderShell() {
           </div>
         </div>
       </main>
+      <div class="md-bgm-column-resizer" data-resize-column="right" role="separator" aria-orientation="vertical" title="列幅を変更"></div>
       <aside class="md-bgm-sidebar right">
         <section class="md-bgm-form">
           <div class="md-bgm-section-title">Song</div>
@@ -191,6 +191,8 @@ function renderShell() {
 function queryElements(root) {
   return {
     status: root.querySelector('[data-role="status"]'),
+    layout: root.querySelector('[data-role="layout"]'),
+    columnResizers: Array.from(root.querySelectorAll('[data-resize-column]')),
     resFilter: root.querySelector('[data-role="res-filter"]'),
     keyword: root.querySelector('[data-role="keyword"]'),
     assetTree: root.querySelector('[data-role="asset-tree"]'),
@@ -306,8 +308,16 @@ function bindEvents({ plugin, api, logger, state, els }) {
     const action = actionTarget?.dataset?.action;
     if (!action) return;
     if (action === 'refresh') await refreshAssets({ state, els });
-    if (action === 'import-music-to-res') await pickAndImportMusicToRes({ plugin, api, state, els });
-    if (action === 'create-empty') await createEmptySong({ plugin, api, state, els });
+    if (action === 'import-music-to-res') {
+      if (await confirmCanReplaceCurrentSong({ plugin, api, state, els })) {
+        await pickAndImportMusicToRes({ plugin, api, state, els });
+      }
+    }
+    if (action === 'create-empty') {
+      if (await confirmCanReplaceCurrentSong({ plugin, api, state, els })) {
+        await createEmptySong({ plugin, api, state, els });
+      }
+    }
     if (action === 'add-pattern') addPattern(state, els);
     if (action === 'delete-pattern') deleteSelectedPattern(state, els);
     if (action === 'set-piano-tool') setPianoTool(state, els, actionTarget?.dataset?.tool);
@@ -341,7 +351,7 @@ function bindEvents({ plugin, api, logger, state, els }) {
       return;
     }
     const key = event.target?.closest('[data-asset-key]')?.dataset?.assetKey;
-    if (key) void selectAsset(key, { state, els, plugin, api });
+    if (key) void requestSelectAsset(key, { plugin, api, state, els });
   });
   els.resFilter.addEventListener('change', () => {
     state.fileFilter = els.resFilter.value;
@@ -361,6 +371,9 @@ function bindEvents({ plugin, api, logger, state, els }) {
     state.showPianoLayers = els.pianoLayers.checked;
     renderPianoRoll(state, els);
   });
+  els.columnResizers.forEach((resizer) => {
+    resizer.addEventListener('pointerdown', (event) => startColumnResize(event, state, els, resizer.dataset.resizeColumn));
+  });
   els.fields.forEach((field) => {
     field.addEventListener('change', () => {
       if (!state.editable) return;
@@ -373,7 +386,90 @@ function bindEvents({ plugin, api, logger, state, els }) {
   });
 }
 
-async function refreshAssets({ state, els }) {
+function applyColumnWidths(state, els) {
+  if (!els.layout) return;
+  els.layout.style.setProperty('--md-bgm-left', `${Math.round(state.leftColumnWidth)}px`);
+  els.layout.style.setProperty('--md-bgm-right', `${Math.round(state.rightColumnWidth)}px`);
+}
+
+function startColumnResize(event, state, els, side) {
+  if (!['left', 'right'].includes(side)) return;
+  event.preventDefault();
+  const startX = event.clientX;
+  const startLeft = state.leftColumnWidth;
+  const startRight = state.rightColumnWidth;
+  const move = (moveEvent) => {
+    const dx = moveEvent.clientX - startX;
+    if (side === 'left') {
+      state.leftColumnWidth = clampNumber(startLeft + dx, 220, 560);
+    } else {
+      state.rightColumnWidth = clampNumber(startRight - dx, 260, 620);
+    }
+    applyColumnWidths(state, els);
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up, { once: true });
+  window.addEventListener('pointercancel', up, { once: true });
+}
+
+function clampNumber(value, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, n));
+}
+
+function setupPageAutoRefresh(pageRoot, state, els) {
+  if (!pageRoot || typeof MutationObserver === 'undefined') return null;
+  let wasActive = pageRoot.classList.contains('active');
+  const observer = new MutationObserver(() => {
+    const active = pageRoot.classList.contains('active');
+    if (active && !wasActive) {
+      void refreshAssets({ state, els, preserveDirty: true });
+    }
+    wasActive = active;
+  });
+  observer.observe(pageRoot, { attributes: true, attributeFilter: ['class'] });
+  return observer;
+}
+
+async function requestSelectAsset(key, { plugin, api, state, els } = {}) {
+  if (!key || key === state.selectedKey || !state.dirty) {
+    return selectAsset(key, { state, els, plugin, api });
+  }
+  const ok = await confirmCanReplaceCurrentSong({ plugin, api, state, els });
+  if (!ok) {
+    renderAssetTree(state, els);
+    return { ok: false, canceled: true };
+  }
+  return selectAsset(key, { state, els, plugin, api });
+}
+
+async function confirmCanReplaceCurrentSong({ plugin, api, state, els }) {
+  if (!state.dirty) return true;
+  const decision = await confirmUnsavedAssetSwitch(api, state.song);
+  if (decision === 'cancel') {
+    renderAssetTree(state, els);
+    setStatus(state, els, '操作をキャンセルしました。');
+    return false;
+  }
+  if (decision === 'save') {
+    const saved = await saveCurrentSong({ plugin, api, state, els });
+    if (!saved?.ok) {
+      renderAssetTree(state, els);
+      return false;
+    }
+  } else {
+    state.dirty = false;
+  }
+  return true;
+}
+
+async function refreshAssets({ state, els, preserveDirty = false }) {
   setStatus(state, els, 'BGM 定義を読み込み中...');
   const result = await state.api.electronAPI.listResDefinitions();
   if (!result?.ok) {
@@ -396,8 +492,14 @@ async function refreshAssets({ state, els }) {
   }
   renderResFilter(state, els);
   renderAssetTree(state, els);
-  if (state.selectedKey) await selectAsset(state.selectedKey, { state, els });
-  else renderAll(state, els);
+  if (preserveDirty && state.dirty && state.selectedKey && findAssetByKey(state, state.selectedKey)) {
+    state.selectedAsset = findAssetByKey(state, state.selectedKey);
+    renderAll(state, els);
+  } else if (state.selectedKey) await selectAsset(state.selectedKey, { state, els });
+  else {
+    clearEditorSelection(state, 'BGM 定義がありません。');
+    renderAll(state, els);
+  }
   setStatus(state, els, `BGM ${countAssets(state)} 件`);
   return result;
 }
@@ -434,15 +536,28 @@ function renderAssetTree(state, els) {
           <strong>${esc(file.file)}</strong>
           <span>${file.entries.length}</span>
         </button>
-        ${expanded ? file.entries.map((entry) => {
+      ${expanded ? file.entries.map((entry) => {
         const key = assetKey(file.file, entry);
         const source = entry.sourcePath || entry.files?.[0] || '';
+        const active = key === state.selectedKey;
         return `
-          <button type="button" class="md-bgm-asset ${key === state.selectedKey ? 'active' : ''}" data-asset-key="${esc(key)}">
-            <span>${esc(entry.name || '')}</span>
-            <small>${esc(entry.type || '')} ${esc(source)}</small>
-            <em>${entry.intermediateAvailable ? '編集可' : 'プレビュー専用'}</em>
-          </button>
+          <div class="md-bgm-asset ${active ? 'active' : ''}" data-asset-key="${esc(key)}" role="button" tabindex="0">
+            <div class="md-bgm-asset-meta">
+              <span>${esc(entry.name || '')}${active && state.dirty ? ' *' : ''}</span>
+              <small>${esc(entry.type || '')} ${esc(source)}</small>
+              <em>${entry.intermediateAvailable ? '編集可' : 'プレビュー専用'}</em>
+            </div>
+            ${active ? `
+              <div class="md-bgm-asset-actions">
+                <button type="button" class="md-bgm-asset-icon md-bgm-primary" data-action="save" title="保存" aria-label="保存">
+                  <svg class="icon"><use href="#icon-save"></use></svg>
+                </button>
+                <button type="button" class="md-bgm-asset-icon md-bgm-danger" data-action="delete-current" title="削除" aria-label="削除">
+                  <svg class="icon"><use href="#icon-trash"></use></svg>
+                </button>
+              </div>
+            ` : ''}
+          </div>
         `;
       }).join('') : ''}
       </section>
@@ -461,10 +576,7 @@ async function selectAsset(key, { state, els, plugin, api } = {}) {
   renderAssetTree(state, els);
   const selected = state.selectedAsset;
   if (!selected) {
-    state.song = createDefaultSong();
-    state.diagnostics = [];
-    state.editable = true;
-    state.selectedExternal = false;
+    clearEditorSelection(state, 'BGM 定義がありません。');
     renderAll(state, els);
     return;
   }
@@ -485,6 +597,26 @@ async function selectAsset(key, { state, els, plugin, api } = {}) {
   state.song.symbol = normalizeSymbol(entry.name || state.song.symbol);
   selectOrderIndex(state, 0);
   renderAll(state, els);
+}
+
+function clearEditorSelection(state, status = '') {
+  stopPreview(state);
+  state.selectedKey = '';
+  state.selectedAsset = null;
+  state.pendingNew = false;
+  state.selectedExternal = false;
+  state.editable = false;
+  state.dirty = false;
+  state.song = createDefaultSong({ title: '', symbol: 'bgm_001' });
+  state.selectedPattern = 0;
+  state.selectedOrderIndex = 0;
+  state.selectedCell = { row: 0, channel: 'FM1' };
+  state.pianoSelection = null;
+  state.pianoDrag = null;
+  state.playbackRow = -1;
+  state.allocations = [];
+  state.diagnostics = status ? [{ level: 'info', code: 'no-bgm-asset', message: status }] : [];
+  state.status = status;
 }
 
 async function readSongJson(api, absPath) {
@@ -563,9 +695,26 @@ async function importMidiViaConverterToRes({ api, state, els, sourcePath, symbol
   };
   const added = await addMusicEntry({ api, state, els, resFile: targetRes, entry });
   if (!added?.ok) return added;
-  state.diagnostics = converted.diagnostics || [];
-  state.allocations = [];
   await refreshAndSelectEntry({ state, els, resFile: targetRes, symbol: safeSymbol });
+  const imported = await state.api.plugins.invokeHook(state.plugin.id, 'importMidi', { sourcePath, symbol: safeSymbol });
+  const importedBody = imported?.result || imported;
+  if (importedBody?.ok) {
+    state.song = normalizeSong(importedBody.song);
+    state.song.symbol = safeSymbol;
+    state.allocations = importedBody.allocations || [];
+    state.diagnostics = [
+      ...(importedBody.diagnostics || []),
+      ...(converted.diagnostics || []),
+      ...(converted.warnings || []).map((message) => ({ level: 'warn', code: 'midi-converter-warning', message })),
+    ];
+    state.selectedExternal = false;
+    state.editable = true;
+    state.dirty = true;
+    await saveCurrentSong({ plugin: state.plugin, api, state, els, forceResFile: targetRes });
+  } else {
+    state.diagnostics = converted.diagnostics || [];
+    state.allocations = [];
+  }
   setStatus(state, els, `MIDI を変換して登録しました: ${safeSymbol}`);
   return { ...converted, asset: entry };
 }
@@ -625,6 +774,9 @@ async function refreshAndSelectEntry({ state, els, resFile, symbol }) {
 }
 
 async function importMidiToRes({ plugin, api, state, els, sourcePath, symbol, resFile }) {
+  if (!(await confirmCanReplaceCurrentSong({ plugin, api, state, els }))) {
+    return { ok: false, canceled: true };
+  }
   const targetRes = resFile || state.fileFilter || state.resFiles[0]?.file || 'resources.res';
   const safeSymbol = normalizeSymbol(symbol || sourcePath.split(/[\\/]/).pop() || 'bgm');
   const result = await api.plugins.invokeHook(plugin.id, 'importMidi', { sourcePath, symbol: safeSymbol });
@@ -725,6 +877,35 @@ function confirmLossyRestore(api, entry) {
   });
 }
 
+function confirmUnsavedAssetSwitch(api, song) {
+  return new Promise((resolve) => {
+    const modal = api.createModal({
+      id: 'md-bgm-composer-unsaved-switch',
+      panelClassName: 'app-panel app-panel-sm',
+      html: `
+        <div class="md-bgm-modal">
+          <h2>未保存の変更</h2>
+          <p>${esc(song?.title || song?.symbol || '現在のBGM')} に未保存の変更があります。</p>
+          <p>別のアセットを開く前に、変更を保存するか破棄してください。</p>
+          <div class="md-bgm-modal-actions">
+            <button type="button" class="md-bgm-btn" data-role="cancel">キャンセル</button>
+            <button type="button" class="md-bgm-btn danger" data-role="discard">破棄して開く</button>
+            <button type="button" class="md-bgm-btn primary" data-role="save">保存して開く</button>
+          </div>
+        </div>
+      `,
+    });
+    const finish = (decision) => {
+      modal.close();
+      resolve(decision);
+    };
+    modal.panel.querySelector('[data-role="cancel"]')?.addEventListener('click', () => finish('cancel'), { once: true });
+    modal.panel.querySelector('[data-role="discard"]')?.addEventListener('click', () => finish('discard'), { once: true });
+    modal.panel.querySelector('[data-role="save"]')?.addEventListener('click', () => finish('save'), { once: true });
+    modal.open();
+  });
+}
+
 function confirmDeleteAsset(api, entry) {
   return new Promise((resolve) => {
     const modal = api.createModal({
@@ -775,6 +956,7 @@ async function deleteCurrentAsset({ api, state, els }) {
   state.selectedAsset = null;
   state.pendingNew = false;
   state.selectedExternal = false;
+  clearEditorSelection(state, '');
   await refreshAssets({ state, els });
   setStatus(state, els, `削除しました: ${deletedName}`);
   return result;

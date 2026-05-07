@@ -6,6 +6,7 @@ const { shell } = require('electron');
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const { spawn } = require('child_process');
 const electronPackageJson = require('./package.json');
+const iconv = require('iconv-lite');
 
 // ── アプリビルドメタ読み込み ──────────────────────────────────────────────
 // npm start / prepare:dist 時に scripts/inject-build-meta.js が生成する。
@@ -278,6 +279,7 @@ function openLogWindow(snapshot = latestLogSnapshot) {
     height: 560,
     title: 'Log - MD Game Editor',
     backgroundColor: '#0b0f16',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'log-viewer-preload.js'),
       contextIsolation: true,
@@ -285,6 +287,8 @@ function openLogWindow(snapshot = latestLogSnapshot) {
       sandbox: false,
     },
   });
+  logWindow.setMenu(null);
+  logWindow.setMenuBarVisibility(false);
 
   logWindow.webContents.on('did-finish-load', () => {
     sendToLogWindow('log:snapshot', latestLogSnapshot);
@@ -293,6 +297,7 @@ function openLogWindow(snapshot = latestLogSnapshot) {
   logWindow.loadFile(path.join(__dirname, 'renderer', 'log-viewer.html'));
   logWindow.on('closed', () => {
     logWindow = null;
+    sendToRenderer('log:windowClosed', {});
   });
 
   return { ok: true, reused: false };
@@ -318,7 +323,7 @@ function collectProjectAssets(projectDir) {
   try {
     const defs = rescompManager.listResDefinitions(projectDir);
     (defs.files || []).forEach((f) => {
-      (f.entries || []).forEach((e) => allAssets.push(e));
+      (f.entries || []).forEach((e) => allAssets.push({ ...e, resFile: f.file }));
     });
   } catch (_) {}
   return allAssets;
@@ -670,6 +675,94 @@ function readCodeTree(absDir, codeRoot) {
   });
 }
 
+const CODE_MEDIA_MIME_BY_EXT = {
+  '.png': 'image/png',
+  '.bmp': 'image/bmp',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+};
+
+function normalizeCodeEncoding(value) {
+  const key = String(value || 'auto').trim().toLowerCase().replace(/[-\s]/g, '_');
+  if (key === 'utf8' || key === 'utf_8') return 'utf8';
+  if (key === 'sjis' || key === 'shift_jis' || key === 'cp932') return 'shift_jis';
+  return 'auto';
+}
+
+function isUtf8Buffer(buffer) {
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+    return true;
+  } catch (_err) {
+    return false;
+  }
+}
+
+function decodeCodeBuffer(buffer, requestedEncoding = 'auto') {
+  const requested = normalizeCodeEncoding(requestedEncoding);
+  if (requested === 'shift_jis') {
+    return { content: iconv.decode(buffer, 'cp932'), encoding: 'shift_jis' };
+  }
+  if (requested === 'utf8') {
+    return { content: buffer.toString('utf-8').replace(/^\uFEFF/, ''), encoding: 'utf8' };
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
+    return { content: buffer.toString('utf-8').replace(/^\uFEFF/, ''), encoding: 'utf8' };
+  }
+  if (isUtf8Buffer(buffer)) {
+    return { content: buffer.toString('utf-8'), encoding: 'utf8' };
+  }
+  return { content: iconv.decode(buffer, 'cp932'), encoding: 'shift_jis' };
+}
+
+function encodeCodeContent(content, requestedEncoding = 'utf8') {
+  const encoding = normalizeCodeEncoding(requestedEncoding);
+  if (encoding === 'shift_jis') {
+    return { buffer: iconv.encode(String(content ?? ''), 'cp932'), encoding: 'shift_jis' };
+  }
+  return { buffer: Buffer.from(String(content ?? ''), 'utf-8'), encoding: 'utf8' };
+}
+
+function readCodeFilePayload(absPath, relativePath, options = {}) {
+  const ext = path.extname(absPath).toLowerCase();
+  const mime = CODE_MEDIA_MIME_BY_EXT[ext];
+  const data = fs.readFileSync(absPath);
+  if (mime) {
+    return {
+      ok: true,
+      path: relativePath || '',
+      media: true,
+      previewKind: mime.startsWith('image/') ? 'image' : 'audio',
+      mime,
+      size: data.length,
+      dataUrl: `data:${mime};base64,${data.toString('base64')}`,
+    };
+  }
+  if (data.includes(0)) {
+    return {
+      ok: true,
+      path: relativePath || '',
+      media: true,
+      previewKind: 'binary',
+      mime: 'application/octet-stream',
+      size: data.length,
+    };
+  }
+  const decoded = decodeCodeBuffer(data, options.encoding);
+  return {
+    ok: true,
+    path: relativePath || '',
+    content: decoded.content,
+    encoding: decoded.encoding,
+  };
+}
+
 function resultOrThrow(result) {
   if (result && result.ok === false) {
     throw new Error(result.error || result.message || 'operation failed');
@@ -750,12 +843,21 @@ function getEditorControlService() {
       aiControl: editorControlServer ? editorControlServer.status() : { running: false },
     }),
     project_list: async () => buildSystem.listProjects(),
-    project_open: async ({ projectName }) => {
-      const info = buildSystem.openProjectByName(String(projectName || '').trim());
+    project_open: async ({ projectName, projectDir }) => {
+      const selectedDir = String(projectDir || '').trim();
+      const info = selectedDir
+        ? buildSystem.openProject(selectedDir)
+        : buildSystem.openProjectByName(String(projectName || '').trim());
       return { ...info, pluginRoleSync: syncProjectPluginRoleState() };
     },
-    project_create: async ({ projectName, config, sourceCode }) => {
-      const created = buildSystem.createProjectInRoot(String(projectName || '').trim(), config || {}, sourceCode || null);
+    project_create: async ({ projectName, parentDir, templateId, config, sourceCode }) => {
+      const created = buildSystem.createProjectInParent(
+        parentDir || buildSystem.getProjectsRootDir(),
+        String(projectName || '').trim(),
+        config || {},
+        sourceCode || null,
+        { templateId: templateId || '' },
+      );
       return {
         projectDir: created.projectDir,
         projectName: path.basename(created.projectDir),
@@ -766,6 +868,19 @@ function getEditorControlService() {
     project_config_update: async ({ patch }) => ({ config: buildSystem.saveProjectConfig(patch || {}) }),
     asset_list: async () => rescompManager.listResDefinitions(buildSystem.getProjectDir()),
     asset_add: async ({ file, entry }) => rescompManager.addResEntry(buildSystem.getProjectDir(), file || 'resources.res', entry || {}),
+    asset_write_file: async ({ targetPath, dataBase64, dataUrl, sourcePath }) => {
+      const payload = {
+        targetSubdir: path.dirname(String(targetPath || '')).replace(/^[./\\]+$/, '') || 'assets',
+        targetFileName: path.basename(String(targetPath || '')),
+        sourcePath,
+        dataUrl,
+      };
+      if (!payload.dataUrl && dataBase64) {
+        payload.dataUrl = `data:application/octet-stream;base64,${dataBase64}`;
+      }
+      if (!payload.targetFileName) throw new Error('targetPath is required');
+      return rescompManager.writeAssetIntoRes(buildSystem.getProjectDir(), payload);
+    },
     asset_update: async ({ file, lineNumber, entry }) => rescompManager.updateResEntry(buildSystem.getProjectDir(), file || 'resources.res', lineNumber, entry || {}),
     asset_delete: async ({ file, lineNumber }) => rescompManager.deleteResEntry(buildSystem.getProjectDir(), file || 'resources.res', lineNumber),
     code_tree: async ({ path: relPath }) => {
@@ -1162,7 +1277,7 @@ ipcMain.handle('codefs:read', async (_event, payload) => {
     if (!fs.statSync(absPath).isFile()) {
       return { ok: false, error: 'file path is required' };
     }
-    return { ok: true, content: fs.readFileSync(absPath, 'utf-8') };
+    return readCodeFilePayload(absPath, payload?.path || '', { encoding: payload?.encoding });
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
   }
@@ -1171,9 +1286,10 @@ ipcMain.handle('codefs:read', async (_event, payload) => {
 ipcMain.handle('codefs:write', async (_event, payload) => {
   try {
     const { absPath } = resolveUnderCodeRoot(payload?.path || '');
+    const encoded = encodeCodeContent(payload?.content, payload?.encoding);
     fs.mkdirSync(path.dirname(absPath), { recursive: true });
-    fs.writeFileSync(absPath, String(payload?.content ?? ''), 'utf-8');
-    return { ok: true, path: payload?.path || '' };
+    fs.writeFileSync(absPath, encoded.buffer);
+    return { ok: true, path: payload?.path || '', encoding: encoded.encoding };
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
   }
@@ -1215,6 +1331,32 @@ ipcMain.handle('codefs:delete', async (_event, payload) => {
   }
 });
 
+ipcMain.handle('codefs:rename', async (_event, payload) => {
+  try {
+    const fromPath = String(payload?.fromPath || '').replace(/^[/\\]+/, '');
+    const toPath = String(payload?.toPath || '').replace(/^[/\\]+/, '');
+    if (!fromPath || !toPath) {
+      return { ok: false, error: 'rename path is required' };
+    }
+    const from = resolveUnderCodeRoot(fromPath);
+    const to = resolveUnderCodeRoot(toPath);
+    if (from.absPath === from.codeRoot) {
+      return { ok: false, error: 'project root はリネームできません' };
+    }
+    if (!fs.existsSync(from.absPath)) {
+      return { ok: false, error: `not found: ${fromPath}` };
+    }
+    if (fs.existsSync(to.absPath)) {
+      return { ok: false, error: `already exists: ${toPath}` };
+    }
+    fs.mkdirSync(path.dirname(to.absPath), { recursive: true });
+    fs.renameSync(from.absPath, to.absPath);
+    return { ok: true, fromPath, toPath };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 ipcMain.handle('res:listDefinitions', async () => {
   try {
     const projectDir = buildSystem.getProjectDir();
@@ -1229,6 +1371,16 @@ ipcMain.handle('res:createFile', async (_event, relativePath) => {
   try {
     const projectDir = buildSystem.getProjectDir();
     const result = rescompManager.createResFile(projectDir, relativePath);
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('res:deleteFile', async (_event, relativePath) => {
+  try {
+    const projectDir = buildSystem.getProjectDir();
+    const result = rescompManager.deleteResFile(projectDir, relativePath);
     return { ok: true, ...result };
   } catch (err) {
     return { ok: false, error: String(err?.message || err) };
@@ -2321,11 +2473,14 @@ ipcMain.handle('project:list', async () => {
 
 ipcMain.handle('project:openExisting', async (_event, payload) => {
   try {
+    const projectDir = String(payload?.projectDir || '').trim();
     const projectName = String(payload?.projectName || '').trim();
-    if (!projectName) {
-      return { ok: false, error: 'project name is empty' };
+    if (!projectDir && !projectName) {
+      return { ok: false, error: 'project path or name is empty' };
     }
-    const info = buildSystem.openProjectByName(projectName);
+    const info = projectDir
+      ? buildSystem.openProject(projectDir)
+      : buildSystem.openProjectByName(projectName);
     const pluginRoleSync = syncProjectPluginRoleState();
     return { ok: true, ...info, pluginRoleSync };
   } catch (err) {
@@ -2340,7 +2495,13 @@ ipcMain.handle('project:createNew', async (_event, payload) => {
       return { ok: false, error: 'project name is empty' };
     }
 
-    const created = buildSystem.createProjectInRoot(projectName, payload?.config || {}, payload?.sourceCode || null);
+    const created = buildSystem.createProjectInParent(
+      payload?.parentDir || buildSystem.getProjectsRootDir(),
+      projectName,
+      payload?.config || {},
+      payload?.sourceCode || null,
+      { templateId: payload?.templateId || '' },
+    );
     const pluginRoleSync = syncProjectPluginRoleState();
     return {
       ok: true,

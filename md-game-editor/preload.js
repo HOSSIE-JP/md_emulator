@@ -47,6 +47,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onPluginLog: (callback) => {
     ipcRenderer.on('plugin-log', (_event, payload) => callback(payload));
   },
+  onLogWindowClosed: (callback) => {
+    ipcRenderer.on('log:windowClosed', (_event, payload) => callback(payload));
+  },
   onMenuOpenSetup: (callback) => {
     ipcRenderer.on('menu:openSetup', (_event) => callback());
   },
@@ -61,6 +64,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   appendLogWindowEntry: (entry) => ipcRenderer.invoke('log:appendEntry', entry || {}),
   listResDefinitions: () => ipcRenderer.invoke('res:listDefinitions'),
   createResFile: (relativePath) => ipcRenderer.invoke('res:createFile', relativePath),
+  deleteResFile: (relativePath) => ipcRenderer.invoke('res:deleteFile', relativePath),
   addResEntry: (payload) => ipcRenderer.invoke('res:addEntry', payload),
   updateResEntry: (payload) => ipcRenderer.invoke('res:updateEntry', payload),
   deleteResEntry: (payload) => ipcRenderer.invoke('res:deleteEntry', payload),
@@ -85,6 +89,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeCodeFile: (payload) => ipcRenderer.invoke('codefs:write', payload),
   createCodeEntry: (payload) => ipcRenderer.invoke('codefs:create', payload),
   deleteCodeEntry: (payload) => ipcRenderer.invoke('codefs:delete', payload),
+  renameCodeEntry: (payload) => ipcRenderer.invoke('codefs:rename', payload),
   // --- プラグイン ---
   listPlugins: () => ipcRenderer.invoke('plugins:list'),
   getPluginRendererAssets: (id) => ipcRenderer.invoke('plugins:getRendererAssets', { id }),

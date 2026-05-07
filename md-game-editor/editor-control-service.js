@@ -46,12 +46,13 @@ function objectSchema(properties = {}, required = []) {
 const COMMANDS = [
   { name: 'editor_status', description: 'Return app, project, server, and capability status.', inputSchema: objectSchema() },
   { name: 'project_list', description: 'List projects known to MD Game Editor.', inputSchema: objectSchema() },
-  { name: 'project_open', description: 'Open an existing project by project name.', mutates: true, inputSchema: objectSchema({ projectName: { type: 'string' } }, ['projectName']) },
-  { name: 'project_create', description: 'Create a project under the editor projects root.', mutates: true, inputSchema: objectSchema({ projectName: { type: 'string' }, config: { type: 'object' }, sourceCode: { type: 'string' } }, ['projectName']) },
+  { name: 'project_open', description: 'Open an existing project by project name or absolute projectDir.', mutates: true, inputSchema: objectSchema({ projectName: { type: 'string' }, projectDir: { type: 'string' } }) },
+  { name: 'project_create', description: 'Create a project under a parent directory, optionally from a bundled template project.', mutates: true, inputSchema: objectSchema({ projectName: { type: 'string' }, parentDir: { type: 'string' }, templateId: { type: 'string' }, config: { type: 'object' }, sourceCode: { type: 'string' } }, ['projectName']) },
   { name: 'project_config_get', description: 'Read project.json for the current project.', inputSchema: objectSchema() },
   { name: 'project_config_update', description: 'Patch project.json for the current project.', mutates: true, inputSchema: objectSchema({ patch: { type: 'object' } }, ['patch']) },
   { name: 'asset_list', description: 'List ResComp resource definitions for the current project.', inputSchema: objectSchema() },
   { name: 'asset_add', description: 'Add an entry to a .res file.', mutates: true, inputSchema: objectSchema({ file: { type: 'string' }, entry: { type: 'object' } }, ['entry']) },
+  { name: 'asset_write_file', description: 'Write or copy a binary asset under the current project res directory.', mutates: true, inputSchema: objectSchema({ targetPath: { type: 'string' }, dataBase64: { type: 'string' }, dataUrl: { type: 'string' }, sourcePath: { type: 'string' } }, ['targetPath']) },
   { name: 'asset_update', description: 'Update an entry in a .res file by line number.', mutates: true, inputSchema: objectSchema({ file: { type: 'string' }, lineNumber: { type: 'number' }, entry: { type: 'object' } }, ['lineNumber', 'entry']) },
   { name: 'asset_delete', description: 'Delete an entry in a .res file by line number.', mutates: true, destructive: true, inputSchema: objectSchema({ file: { type: 'string' }, lineNumber: { type: 'number' } }, ['lineNumber']) },
   { name: 'code_tree', description: 'List files under the current project root.', inputSchema: objectSchema({ path: { type: 'string' } }) },
@@ -86,6 +87,69 @@ function ok(result) {
 
 function fail(code, message, details) {
   return { ok: false, error: { code, message: String(message || code), details } };
+}
+
+function isPlainObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function summarizeValue(value, depth = 0) {
+  if (typeof value === 'string') {
+    if (value.length > 160) return { type: 'string', length: value.length, preview: value.slice(0, 80) };
+    return value;
+  }
+  if (typeof value !== 'object' || value === null) return value;
+  if (Array.isArray(value)) {
+    return {
+      type: 'array',
+      length: value.length,
+      items: depth >= 1 ? undefined : value.slice(0, 5).map((item) => summarizeValue(item, depth + 1)),
+    };
+  }
+  if (depth >= 2) return { type: 'object', keys: Object.keys(value).slice(0, 12) };
+  const out = {};
+  Object.entries(value).slice(0, 20).forEach(([key, item]) => {
+    if (/^(dataBase64|dataUrl|content|sourceCode)$/i.test(key)) {
+      out[key] = typeof item === 'string'
+        ? { redacted: true, length: item.length }
+        : { redacted: true };
+      return;
+    }
+    out[key] = summarizeValue(item, depth + 1);
+  });
+  return out;
+}
+
+function summarizeToolResult(result) {
+  if (!result || result.ok === false) return result?.error || result;
+  const value = result.result;
+  if (!isPlainObject(value)) return summarizeValue(value);
+  const keys = [
+    'dryRun',
+    'name',
+    'projectName',
+    'projectDir',
+    'path',
+    'relativePath',
+    'srcPath',
+    'romPath',
+    'romSize',
+    'success',
+    'skipped',
+    'built',
+    'exportPath',
+  ];
+  const summary = {};
+  keys.forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(value, key)) summary[key] = summarizeValue(value[key]);
+  });
+  Object.entries(value).forEach(([key, item]) => {
+    if (Object.prototype.hasOwnProperty.call(summary, key)) return;
+    if (Array.isArray(item)) summary[key] = { type: 'array', length: item.length };
+    else if (isPlainObject(item)) summary[key] = { type: 'object', keys: Object.keys(item).slice(0, 12) };
+    else if (typeof item !== 'undefined') summary[key] = summarizeValue(item);
+  });
+  return summary;
 }
 
 function asErrorResult(err) {
@@ -244,6 +308,36 @@ function createEditorControlServer(service, options = {}) {
     if (typeof options.onLog === 'function') options.onLog(entry);
   }
 
+  function logEntry(entry) {
+    const next = {
+      at: new Date().toISOString(),
+      level: entry.level || 'info',
+      ...entry,
+    };
+    logs.push(next);
+    if (logs.length > 200) logs.splice(0, logs.length - 200);
+    if (typeof options.onLog === 'function') options.onLog(next);
+  }
+
+  async function callToolWithLog(protocol, name, args, callOptions = {}) {
+    const started = Date.now();
+    const result = await service.callTool(name, args || {}, callOptions);
+    const durationMs = Date.now() - started;
+    logEntry({
+      kind: 'tool',
+      protocol,
+      tool: String(name || ''),
+      level: result.ok ? 'info' : 'warn',
+      message: `${protocol} ${name || '(unknown)'} ${result.ok ? 'ok' : 'failed'} (${durationMs}ms)`,
+      arguments: summarizeValue(args || {}),
+      dryRun: Boolean(callOptions.dryRun),
+      confirm: callOptions.confirm === true,
+      durationMs,
+      result: summarizeToolResult(result),
+    });
+    return result;
+  }
+
   function status() {
     return {
       running: Boolean(server),
@@ -286,14 +380,17 @@ function createEditorControlServer(service, options = {}) {
       sendJson(res, 200, ok({ prompts: service.listPrompts() }));
       return;
     }
+    if (req.method === 'GET' && pathname === '/v1/logs') {
+      sendJson(res, 200, ok({ logs: logs.slice(-200) }));
+      return;
+    }
     if (req.method === 'POST' && pathname === '/v1/tools/call') {
       const body = await readJsonBody(req);
-      const result = await service.callTool(body.name, body.arguments || {}, {
+      const result = await callToolWithLog('rest', body.name, body.arguments || {}, {
         dryRun: body.dryRun,
         confirm: body.confirm,
         source: 'rest',
       });
-      log(result.ok ? 'info' : 'warn', `REST tool ${body.name}`, result.ok ? null : result.error);
       sendJson(res, result.ok ? 200 : 400, result);
       return;
     }
@@ -335,7 +432,7 @@ function createEditorControlServer(service, options = {}) {
         case 'tools/call': {
           const params = message.params || {};
           const args = params.arguments || {};
-          const result = await service.callTool(params.name, args, {
+          const result = await callToolWithLog('mcp-http', params.name, args, {
             dryRun: args.dryRun,
             confirm: args.confirm,
             source: 'mcp-http',
@@ -421,7 +518,7 @@ function createEditorControlServer(service, options = {}) {
 
   async function start(startOptions = {}) {
     if (server) return { ...status(), alreadyRunning: true, token };
-    const requested = Number(startOptions.port || options.port || DEFAULT_PORT);
+    const requested = Number(startOptions.port ?? options.port ?? DEFAULT_PORT);
     try {
       const nextStatus = await listen(requested);
       return { ...nextStatus, token, alreadyRunning: false };

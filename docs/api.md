@@ -21,6 +21,7 @@ MD Game Editor には、外部 AI ツールが Editor を操作するための o
 - `GET /v1/tools`
 - `GET /v1/resources`
 - `GET /v1/prompts`
+- `GET /v1/logs`
 - `POST /v1/resources/read`
 - `POST /v1/tools/call`
 
@@ -35,6 +36,8 @@ MD Game Editor には、外部 AI ツールが Editor を操作するための o
 }
 ```
 
+`GET /v1/logs` は REST と HTTP MCP の tool 呼び出しを同じ構造で返します。各ログには `protocol`、`tool`、引数の要約、`durationMs`、結果の要約が含まれ、大きな payload は redaction されます。
+
 ### MCP
 
 MCP stdio sidecar は `md-game-editor/scripts/md-game-editor-mcp.js` です。`MD_EDITOR_CONTROL_URL` と `MD_EDITOR_CONTROL_TOKEN` を設定して起動します。
@@ -43,7 +46,7 @@ MCP stdio sidecar は `md-game-editor/scripts/md-game-editor-mcp.js` です。`M
 
 - `editor_status`, `project_list`, `project_open`, `project_create`
 - `project_config_get`, `project_config_update`
-- `asset_list`, `asset_add`, `asset_update`, `asset_delete`
+- `asset_list`, `asset_write_file`, `asset_add`, `asset_update`, `asset_delete`
 - `code_tree`, `code_read`, `code_write`
 - `plugin_list`, `plugin_set_role`, `plugin_run_generator`
 - `build_run`, `testplay_open`, `export_rom`, `export_html`

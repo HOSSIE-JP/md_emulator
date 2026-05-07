@@ -63,29 +63,118 @@ test('plugin role accordion starts collapsed by default', () => {
 test('log viewer height persists and popout control is wired', () => {
   const html = readRendererFile('index.html');
   const renderer = readRendererFile('renderer.js');
+  const popoutHtml = readRendererFile('log-viewer.html');
+  const popoutRenderer = readRendererFile('log-viewer.js');
 
   assert.match(html, /id="btnPopoutLog"/);
   assert.match(renderer, /LOG_VIEWER_STATE_KEY\s*=\s*['"]md-editor\.logViewerState\.v1['"]/);
   assert.match(renderer, /localStorage\.setItem\(LOG_VIEWER_STATE_KEY/);
   assert.match(renderer, /loadLogViewerState\(\)/);
+  assert.match(renderer, /logDetached:\s*false/);
+  assert.match(renderer, /function setLogDetached\(detached\)/);
+  assert.match(renderer, /onLogWindowClosed\?\.\(\(\)\s*=>\s*\{\s*setLogDetached\(false\)/);
   assert.match(renderer, /openLogWindow\?\.\(getLogSnapshot\(\)\)/);
+  assert.match(renderer, /setLogDetached\(true\)/);
   assert.match(renderer, /appendLogWindowEntry\?\.\(entry\)/);
+  assert.match(renderer, /from '\.\/log-viewer-core\.mjs'/);
+  assert.match(popoutHtml, /<script type="module" src="\.\/log-viewer\.js"><\/script>/);
+  assert.match(popoutHtml, /id="logLevelFilter"/);
+  assert.match(popoutHtml, /id="logSearchInput"/);
+  assert.match(popoutHtml, /id="logSourceFilters"/);
+  assert.match(popoutRenderer, /from '\.\/log-viewer-core\.mjs'/);
 });
 
-test('startup selects the first sidebar plugin and project creation exposes builder choice', () => {
+test('asset manager res file delete and preview resize are wired', () => {
+  const html = readRendererFile('index.html');
+  const renderer = readRendererFile('renderer.js');
+  const css = readRendererFile('style.css');
+
+  assert.match(html, /id="btnDeleteAssetEntry"[\s\S]*title="選択中の \.res ファイルを削除"/);
+  assert.match(html, /id="assetPreviewResizer"[\s\S]*role="separator"/);
+  assert.match(renderer, /deleteResFile\(fileName\)/);
+  assert.match(renderer, /el\.btnDeleteAssetEntry\?\.addEventListener\('click',\s*deleteCurrentResFile\)/);
+  assert.match(renderer, /ASSET_PREVIEW_WIDTH_KEY\s*=\s*['"]md-editor\.assetPreviewWidth\.v1['"]/);
+  assert.match(renderer, /assetPreviewResizer:\s*\$\('assetPreviewResizer'\)/);
+  assert.match(renderer, /function beginAssetPreviewResize\(event\)/);
+  assert.match(renderer, /addEventListener\('pointerdown',\s*beginAssetPreviewResize\)/);
+  assert.match(css, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s*5px\s*var\(--asset-preview-width\)/);
+  assert.match(css, /\.asset-preview-resizer/);
+});
+
+test('code editor exposes advanced tree, preview, encoding, rename, and completion controls', () => {
+  const html = readRendererFile('index.html');
+  const renderer = readRendererFile('renderer.js');
+  const css = readRendererFile('style.css');
+
+  assert.doesNotMatch(html, /id="btnOpenSrcFolder"/);
+  assert.doesNotMatch(html, /id="btnCodeReload"/);
+  assert.match(html, /id="codeTreeFilterInput"/);
+  assert.match(html, /placeholder="検索語 \/ 正規表現 \/ glob"/);
+  assert.doesNotMatch(html, /placeholder="\*\.c"/);
+  assert.match(html, /id="codeEntryModal"/);
+  assert.match(html, /id="codeMediaPreview"/);
+  assert.match(html, /id="codeEncodingSelect"[\s\S]*value="auto"[\s\S]*value="shift_jis"/);
+  assert.match(html, /id="codeCompletionPanel"/);
+  assert.match(html, /id="btnCodeFindToggle"/);
+  assert.match(html, /id="btnSaveCode"[\s\S]*id="btnCodeDelete"/);
+  assert.match(html, /id="codeFindPanel"/);
+  assert.match(html, /id="codeFindInput"/);
+  assert.match(html, /id="codeReplaceInput"/);
+  assert.match(html, /id="btnCodeReplaceAll"/);
+  assert.match(html, /id="codeEditor"[\s\S]*wrap="off"/);
+  assert.doesNotMatch(html, /id="btnCopyCode"/);
+  assert.doesNotMatch(html, /id="codeNewEntryRow"/);
+
+  assert.match(renderer, /promptCreateCodeEntry\('file'\)/);
+  assert.match(renderer, /next === 'code'[\s\S]*loadCodeTree\(undefined, \{ refreshOnly: state\.code\.dirty \}\)/);
+  assert.doesNotMatch(renderer, /btnOpenSrcFolder/);
+  assert.doesNotMatch(renderer, /btnCodeReload/);
+  assert.match(renderer, /function renameSelectedCodeEntry\(\)/);
+  assert.match(renderer, /renameCodeEntry\?\.\(\{ fromPath, toPath \}\)/);
+  assert.match(renderer, /state\.code\.collapsedDirs = collectAllDirPaths\(state\.code\.tree\)/);
+  assert.match(renderer, /function getCodeTreeFilter\(\)/);
+  assert.match(renderer, /globToRegExp/);
+  assert.match(renderer, /result\.previewKind === 'image'/);
+  assert.match(renderer, /state\.code\.selectedEncoding/);
+  assert.match(renderer, /CODE_COMPLETION_ITEMS/);
+  assert.match(renderer, /applyCodeCompletion\(\)/);
+  assert.match(renderer, /function updateCodeCursorLine\(\)/);
+  assert.match(renderer, /function replaceCurrentCodeMatch\(\)/);
+  assert.match(renderer, /function getCodeLines\(content\)/);
+  assert.match(renderer, /function wrapHighlightedCodeLines\(highlighted, sourceText\)/);
+  assert.match(renderer, /\.join\(''\)/);
+  assert.match(renderer, /function updateCodeEditorMetrics\(content\)/);
+  assert.match(renderer, /editor\.style\.height = `\$\{minHeight\}px`/);
+  assert.match(renderer, /if \(state\.code\.findOpen\) closeCodeFindPanel\(\)/);
+  assert.match(css, /\.code-media-preview/);
+  assert.match(css, /\.code-completion-panel/);
+  assert.match(css, /\.code-tree-filter-input/);
+  assert.match(css, /\.code-find-panel/);
+  assert.match(css, /\.code-line-number/);
+  assert.match(css, /\.code-highlight-line\.cursor-line/);
+  assert.match(css, /\.code-highlight-line\.find-line/);
+});
+
+test('startup selects the first sidebar plugin and project creation exposes template choice', () => {
   const html = readRendererFile('index.html');
   const renderer = readRendererFile('renderer.js');
 
-  assert.match(html, /id="projectBuilderSelect"/);
+  assert.match(html, /id="btnProjectPickerOpenFolder"/);
+  assert.match(html, /id="btnProjectPickerNew"/);
+  assert.match(html, /最近開いたプロジェクト|projectPickerList/);
+  assert.match(html, /id="projectParentDirInput"/);
+  assert.match(html, /id="btnProjectParentDirBrowse"/);
+  assert.match(html, /id="projectTemplateSelect"/);
   assert.match(renderer, /function getFirstSidebarPluginPageId\(\)/);
   assert.match(renderer, /selectedDefaultSidebarPage:\s*false/);
   assert.match(renderer, /switchPage\(getFirstSidebarPluginPageId\(\)\s*\|\|\s*getFirstVisiblePageId\(\)\)/);
-  assert.match(renderer, /function populateProjectBuilderSelect\(\)/);
-  assert.match(renderer, /function getPluginsByRole\(roleId\)/);
-  assert.match(renderer, /return getPluginsByRole\('builder'\)/);
-  assert.doesNotMatch(renderer, /function getInstalledBuilderPlugins\(\)\s*\{[\s\S]*?plugin\.enabled && pluginSupportsRole\(plugin,\s*'builder'\)/);
+  assert.match(renderer, /function populateProjectTemplateSelect\(\)/);
+  assert.match(renderer, /function openProjectFolderFromDialog\(\)/);
   assert.match(renderer, /空のプロジェクト/);
-  assert.match(renderer, /payload\.config\.pluginRoles\s*=\s*\{\s*builder:\s*selectedBuilder\s*\}/);
+  assert.match(renderer, /parentDir:\s*el\.projectParentDirInput\?\.value\.trim\(\)/);
+  assert.match(renderer, /templateId:\s*String\(el\.projectTemplateSelect\?\.value \|\| ''\)\.trim\(\)/);
+  assert.doesNotMatch(renderer, /payload\.config\.pluginRoles\s*=\s*\{\s*builder:/);
+  assert.match(renderer, /openExistingProject\(\{\s*projectDir/s);
 });
 
 test('sidebar plugin icons prefer manifest icon over tab icon', () => {
@@ -116,6 +205,24 @@ test('default sidebar order prioritizes game editors then core tools', () => {
   assert.ok(bgm.tab.order < code.tab.order);
   assert.ok(html.indexOf('id="sidebarPluginTabs"') < html.indexOf('data-page="plugins"'));
   assert.ok(html.indexOf('data-page="plugins"') < html.indexOf('data-page="settings"'));
+});
+
+test('sidebar context menu toggles installed tab plugins', () => {
+  const renderer = readRendererFile('renderer.js');
+  const css = readRendererFile('style.css');
+
+  assert.match(renderer, /function isSidebarTogglePlugin\(plugin\)/);
+  assert.match(renderer, /plugin\?\.tab && plugin\?\.hasRenderer && getPluginRendererPageId\(plugin\)/);
+  assert.match(renderer, /function getSidebarTogglePlugins\(\)/);
+  assert.match(renderer, /\.filter\(\(plugin\) => isSidebarTogglePlugin\(plugin\)\)/);
+  assert.match(renderer, /function openSidebarPluginContextMenu\(event\)/);
+  assert.match(renderer, /el\.sidebar\?\.addEventListener\('contextmenu',\s*openSidebarPluginContextMenu\)/);
+  assert.match(renderer, /data-sidebar-plugin-toggle/);
+  assert.match(renderer, /await setPluginEnabledFromUi\(plugin,\s*Boolean\(input\.checked\),\s*input\)/);
+  assert.match(renderer, /async function setPluginEnabledFromUi\(plugin,\s*desired,\s*control = null\)/);
+  assert.match(renderer, /window\.electronAPI\.setPluginEnabled\(plugin\.id,\s*desired\)/);
+  assert.match(css, /\.sidebar-plugin-context-menu/);
+  assert.match(css, /\.sidebar-plugin-menu-item/);
 });
 
 test('plugin page availability keeps multiple editor plugin pages independent', () => {
@@ -245,6 +352,27 @@ test('project plugin roles restore plugin enabled state on plugin load', () => {
   assert.match(renderer, /window\.electronAPI\.setPluginRole\(roleId,\s*pluginId\)/);
   assert.match(renderer, /pluginState\.plugins = await window\.electronAPI\.listPlugins\(\)/);
   assert.match(renderer, /await restoreProjectPluginRoleState\(\)/);
+});
+
+test('project plugin settings persist non-role enabled state and sidebar order', () => {
+  const renderer = readRendererFile('renderer.js');
+
+  assert.match(renderer, /const PROJECT_PLUGIN_STATE_EXCLUDED_ROLES = \['builder', 'testplay'\]/);
+  assert.match(renderer, /function isProjectPluginStateManaged\(plugin\)/);
+  assert.match(renderer, /!PROJECT_PLUGIN_STATE_EXCLUDED_ROLES\.some\(\(roleId\) => pluginSupportsRole\(plugin,\s*roleId\)\)/);
+  assert.match(renderer, /function getProjectPluginEnabledSettings\(\)/);
+  assert.match(renderer, /function getCurrentProjectPluginEnabledState\(\)/);
+  assert.match(renderer, /\.filter\(\(plugin\) => isProjectPluginStateManaged\(plugin\)\)/);
+  assert.match(renderer, /async function restoreProjectPluginEnabledState\(\)/);
+  assert.match(renderer, /window\.electronAPI\.setPluginEnabled\(pluginId,\s*Boolean\(enabled\)\)/);
+  assert.match(renderer, /await restoreProjectPluginEnabledState\(\)/);
+  assert.match(renderer, /await persistProjectPluginSettings\(\{ enabled: getCurrentProjectPluginEnabledState\(\) \}\)/);
+  assert.match(renderer, /persistProjectPluginSettings\(\{ sidebarOrder: pluginState\.sidebarOrder \}\)/);
+  assert.match(renderer, /const projectOrder = getProjectPluginSidebarOrder\(\)/);
+  assert.match(renderer, /const validIds = new Set\(getSidebarTogglePlugins\(\)\.map\(\(p\) => p\.id\)\)/);
+  assert.match(renderer, /state\.projectConfig = \{ \.\.\.state\.projectConfig, \.\.\.cfg, \.\.\.normalized \}/);
+  assert.match(renderer, /loadPlugins\(options = \{\}\)/);
+  assert.match(renderer, /skipProjectPluginStateRestore/);
 });
 
 test('quantize dialog is larger and exposes tone controls', () => {

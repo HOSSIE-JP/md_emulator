@@ -40,15 +40,16 @@ test('standard WASM emulator owns its bundled testplay assets and handles launch
   assert.equal(result.handled, true);
 });
 
-test('standard API emulator declares UI and opens API-backed testplay window', async () => {
+test('standard API emulator declares testplay role and opens API-backed testplay window', async () => {
   const pluginDir = path.join(__dirname, '..', 'plugins', 'standard-api-emulator');
   const manifest = readManifest('standard-api-emulator');
   const plugin = require(path.join(pluginDir, 'index.js'));
   const mainSource = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
   const prepareDistSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'prepare-dist.js'), 'utf-8');
 
-  assert.equal(manifest.tab.page, 'api-emulator');
-  assert.ok(manifest.renderer.capabilities.includes('api-emulator-control'));
+  assert.equal(manifest.tab, undefined);
+  assert.equal(manifest.renderer, undefined);
+  assert.deepEqual(manifest.roles, [{ id: 'testplay', label: 'Test Play', exclusive: true, order: 21 }]);
   assert.ok(manifest.permissions.includes('api.start'));
   assert.ok(fs.existsSync(path.join(pluginDir, 'api-testplay.html')));
   assert.ok(fs.existsSync(path.join(pluginDir, 'api-testplay-preload.js')));

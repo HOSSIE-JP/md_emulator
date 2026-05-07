@@ -77,6 +77,20 @@ test('block-stage-editor exposes a v2 renderer module', () => {
   assert.equal(new URL(plugin.rendererAssets.scriptUrl).protocol, 'file:');
 });
 
+test('block-stage-editor refreshes referenced asset definitions on page activation', () => {
+  const rendererSource = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'block-stage-editor', 'renderer.js'), 'utf8');
+
+  assert.match(rendererSource, /async function refresh\(\)[\s\S]*?await refreshResourcesFromResFile\(\);/);
+  assert.match(rendererSource, /function observePageActivation\(\)/);
+  assert.match(rendererSource, /new MutationObserver/);
+  assert.match(rendererSource, /active && !state\.wasActive[\s\S]*?refreshVisibleAssetDefinitions\(\)/);
+  assert.match(rendererSource, /function refreshVisibleAssetDefinitions\(\)/);
+  assert.match(rendererSource, /refreshVisibleAssetDefinitions[\s\S]*?await refreshResourcesFromResFile\(\);/);
+  assert.match(rendererSource, /refreshVisibleAssetDefinitions[\s\S]*?renderAssetSettings\(\);/);
+  assert.match(rendererSource, /refreshVisibleAssetDefinitions[\s\S]*?updateStageThumbs\(\);/);
+  assert.match(rendererSource, /observePageActivation\(\);\s*void refresh\(\);/);
+});
+
 test('block-game-builder declares builder role and stage-editor dependency', () => {
   const userData = makeTempDir('md-editor-block-builder-plugin-test-');
   const pluginManager = loadWithMockedElectron(path.join(__dirname, '..', 'plugin-manager.js'), { userData });

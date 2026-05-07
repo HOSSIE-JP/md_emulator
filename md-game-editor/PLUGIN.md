@@ -757,6 +757,8 @@ Tiled 互換の `.tmx` / `.tsx` サブセットを編集し、SGDK ResComp の `
 
 TMX 入力の `MAP` / `TILEMAP` 定義では、ResComp 構文に合わせて Asset Manager の `tileset_id` 欄を `layer_id` として扱います。画像入力の `MAP` / `TILEMAP` では従来どおり `tileset_id` です。
 
+collision は `Collision` / `Collision:<name>` という TMX tile layer に CSV 値として保存します。ResComp の描画対象 layer_id には使わず、TileMap エディタ保存時に `inc/tilemap_collision.h` / `src/tilemap_collision.c` を生成してゲーム側の判定ロジックから参照します。
+
 ---
 
 ### `image-resize-converter` — 画像リサイズコンバーター

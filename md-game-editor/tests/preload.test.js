@@ -12,6 +12,7 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.equal(typeof api.openRomDialog, 'function');
   assert.equal(typeof api.generateProject, 'function');
   assert.equal(typeof api.listResDefinitions, 'function');
+  assert.equal(typeof api.deleteResFile, 'function');
   assert.equal(typeof api.pickFile, 'function');
   assert.equal(typeof api.readTempFileAsDataUrl, 'function');
   assert.equal(typeof api.listPlugins, 'function');
@@ -23,17 +24,20 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.equal(typeof api.openLogWindow, 'function');
   assert.equal(typeof api.syncLogWindow, 'function');
   assert.equal(typeof api.appendLogWindowEntry, 'function');
+  assert.equal(typeof api.onLogWindowClosed, 'function');
   assert.equal(typeof api.loadOptionalAudioEngine, 'function');
   assert.equal(typeof api.exportHtml, 'function');
   assert.equal(typeof api.getProjectStartupState, 'function');
   assert.equal(typeof api.startAiControlServer, 'function');
   assert.equal(typeof api.getAiControlStatus, 'function');
   assert.equal(typeof api.listAiControlTools, 'function');
+  assert.equal(typeof api.renameCodeEntry, 'function');
   assert.equal(typeof api.quitApp, 'function');
 
   await api.readRomFile('game.bin');
   await api.pickFile({ title: 'Pick' });
   await api.readTempFileAsDataUrl('tmp.wav', { deleteAfter: true });
+  await api.deleteResFile('resources.res');
   await api.setPluginRole('builder', 'slideshow');
   await api.saveProjectConfig({ title: 'Saved' });
   await api.getPluginRendererAssets('asset-manager');
@@ -42,13 +46,19 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   await api.openLogWindow({ entries: [] });
   await api.appendLogWindowEntry({ source: 'app', text: 'hello' });
   await api.createCodeEntry({ path: 'src/new.c', type: 'file' });
+  await api.renameCodeEntry({ fromPath: 'src/new.c', toPath: 'src/renamed.c' });
   await api.startAiControlServer({ port: 17777 });
   await api.getProjectStartupState();
   await api.quitApp();
 
+  assert.deepEqual(invocations.find((entry) => entry.channel === 'res:deleteFile'), {
+    channel: 'res:deleteFile',
+    args: ['resources.res'],
+  });
+
   assert.deepEqual(invocations.slice(-5), [
-    { channel: 'log:appendEntry', args: [{ source: 'app', text: 'hello' }] },
     { channel: 'codefs:create', args: [{ path: 'src/new.c', type: 'file' }] },
+    { channel: 'codefs:rename', args: [{ fromPath: 'src/new.c', toPath: 'src/renamed.c' }] },
     { channel: 'ai-control:start', args: [{ port: 17777 }] },
     { channel: 'project:getStartupState', args: [] },
     { channel: 'app:quit', args: [] },
@@ -72,6 +82,11 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   api.onAiControlLog((payload) => { aiControlLog = payload; });
   listeners.get('ai-control-log')({}, { message: 'started' });
   assert.deepEqual(aiControlLog, { message: 'started' });
+
+  let logWindowClosed = null;
+  api.onLogWindowClosed((payload) => { logWindowClosed = payload; });
+  listeners.get('log:windowClosed')({}, { closed: true });
+  assert.deepEqual(logWindowClosed, { closed: true });
 });
 
 test('setup preload exposes setup IPC helpers and progress listener', async () => {

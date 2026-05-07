@@ -1,0 +1,58 @@
+{
+  "se_bindings": {
+    "ball_hit_paddle": "se_ball_hit_paddle",
+    "ball_hit_wall": "se_ball_hit_wall",
+    "block_break": "se_block_break",
+    "block_hit": "se_ball_hit_wall",
+    "game_start": "se_game_start",
+    "powerup_appear": "se_powerup_appear",
+    "powerup_get": "se_powerup_get",
+    "game_over": "se_game_over",
+    "ball_lose": "se_ball_lose",
+    "pause": "se_pause",
+    "stage_clear": "se_stage_clear",
+    "bonus_count": "se_bonus_count"
+  },
+  "sprite_bindings": {
+    "ball": "spr_ball",
+    "paddle": "spr_paddle",
+    "powerup_multi_ball": "spr_powerup_multi_ball",
+    "powerup_strong": "spr_powerup_strong",
+    "powerup_speed_up": "spr_powerup_speed_up",
+    "powerup_barrier": "spr_powerup_barrier",
+    "block_white": "spr_block_white",
+    "block_yellow": "spr_block_yellow",
+    "block_green": "spr_block_green",
+    "block_blue": "spr_block_blue",
+    "block_red": "spr_block_white",
+    "block_gray": "spr_block_gray"
+  },
+  "image_usage_bindings": {
+    "logo_screen_1": "img_logo_screen_1",
+    "logo_screen_2": "img_logo_screen_2",
+    "title_screen": "img_title_screen",
+    "game_over_screen": "img_game_over_screen",
+    "high_score_screen": "img_high_score_screen",
+    "game_clear_screen": "img_game_clear_screen"
+  },
+  "game_settings": {
+    "ball_speed": 3,
+    "paddle_speed": 3,
+    "initial_lives": 4,
+    "bgm_volume": 100,
+    "system_font_symbol": "font_system",
+    "screen_wait_seconds": {
+      "logo_screen_1": 3,
+      "logo_screen_2": 3,
+      "title_screen": 55,
+      "high_score_screen": 45,
+      "game_over_screen": 0,
+      "game_clear_screen": 0
+    },
+    "screen_bgm_symbols": {
+      "title_screen": "bgm_003",
+      "game_clear_screen": "bgm_002",
+      "high_score_screen": ""
+    }
+  }
+}

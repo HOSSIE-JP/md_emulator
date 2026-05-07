@@ -220,6 +220,8 @@ TYPE   name   "ファイルパス"   [追加パラメータ]
 #include "resources.h"
 ```
 
+TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id ではなく、TMX の `Collision` / `Collision:<name>` tile layer として保存される。ゲーム側で使う場合はエディタが生成する `inc/tilemap_collision.h` / `src/tilemap_collision.c` の `tilemap_collision_at()` を参照する。
+
 ---
 
 ## フック早見表
@@ -275,4 +277,4 @@ TYPE   name   "ファイルパス"   [追加パラメータ]
 
 ---
 
-*Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.4 / AI Control API*
+*Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.4 / AI Control API / TileMap collision*

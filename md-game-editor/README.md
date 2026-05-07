@@ -352,7 +352,7 @@ contextBridge.exposeInMainWorld('myFeatureAPI', {
 
 ### 4. サンプル ROM の差し替え
 
-`md-game-editor/projects/sample_slideshow/src/main.c` を編集するか、`md-game-editor/projects/` 配下のサンプルプロジェクトを差し替えます。  
+`md-game-editor/template/template_slideshow/src/main.c` を編集するか、`md-game-editor/template/` 配下のテンプレートプロジェクトを差し替えます。  
 ビルドコマンドは `build-system.js` の `buildRom()` が制御しています。
 
 ### 5. 画面レイアウトの変更

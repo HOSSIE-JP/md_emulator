@@ -229,6 +229,12 @@ function parseMidiTrack(data, trackIndex) {
       if (type === 0x03) {
         name = payload.toString('utf-8') || name;
         events.push({ tick, type: 'trackName', name });
+      } else if (type === 0x01) {
+        events.push({ tick, type: 'text', text: payload.toString('utf-8') });
+      } else if (type === 0x02) {
+        events.push({ tick, type: 'copyright', text: payload.toString('utf-8') });
+      } else if (type === 0x04) {
+        events.push({ tick, type: 'instrumentName', name: payload.toString('utf-8') });
       } else if (type === 0x51 && payload.length === 3) {
         events.push({
           tick,
@@ -272,6 +278,25 @@ function parseMidiTrack(data, trackIndex) {
   }
 
   return { index: trackIndex, name, events };
+}
+
+function extractMidiMetadata(midi, fallbackTitle = 'Imported MIDI') {
+  const events = midi.tracks.flatMap((track) => track.events || []);
+  const trackNames = events.filter((event) => event.type === 'trackName').map((event) => event.name).filter(Boolean);
+  const textEvents = events.filter((event) => event.type === 'text').map((event) => event.text).filter(Boolean);
+  const copyright = events.find((event) => event.type === 'copyright')?.text || '';
+  const firstMusicTrack = midi.tracks.find((track) => (track.events || []).some((event) => event.type === 'noteOn'));
+  const title = trackNames.find((name) => !/^tempo$/i.test(name))
+    || firstMusicTrack?.name
+    || textEvents[0]
+    || fallbackTitle;
+  return {
+    title,
+    artist: copyright.replace(/^copyright\s*/i, '').trim(),
+    trackNames,
+    text: textEvents,
+    copyright,
+  };
 }
 
 function extractNotes(track, diagnostics) {
@@ -335,7 +360,9 @@ function extractNotes(track, diagnostics) {
 
 function convertMidiToSong(midi, options = {}) {
   const diagnostics = [];
-  const title = String(options.title || 'Imported MIDI');
+  const midiMetadata = extractMidiMetadata(midi, options.title || 'Imported MIDI');
+  const title = String(options.title || midiMetadata.title || 'Imported MIDI');
+  const artist = String(options.artist || midiMetadata.artist || '');
   const symbol = normalizeSymbolName(options.symbol || title);
   const tempoEvent = midi.tracks.flatMap((track) => track.events).find((event) => event.type === 'tempo');
   const tempo = tempoEvent ? Math.round(60000000 / tempoEvent.microsecondsPerQuarter) : 150;
@@ -373,13 +400,18 @@ function convertMidiToSong(midi, options = {}) {
   const maxTick = candidates.reduce((max, entry) => Math.max(max, ...entry.notes.map((note) => note.endTick)), 0);
   const totalRows = Math.max(ROWS_PER_PATTERN, Math.ceil(maxTick / ticksPerRow) + 1);
   const patternCount = Math.max(1, Math.ceil(totalRows / ROWS_PER_PATTERN));
-  const song = createDefaultSong({ title, symbol, tempo, speed: DEFAULT_TICKS_PER_ROW });
+  const song = createDefaultSong({ title, artist, symbol, tempo, speed: DEFAULT_TICKS_PER_ROW });
   song.order = Array.from({ length: patternCount }, (_, index) => index);
   song.patterns = song.order.map((id) => ({ id, name: `Pattern ${String(id).padStart(2, '0')}`, rows: createEmptyRows() }));
   song.metadata.midi = {
     format: midi.format,
     ticksPerQuarter: midi.ticksPerQuarter,
     ticksPerRow,
+    title: midiMetadata.title,
+    artist: midiMetadata.artist,
+    trackNames: midiMetadata.trackNames,
+    text: midiMetadata.text,
+    copyright: midiMetadata.copyright,
     allocations,
   };
 
@@ -709,6 +741,123 @@ function psgPeriodToMidi(period) {
   return Math.max(24, Math.min(96, Math.round(69 + (12 * Math.log2(frequency / 440)))));
 }
 
+function clampInt(value, min, max, fallback = min) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(n)));
+}
+
+function parseGd3Tag(buffer) {
+  const gd3Offset = readU32LE(buffer, 0x14) >>> 0;
+  if (!gd3Offset) return {};
+  const offset = 0x14 + gd3Offset;
+  if (offset < 0 || offset + 12 > buffer.length || buffer.toString('ascii', offset, offset + 4) !== 'Gd3 ') return {};
+  const length = readU32LE(buffer, offset + 8) >>> 0;
+  const end = Math.min(buffer.length, offset + 12 + length);
+  const strings = buffer.toString('utf16le', offset + 12, end).split('\u0000');
+  const [
+    titleEn = '',
+    titleJp = '',
+    gameEn = '',
+    gameJp = '',
+    systemEn = '',
+    systemJp = '',
+    artistEn = '',
+    artistJp = '',
+    date = '',
+    creator = '',
+    notes = '',
+  ] = strings;
+  return {
+    title: titleEn || titleJp || '',
+    titleEn,
+    titleJp,
+    game: gameEn || gameJp || '',
+    gameEn,
+    gameJp,
+    system: systemEn || systemJp || '',
+    systemEn,
+    systemJp,
+    artist: artistEn || artistJp || '',
+    artistEn,
+    artistJp,
+    date,
+    creator,
+    notes,
+  };
+}
+
+function parseVgmHeaderMetadata(buffer, symbol) {
+  const totalSamples = readU32LE(buffer, 0x18) >>> 0;
+  const loopSamples = readU32LE(buffer, 0x20) >>> 0;
+  const rate = readU32LE(buffer, 0x24) >>> 0;
+  const sn76489Clock = readU32LE(buffer, 0x0c) >>> 0;
+  const ym2612Clock = readU32LE(buffer, 0x2c) >>> 0;
+  const version = readU32LE(buffer, 0x08) >>> 0;
+  const gd3 = parseGd3Tag(buffer);
+  return {
+    version,
+    title: gd3.title || symbol,
+    artist: gd3.artist || '',
+    durationSec: totalSamples ? totalSamples / SAMPLE_RATE_NTSC : 0,
+    totalSamples,
+    loopSamples,
+    rate,
+    sn76489Clock,
+    ym2612Clock,
+    gd3,
+  };
+}
+
+function scanVgmWaits(buffer, startOffset) {
+  const waits = [];
+  let offset = startOffset;
+  while (offset < buffer.length) {
+    const command = buffer[offset++];
+    if (command === 0x66) break;
+    if (command === 0x52 || command === 0x53) {
+      offset += 2;
+    } else if (command === 0x50) {
+      offset += 1;
+    } else if (command === 0x61) {
+      const wait = readU16LE(buffer, offset);
+      offset += 2;
+      if (wait >= 16) waits.push(wait);
+    } else if (command === 0x62) {
+      waits.push(735);
+    } else if (command === 0x63) {
+      waits.push(882);
+    } else if (command === 0x67 && buffer[offset] === 0x66) {
+      const size = readU32LE(buffer, offset + 2) >>> 0;
+      offset += 6 + size;
+    } else if (command >= 0x70 && command <= 0x7F) {
+      const wait = (command & 0x0F) + 1;
+      if (wait >= 16) waits.push(wait);
+    } else {
+      break;
+    }
+  }
+  return waits;
+}
+
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function inferGridFromVgm(buffer, startOffset) {
+  const rowWaitSamples = Math.max(1, median(scanVgmWaits(buffer, startOffset)) || 735);
+  const rowMs = rowWaitSamples * 1000 / SAMPLE_RATE_NTSC;
+  let tempo = 150;
+  let speed = clampInt(rowMs / 100 * DEFAULT_TICKS_PER_ROW, 1, 31, DEFAULT_TICKS_PER_ROW);
+  if (speed === 31 && rowMs > (60000 / tempo / 4) * (31 / DEFAULT_TICKS_PER_ROW)) {
+    speed = DEFAULT_TICKS_PER_ROW;
+    tempo = clampInt((60000 / 4) * (speed / DEFAULT_TICKS_PER_ROW) / rowMs, 30, 300, 150);
+  }
+  return { rowWaitSamples, rowMs, tempo, speed };
+}
+
 function setSongCellFromVgm(song, absoluteRow, channelId, midiNote, diagnostics, instrument) {
   const patternIndex = Math.floor(absoluteRow / ROWS_PER_PATTERN);
   while (song.patterns.length <= patternIndex) {
@@ -739,19 +888,38 @@ function analyzeVgm(payload, context = {}) {
     return analyzeXgm(payload, context);
   }
   const symbol = normalizeSymbolName(payload?.symbol || path.basename(sourcePath, path.extname(sourcePath)));
-  const song = createDefaultSong({ title: symbol, symbol });
-  const diagnostics = [makeDiagnostic('info', 'vgm-approximation', 'VGM から近似復元しました。音色・長さ・effect は完全再現ではありません。')];
   const buffer = fs.readFileSync(sourcePath);
   if (buffer.length < 0x40 || buffer.toString('ascii', 0, 4) !== 'Vgm ') {
     return { ok: false, error: 'VGM header が見つかりません。' };
   }
   let offset = readU32LE(buffer, 0x34) ? 0x34 + readU32LE(buffer, 0x34) : 0x40;
   if (offset < 0x40 || offset >= buffer.length) offset = 0x40;
+  const sourceMetadata = parseVgmHeaderMetadata(buffer, symbol);
+  const grid = inferGridFromVgm(buffer, offset);
+  const song = createDefaultSong({
+    title: sourceMetadata.title || symbol,
+    artist: sourceMetadata.artist || '',
+    symbol,
+    tempo: grid.tempo,
+    speed: grid.speed,
+  });
+  song.metadata.source = {
+    type: 'VGM',
+    path: sourcePath,
+    ...sourceMetadata,
+    inferredRowWaitSamples: grid.rowWaitSamples,
+    inferredRowMs: grid.rowMs,
+  };
+  const diagnostics = [makeDiagnostic('info', 'vgm-approximation', 'VGM から近似復元しました。音色・長さ・effect は完全再現ではありません。')];
+  if (sourceMetadata.gd3?.title || sourceMetadata.gd3?.artist) {
+    diagnostics.push(makeDiagnostic('info', 'vgm-gd3-metadata', 'VGM GD3 メタ情報を Song プロパティへ反映しました。'));
+  }
+  diagnostics.push(makeDiagnostic('info', 'vgm-grid-inferred', `VGM wait から tempo ${grid.tempo} / speed ${grid.speed} を推定しました。`));
   let samples = 0;
   const fm = Array.from({ length: 6 }, () => ({ fnum: 0, block: 4 }));
   const psg = Array.from({ length: 4 }, () => ({ tone: 0, volume: 15 }));
   let psgLatch = { type: 'tone', channel: 0 };
-  const sampleToRow = () => Math.max(0, Math.round(samples / 735));
+  const sampleToRow = () => Math.max(0, Math.round(samples / grid.rowWaitSamples));
 
   while (offset < buffer.length) {
     const command = buffer[offset++];
@@ -840,8 +1008,16 @@ function analyzeXgm(payload, context = {}) {
     return analyzeVgm({ ...payload, sourcePath, forceVgm: true }, context);
   }
   const song = createDefaultSong({ title: symbol, symbol });
+  song.metadata.source = {
+    type: 'XGM',
+    path: sourcePath,
+    byteLength: buffer.length,
+    tempo: song.tempo,
+    speed: song.speed,
+  };
   const diagnostics = [
     makeDiagnostic('warn', 'xgm-approximation', 'XGM から近似復元しました。音色・effect・細かなタイミングは完全再現ではありません。'),
+    makeDiagnostic('info', 'xgm-metadata-limited', 'XGM には標準の曲名/作者メタ情報がないため、ファイル名と既定 tempo/speed を使用しました。'),
   ];
 
   // XGM is a packed command stream, not an editable project format. For now,
@@ -869,8 +1045,9 @@ function importMidi(payload) {
   }
   const midi = parseMidi(fs.readFileSync(sourcePath));
   const imported = convertMidiToSong(midi, {
-    title: payload?.title || path.basename(sourcePath, path.extname(sourcePath)),
+    title: payload?.title,
     symbol: payload?.symbol || path.basename(sourcePath, path.extname(sourcePath)),
+    artist: payload?.artist,
     allocations: payload?.allocations,
   });
   return { ok: true, ...imported };

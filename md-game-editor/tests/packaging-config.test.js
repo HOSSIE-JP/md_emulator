@@ -9,13 +9,14 @@ function readPackageConfig() {
   return fs.readFileSync(path.join(__dirname, '..', 'electron-builder.yml'), 'utf-8');
 }
 
-test('packaging includes the bundled game editor sample projects', () => {
+test('packaging includes the bundled game editor template projects', () => {
   const config = readPackageConfig();
 
-  assert.match(config, /from:\s*projects\/sample_block_game/);
-  assert.match(config, /to:\s*projects\/sample_block_game/);
-  assert.match(config, /from:\s*projects\/sample_slideshow/);
-  assert.match(config, /to:\s*projects\/sample_slideshow/);
+  assert.match(config, /from:\s*template/);
+  assert.match(config, /to:\s*template/);
+  assert.match(config, /!\*\*\/out\/\*\*/);
+  assert.doesNotMatch(config, /from:\s*projects\/sample_block_game/);
+  assert.doesNotMatch(config, /from:\s*projects\/sample_slideshow/);
   assert.doesNotMatch(config, /from:\s*projects\/sample\s/);
   assert.doesNotMatch(config, /to:\s*projects\/sample\s/);
 });

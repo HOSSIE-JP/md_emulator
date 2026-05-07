@@ -164,28 +164,24 @@ function parseEntryByType(type, tokens) {
       }
       break;
     case 'MAP':
-      out.tileset = args[1] || '';
-      out.compression = args[2] || 'NONE';
       if (isTmxInput) {
-        out.mapCompression = args[3] || 'NONE';
-        out.mapBase = args[4] || '0';
-        out.ordering = args[5] || 'ROW';
-        out.extras = args.slice(6);
+        const parsed = parseTmxMapArgs(args);
+        Object.assign(out, parsed);
       } else {
+        out.tileset = args[1] || '';
+        out.compression = args[2] || 'NONE';
         out.mapBase = args[3] || '0';
         out.ordering = args[4] || 'ROW';
         out.extras = args.slice(5);
       }
       break;
     case 'TILEMAP':
-      out.tileset = args[1] || '';
-      out.compression = args[2] || 'NONE';
       if (isTmxInput) {
-        out.mapCompression = args[3] || 'NONE';
-        out.mapBase = args[4] || '0';
-        out.ordering = args[5] || 'ROW';
-        out.extras = args.slice(6);
+        const parsed = parseTmxMapArgs(args);
+        Object.assign(out, parsed);
       } else {
+        out.tileset = args[1] || '';
+        out.compression = args[2] || 'NONE';
         out.mapOpt = args[3] || 'ALL';
         out.mapBase = args[4] || '0';
         out.ordering = args[5] || 'ROW';
@@ -204,6 +200,27 @@ function parseEntryByType(type, tokens) {
   }
 
   return out;
+}
+
+function parseTmxMapArgs(args) {
+  if (args.length > 6) {
+    return {
+      tileset: args.slice(1, args.length - 4).join(' '),
+      compression: args[args.length - 4] || 'NONE',
+      mapCompression: args[args.length - 3] || 'NONE',
+      mapBase: args[args.length - 2] || '0',
+      ordering: args[args.length - 1] || 'ROW',
+      extras: [],
+    };
+  }
+  return {
+    tileset: args[1] || '',
+    compression: args[2] || 'NONE',
+    mapCompression: args[3] || 'NONE',
+    mapBase: args[4] || '0',
+    ordering: args[5] || 'ROW',
+    extras: args.slice(6),
+  };
 }
 
 function entryToResLine(entry) {
@@ -267,17 +284,17 @@ function entryToResLine(entry) {
       break;
     case 'MAP':
       if (String(entry.sourcePath || '').toLowerCase().endsWith('.tmx')) {
-        parts.push(source, entry.tileset || '', entry.compression || 'NONE', entry.mapCompression || 'NONE', entry.mapBase || '0');
+        parts.push(source, quoteIfNeeded(entry.tileset || ''), entry.compression || 'NONE', entry.mapCompression || 'NONE', entry.mapBase || '0');
       } else {
-        parts.push(source, entry.tileset || '', entry.compression || 'NONE', entry.mapBase || '0');
+        parts.push(source, quoteIfNeeded(entry.tileset || ''), entry.compression || 'NONE', entry.mapBase || '0');
       }
       if (entry.ordering) parts.push(entry.ordering);
       break;
     case 'TILEMAP':
       if (String(entry.sourcePath || '').toLowerCase().endsWith('.tmx')) {
-        parts.push(source, entry.tileset || '', entry.compression || 'NONE', entry.mapCompression || 'NONE', entry.mapBase || '0');
+        parts.push(source, quoteIfNeeded(entry.tileset || ''), entry.compression || 'NONE', entry.mapCompression || 'NONE', entry.mapBase || '0');
       } else {
-        parts.push(source, entry.tileset || '', entry.compression || 'NONE', entry.mapOpt || 'ALL', entry.mapBase || '0');
+        parts.push(source, quoteIfNeeded(entry.tileset || ''), entry.compression || 'NONE', entry.mapOpt || 'ALL', entry.mapBase || '0');
       }
       if (entry.ordering) parts.push(entry.ordering);
       break;
@@ -428,6 +445,27 @@ function createResFile(projectDir, relPath) {
   return { file: safeRel };
 }
 
+function deleteResFile(projectDir, relPath) {
+  const resRoot = path.join(projectDir, 'res');
+  ensureDirSync(resRoot);
+
+  const safeRel = normalizeResPath(relPath || '').replace(/^res\//, '');
+  if (!safeRel.toLowerCase().endsWith('.res')) {
+    throw new Error('res file must end with .res');
+  }
+
+  const abs = toAbsPathUnder(resRoot, safeRel);
+  if (!fs.existsSync(abs)) {
+    throw new Error(`res file not found: ${safeRel}`);
+  }
+  if (!fs.statSync(abs).isFile()) {
+    throw new Error(`not a file: ${safeRel}`);
+  }
+
+  fs.unlinkSync(abs);
+  return { file: safeRel };
+}
+
 function addResEntry(projectDir, relFilePath, entry) {
   const resRoot = path.join(projectDir, 'res');
   const targetRel = normalizeResPath(relFilePath || 'resources.res');
@@ -566,6 +604,7 @@ module.exports = {
   SUPPORTED_TYPES,
   listResDefinitions,
   createResFile,
+  deleteResFile,
   addResEntry,
   updateResEntry,
   deleteResEntry,

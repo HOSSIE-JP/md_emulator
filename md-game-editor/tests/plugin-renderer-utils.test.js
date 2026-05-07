@@ -76,8 +76,10 @@ test('asset-manager declares v2.4 asset provider capabilities', () => {
   assert.match(rendererSource, /indices\[indices\.length - 1\]\s*=\s*0/);
   assert.match(rendererSource, /savedDataUrl\s*=\s*workingDataUrl/);
   assert.match(rendererSource, /convertedDataUrl:\s*savedDataUrl/);
-  assert.match(rendererSource, /mountReloadButton\(\{ root,\s*api,\s*logger \}\)/);
+  assert.match(rendererSource, /setupAutoReloadOnOpen\(\{ root,\s*api,\s*logger \}\)/);
+  assert.match(rendererSource, /new MutationObserver\(reloadIfOpened\)/);
   assert.match(rendererSource, /reloadResources\?\.\(\{ keepSelection:\s*true \}\)/);
+  assert.doesNotMatch(rendererSource, /data-asset-manager-reload|mountReloadButton/);
   assert.match(rendererSource, /buildPreviewPaletteFromDataUrl/);
   assert.match(rendererSource, /MIDI_EXTS/);
   assert.match(appRendererSource, /tryHandleAssetImport/);
@@ -235,6 +237,10 @@ test('sprite-editor declares plugin-local page and uses v2.4 capabilities', () =
     path.join(__dirname, '..', 'plugins', 'sprite-editor', 'renderer.js'),
     'utf-8',
   );
+  const styleSource = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'sprite-editor', 'style.css'),
+    'utf-8',
+  );
 
   assert.deepEqual(manifest.types, ['editor', 'asset']);
   assert.equal(manifest.tab.page, 'sprite-editor');
@@ -244,6 +250,9 @@ test('sprite-editor declares plugin-local page and uses v2.4 capabilities', () =
   assert.match(rendererSource, /listResDefinitions\(\)/);
   assert.match(rendererSource, /image-import-pipeline/);
   assert.match(rendererSource, /data-role="splitter"/);
+  assert.match(rendererSource, /data-role="left-column-resizer"/);
+  assert.match(rendererSource, /data-role="right-column-resizer"/);
+  assert.match(rendererSource, /function resizeColumns\(event\)/);
   assert.match(rendererSource, /addEventListener\(['"]wheel['"]/);
   assert.match(rendererSource, /min="0\.25" max="12" step="0\.25"/);
   assert.match(rendererSource, /selectFrameFromSheet/);
@@ -269,7 +278,18 @@ test('sprite-editor declares plugin-local page and uses v2.4 capabilities', () =
   assert.match(rendererSource, /addResEntry/);
   assert.match(rendererSource, /updateResEntry/);
   assert.match(rendererSource, /deleteResEntry/);
-  assert.match(rendererSource, /data-role="actions"[\s\S]*data-role="save"[\s\S]*#icon-save[\s\S]*保存[\s\S]*data-role="delete"[\s\S]*#icon-trash[\s\S]*削除/);
+  assert.match(rendererSource, /function confirmCanReplaceCurrentSprite\(\)/);
+  assert.match(rendererSource, /confirmUnsavedSpriteSwitch/);
+  assert.match(rendererSource, /data-sprite-action="save"[\s\S]*#icon-save[\s\S]*data-sprite-action="delete"[\s\S]*#icon-trash/);
+  assert.doesNotMatch(rendererSource, /data-role="refresh"/);
+  assert.match(styleSource, /height:\s*calc\(100% \+ 40px\)/);
+  assert.match(styleSource, /\.sprite-editor-column-resizer/);
+  assert.match(styleSource, /grid-template-columns:\s*var\(--sprite-left-width\)\s*3px\s*minmax\(420px,\s*1fr\)\s*3px\s*var\(--sprite-right-width\)/);
+  assert.doesNotMatch(styleSource, /\.sprite-editor-column-resizer::before/);
+  assert.match(styleSource, /--sprite-left-width/);
+  assert.match(styleSource, /--sprite-right-width/);
+  assert.match(styleSource, /grid-template-rows:\s*minmax\(0,\s*0\.9fr\)\s*6px\s*minmax\(0,\s*1\.1fr\)/);
+  assert.match(styleSource, /\.sprite-editor-animation-rows\s*\{[\s\S]*max-height:\s*min\(220px,\s*38%\)/);
   assert.doesNotMatch(rendererSource, /window\.prompt|window\.alert|window\.confirm/);
 });
 
@@ -284,8 +304,12 @@ test('ai-control declares plugin-local page and control capability', () => {
   );
 
   assert.deepEqual(manifest.types, ['editor', 'tool']);
+  assert.equal(manifest.renderer.entry, 'renderer.js');
+  assert.equal(manifest.renderer.script, undefined);
   assert.equal(manifest.renderer.page, 'ai-control');
   assert.deepEqual(manifest.renderer.capabilities, ['page', 'ai-control']);
   assert.match(rendererSource, /registerCapability\('ai-control'/);
   assert.match(rendererSource, /startAiControlServer/);
+  assert.match(rendererSource, /data-ai-control-sidebar-status/);
+  assert.match(rendererSource, /dataset\.aiControlRunning/);
 });

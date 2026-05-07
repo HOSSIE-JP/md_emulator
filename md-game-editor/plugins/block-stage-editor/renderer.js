@@ -77,6 +77,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     backgroundImage: null,
     showStageBackground: true,
     audio: null,
+    activationObserver: null,
+    wasActive: root.classList.contains('active'),
   };
 
   root.innerHTML = `
@@ -415,6 +417,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 
     state.stages = stageResult.stages || [];
     state.resources = normalizeResourceBuckets(settingsResult.resources || stageResult.resources || {});
+    await refreshResourcesFromResFile();
     state.settings = settingsResult.settings || defaultSettings();
     renderSelect(ui.bgSelect, state.resources.stageImages || [], '(なし)');
     renderSelect(ui.clearSelect, state.resources.stageImages || [], '(なし)');
@@ -1423,6 +1426,16 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       ));
   }
 
+  function observePageActivation() {
+    const observer = new MutationObserver(() => {
+      const active = root.classList.contains('active');
+      if (active && !state.wasActive) void refreshVisibleAssetDefinitions();
+      state.wasActive = active;
+    });
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+    state.activationObserver = observer;
+  }
+
   async function refreshResourcesFromResFile() {
     if (!api.electronAPI?.listResDefinitions) return;
     const result = await api.electronAPI.listResDefinitions();
@@ -1445,6 +1458,41 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       palettes: normalized.filter((entry) => entry.type === 'PALETTE'),
       all: normalized,
     });
+  }
+
+  async function refreshVisibleAssetDefinitions() {
+    const stageValues = {
+      bg: ui.bgSelect.value,
+      clear: ui.clearSelect.value,
+      bgm: ui.bgmSelect.value,
+    };
+    const fontValue = ui.fontSelect.value;
+    const screenBgmValues = new Map(ui.screenBgmSelects.map((select) => [select.dataset.screenBgm, select.value]));
+    await refreshResourcesFromResFile();
+    renderSelect(ui.bgSelect, state.resources.stageImages || [], '(なし)');
+    renderSelect(ui.clearSelect, state.resources.stageImages || [], '(なし)');
+    renderSelect(ui.bgmSelect, state.resources.bgms || [], '(なし)');
+    renderSelect(ui.fontSelect, state.resources.tilesets || [], '(デフォルト)');
+    setSelectValueIfAvailable(ui.bgSelect, stageValues.bg);
+    setSelectValueIfAvailable(ui.clearSelect, stageValues.clear);
+    setSelectValueIfAvailable(ui.bgmSelect, stageValues.bgm);
+    setSelectValueIfAvailable(ui.fontSelect, fontValue);
+    ui.screenBgmSelects.forEach((select) => {
+      renderSelect(select, state.resources.bgms || [], '(なし)');
+      setSelectValueIfAvailable(select, screenBgmValues.get(select.dataset.screenBgm) || '');
+    });
+    readFormIntoStage();
+    renderAssetSettings();
+    updateStageThumbs();
+    updateSystemFontPreview();
+    await loadImageForSymbol(state.current?.background_image_symbol || '');
+    draw();
+    setStatus('アセット定義を更新しました');
+  }
+
+  function setSelectValueIfAvailable(select, value) {
+    select.value = value || '';
+    if (value && select.value !== value) select.value = '';
   }
 
   function isBgmResource(entry) {
@@ -1797,6 +1845,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 
   syncTopTabs();
   renderPalettes();
+  observePageActivation();
   void refresh();
   registerCapability('block-stage-editor', { pluginId: plugin.id, root, refresh });
   logger.debug('block-stage-editor renderer activated');
@@ -1804,6 +1853,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   return {
     deactivate() {
       if (state.audio) state.audio.pause();
+      state.activationObserver?.disconnect();
       root.innerHTML = '';
     },
   };

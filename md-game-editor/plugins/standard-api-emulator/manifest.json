@@ -7,17 +7,5 @@
   "types": ["emulator", "tool"],
   "permissions": ["project.read", "testplay.launch", "api.start"],
   "roles": [{ "id": "testplay", "label": "Test Play", "exclusive": true, "order": 21 }],
-  "hooks": ["onTestPlay"],
-  "tab": {
-    "label": "API Emulator",
-    "page": "api-emulator",
-    "icon": "play",
-    "order": 95
-  },
-  "renderer": {
-    "page": "api-emulator",
-    "script": "renderer.js",
-    "styles": ["style.css"],
-    "capabilities": ["page", "api-emulator-control"]
-  }
+  "hooks": ["onTestPlay"]
 }

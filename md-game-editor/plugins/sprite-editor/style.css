@@ -1,9 +1,12 @@
 .sprite-editor-root {
+  --sprite-left-width: 300px;
+  --sprite-right-width: 320px;
   display: grid;
-  grid-template-columns: 300px minmax(420px, 1fr) 320px;
+  grid-template-columns: var(--sprite-left-width) 3px minmax(420px, 1fr) 3px var(--sprite-right-width);
   gap: 1px;
   min-height: 0;
-  height: 100%;
+  width: calc(100% + 48px);
+  height: calc(100% + 40px);
   margin: -20px -24px;
   background: var(--border);
   color: var(--text);
@@ -16,6 +19,18 @@
   background: var(--bg);
   display: flex;
   flex-direction: column;
+}
+
+.sprite-editor-column-resizer {
+  min-width: 0;
+  background: #1e2a3a;
+  cursor: col-resize;
+  position: relative;
+}
+
+.sprite-editor-column-resizer:hover,
+.sprite-editor-column-resizer.active {
+  background: #4aa3ff;
 }
 
 .sprite-editor-toolbar,
@@ -118,8 +133,9 @@
   background: transparent;
   color: var(--text);
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 48px minmax(0, 1fr) auto;
   gap: 8px;
+  align-items: center;
   padding: 8px;
   cursor: pointer;
   text-align: left;
@@ -159,10 +175,26 @@
   font-size: 11px;
 }
 
+.sprite-editor-list-actions {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.sprite-editor-list-icon {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
 .sprite-editor-center {
   display: grid;
-  grid-template-rows: minmax(220px, 0.9fr) 6px minmax(240px, 1.1fr);
+  grid-template-rows: minmax(0, 0.9fr) 6px minmax(0, 1.1fr);
   gap: 1px;
+  min-height: 0;
   background: var(--border);
 }
 
@@ -209,6 +241,9 @@
   padding: 8px 10px 10px;
   display: grid;
   gap: 7px;
+  flex: 0 0 auto;
+  max-height: min(220px, 38%);
+  overflow: auto;
 }
 
 .sprite-editor-row-title {
@@ -319,5 +354,9 @@
 @media (max-width: 1160px) {
   .sprite-editor-root {
     grid-template-columns: 260px minmax(360px, 1fr) 300px;
+  }
+
+  .sprite-editor-column-resizer {
+    display: none;
   }
 }

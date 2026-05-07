@@ -12,14 +12,37 @@ const { spawn } = require('child_process');
 const { app } = require('electron');
 const setupManager = require('./setup-manager');
 
-const DEFAULT_PROJECT_NAME = 'sample_slideshow';
+const DEFAULT_PROJECT_NAME = 'new_project';
 const LEGACY_SAMPLE_PROJECT_NAME = 'sample';
+const TEMPLATE_PROJECT_PREFIX = 'template_';
+const MAX_RECENT_PROJECTS = 10;
+const EMPTY_PROJECT_SOURCE = `#include <genesis.h>
+
+int main(bool hardReset)
+{
+    (void)hardReset;
+
+    while (TRUE)
+    {
+        SYS_doVBlankProcess();
+    }
+
+    return 0;
+}
+`;
 
 function getProjectsRootDir() {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'projects');
   }
   return path.join(__dirname, 'projects');
+}
+
+function getTemplatesRootDir() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'template');
+  }
+  return path.join(__dirname, 'template');
 }
 
 function getLegacySampleProjectDir() {
@@ -46,11 +69,102 @@ function readEditorState() {
   }
 }
 
+function getProjectConfigPath(projectDir) {
+  return path.join(path.resolve(projectDir), 'project.json');
+}
+
+function hasProjectConfig(projectDir) {
+  return fs.existsSync(getProjectConfigPath(projectDir));
+}
+
+function isTemplateProjectName(projectName) {
+  return String(projectName || '').startsWith(TEMPLATE_PROJECT_PREFIX);
+}
+
+function isBundledTemplateLikeProjectName(projectName) {
+  const value = String(projectName || '');
+  return value.startsWith(TEMPLATE_PROJECT_PREFIX) || value.startsWith('sample_');
+}
+
+function projectPathKey(projectDir) {
+  return path.resolve(projectDir).toLowerCase();
+}
+
+function normalizeRecentProjectEntry(entry) {
+  const rawDir = typeof entry === 'string' ? entry : entry?.projectDir;
+  if (!rawDir) return null;
+  const projectDir = path.resolve(String(rawDir));
+  const projectName = String(entry?.projectName || path.basename(projectDir));
+  const title = String(entry?.title || projectName);
+  const lastOpenedAt = String(entry?.lastOpenedAt || entry?.openedAt || '');
+  return { projectDir, projectName, title, lastOpenedAt };
+}
+
+function normalizeRecentProjects(entries = []) {
+  if (!Array.isArray(entries)) return [];
+  const seen = new Set();
+  const normalized = [];
+  entries.forEach((entry) => {
+    const item = normalizeRecentProjectEntry(entry);
+    if (!item) return;
+    const key = projectPathKey(item.projectDir);
+    if (seen.has(key)) return;
+    seen.add(key);
+    normalized.push(item);
+  });
+  return normalized.slice(0, MAX_RECENT_PROJECTS);
+}
+
+function buildRecentProjectEntry(projectDir) {
+  const resolved = path.resolve(projectDir);
+  const cfg = loadProjectConfigFromDir(resolved);
+  const projectName = path.basename(resolved);
+  return {
+    projectDir: resolved,
+    projectName,
+    title: cfg.title || cfg.romName || projectName,
+    lastOpenedAt: new Date().toISOString(),
+  };
+}
+
+function mergeRecentProject(state, projectDir) {
+  const entry = buildRecentProjectEntry(projectDir);
+  const key = projectPathKey(entry.projectDir);
+  const rest = normalizeRecentProjects(state.recentProjects || [])
+    .filter((item) => projectPathKey(item.projectDir) !== key);
+  return [entry, ...rest].slice(0, MAX_RECENT_PROJECTS);
+}
+
+function getRecentProjects() {
+  const state = readEditorState();
+  const currentProjectDir = path.resolve(getProjectDir());
+  const entries = normalizeRecentProjects(state.recentProjects || []);
+  const existingEntries = entries.filter((entry) => fs.existsSync(entry.projectDir) && hasProjectConfig(entry.projectDir));
+  if (existingEntries.length !== entries.length) {
+    writeEditorState({
+      ...state,
+      recentProjects: existingEntries,
+    });
+  }
+  return existingEntries.map((entry) => {
+    const exists = fs.existsSync(entry.projectDir) && hasProjectConfig(entry.projectDir);
+    const cfg = exists ? loadProjectConfigFromDir(entry.projectDir) : {};
+    const projectName = path.basename(entry.projectDir);
+    return {
+      ...entry,
+      projectName,
+      title: cfg.title || cfg.romName || entry.title || projectName,
+      exists,
+      current: exists && path.resolve(entry.projectDir) === currentProjectDir,
+    };
+  });
+}
+
 function getProjectStartupState() {
   const state = readEditorState();
   const savedProjectDir = state.currentProjectDir ? path.resolve(state.currentProjectDir) : '';
   const hasSavedProject = Boolean(savedProjectDir);
-  const savedProjectExists = hasSavedProject && fs.existsSync(savedProjectDir);
+  const savedProjectExists = hasSavedProject && fs.existsSync(savedProjectDir) && hasProjectConfig(savedProjectDir);
   return {
     hasSavedProject,
     savedProjectDir,
@@ -58,6 +172,7 @@ function getProjectStartupState() {
     requiresProjectSelection: !savedProjectExists,
     defaultProjectDir: getDefaultProjectDir(),
     projectsRootDir: ensureProjectsRootDir(),
+    recentProjects: getRecentProjects(),
   };
 }
 
@@ -69,17 +184,17 @@ function writeEditorState(nextState) {
 
 function getProjectDir() {
   const state = readEditorState();
-  if (state.currentProjectDir && fs.existsSync(state.currentProjectDir)) {
-    return state.currentProjectDir;
+  if (state.currentProjectDir && fs.existsSync(state.currentProjectDir) && hasProjectConfig(state.currentProjectDir)) {
+    return path.resolve(state.currentProjectDir);
   }
 
   const defaultProjectDir = getDefaultProjectDir();
-  if (fs.existsSync(defaultProjectDir)) {
+  if (fs.existsSync(defaultProjectDir) && hasProjectConfig(defaultProjectDir)) {
     return defaultProjectDir;
   }
 
   const legacySampleDir = getLegacySampleProjectDir();
-  if (fs.existsSync(legacySampleDir)) {
+  if (fs.existsSync(legacySampleDir) && hasProjectConfig(legacySampleDir)) {
     return legacySampleDir;
   }
 
@@ -92,6 +207,7 @@ function setProjectDir(projectDir) {
   writeEditorState({
     ...state,
     currentProjectDir: resolved,
+    recentProjects: mergeRecentProject(state, resolved),
   });
   return resolved;
 }
@@ -163,13 +279,9 @@ const ROMHeader rom_header = {
 }
 
 function getSampleSourcePath() {
-  const currentRootSample = path.join(getProjectsRootDir(), DEFAULT_PROJECT_NAME, 'src', 'main.c');
+  const currentRootSample = path.join(getTemplatesRootDir(), 'template_slideshow', 'src', 'main.c');
   if (fs.existsSync(currentRootSample)) {
     return currentRootSample;
-  }
-  const legacyRootSample = path.join(getProjectsRootDir(), LEGACY_SAMPLE_PROJECT_NAME, 'src', 'main.c');
-  if (fs.existsSync(legacyRootSample)) {
-    return legacyRootSample;
   }
   return path.join(getLegacySampleProjectDir(), 'src', 'main.c');
 }
@@ -215,6 +327,9 @@ function ensureProjectStructure(projectDir, config = {}, options = {}) {
   if (config.pluginRoles && typeof config.pluginRoles === 'object') {
     meta.pluginRoles = { ...config.pluginRoles };
   }
+  if (config.pluginSettings && typeof config.pluginSettings === 'object') {
+    meta.pluginSettings = { ...config.pluginSettings };
+  }
   const cfgPath = path.join(projectDir, 'project.json');
   if (options.overwriteConfig || !fs.existsSync(cfgPath)) {
     let existing = {};
@@ -249,6 +364,8 @@ function listProjects() {
   const currentProjectDir = path.resolve(getProjectDir());
   const projects = fs.readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
+    .filter((entry) => !isBundledTemplateLikeProjectName(entry.name))
+    .filter((entry) => hasProjectConfig(path.join(root, entry.name)))
     .map((entry) => {
       const projectDir = path.join(root, entry.name);
       const config = loadProjectConfigFromDir(projectDir);
@@ -265,7 +382,31 @@ function listProjects() {
     projectsRootDir: root,
     currentProjectDir,
     projects,
+    recentProjects: getRecentProjects(),
+    templates: listProjectTemplates(),
   };
+}
+
+function listProjectTemplates() {
+  const root = getTemplatesRootDir();
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .filter((entry) => isTemplateProjectName(entry.name))
+    .filter((entry) => hasProjectConfig(path.join(root, entry.name)))
+    .map((entry) => {
+      const projectDir = path.join(root, entry.name);
+      const config = loadProjectConfigFromDir(projectDir);
+      const pluginRoles = (config.pluginRoles && typeof config.pluginRoles === 'object') ? config.pluginRoles : {};
+      return {
+        templateId: entry.name,
+        projectDir,
+        projectName: entry.name,
+        title: config.title || config.romName || entry.name,
+        builderPlugin: pluginRoles.builder || null,
+      };
+    })
+    .sort((left, right) => left.projectName.localeCompare(right.projectName, 'ja'));
 }
 
 function createProject(projectDir, config = {}, sourceCode) {
@@ -278,7 +419,7 @@ function createProject(projectDir, config = {}, sourceCode) {
   }
 
   const result = ensureProjectStructure(resolved, config, {
-    sourceCode: sourceCode || getSampleSourceCode(),
+    sourceCode: sourceCode || EMPTY_PROJECT_SOURCE,
     overwriteSource: true,
     overwriteRomHeader: true,
     overwriteConfig: true,
@@ -304,16 +445,86 @@ function normalizeProjectName(projectName) {
 }
 
 function createProjectInRoot(projectName, config = {}, sourceCode) {
-  const normalizedName = normalizeProjectName(projectName);
+  return createProjectInParent(ensureProjectsRootDir(), projectName, config, sourceCode);
+}
 
-  const projectDir = path.join(ensureProjectsRootDir(), normalizedName);
-  return createProject(projectDir, config, sourceCode);
+function resolveTemplateProjectDir(templateId) {
+  const normalizedId = normalizeProjectName(templateId);
+  if (!isTemplateProjectName(normalizedId)) {
+    throw new Error(`invalid template project: ${normalizedId}`);
+  }
+  const templateDir = path.join(getTemplatesRootDir(), normalizedId);
+  if (!fs.existsSync(templateDir) || !hasProjectConfig(templateDir)) {
+    throw new Error(`template project not found: ${normalizedId}`);
+  }
+  return templateDir;
+}
+
+function copyTemplateProject(templateDir, targetDir) {
+  ensureDirSync(targetDir);
+  fs.readdirSync(templateDir, { withFileTypes: true }).forEach((entry) => {
+    if (entry.name === 'out') return;
+    const source = path.join(templateDir, entry.name);
+    const target = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      copyTemplateProject(source, target);
+      return;
+    }
+    if (entry.isFile()) {
+      ensureDirSync(path.dirname(target));
+      fs.copyFileSync(source, target);
+    }
+  });
+}
+
+function createProjectFromTemplate(projectDir, templateId, config = {}) {
+  const resolved = path.resolve(projectDir);
+  if (fs.existsSync(resolved)) {
+    const children = fs.readdirSync(resolved);
+    if (children.length > 0) {
+      throw new Error(`project directory already exists and is not empty: ${resolved}`);
+    }
+  }
+
+  const templateDir = resolveTemplateProjectDir(templateId);
+  const templateConfig = loadProjectConfigFromDir(templateDir);
+  const nextConfig = {
+    ...templateConfig,
+    ...(config || {}),
+  };
+  if (templateConfig.pluginRoles && typeof templateConfig.pluginRoles === 'object' && !config.pluginRoles) {
+    nextConfig.pluginRoles = { ...templateConfig.pluginRoles };
+  }
+
+  copyTemplateProject(templateDir, resolved);
+  const result = ensureProjectStructure(resolved, nextConfig, {
+    overwriteSource: false,
+    overwriteRomHeader: true,
+    overwriteConfig: true,
+  });
+  setProjectDir(resolved);
+  return result;
+}
+
+function createProjectInParent(parentDir, projectName, config = {}, sourceCode = null, options = {}) {
+  const normalizedName = normalizeProjectName(projectName);
+  const parent = parentDir ? path.resolve(parentDir) : ensureProjectsRootDir();
+  ensureDirSync(parent);
+  const projectDir = path.join(parent, normalizedName);
+  const templateId = String(options?.templateId || '').trim();
+  if (templateId) {
+    return createProjectFromTemplate(projectDir, templateId, config);
+  }
+  return createProject(projectDir, config, sourceCode || EMPTY_PROJECT_SOURCE);
 }
 
 function openProject(projectDir) {
   const resolved = path.resolve(projectDir);
   if (!fs.existsSync(resolved)) {
     throw new Error(`project directory not found: ${resolved}`);
+  }
+  if (!hasProjectConfig(resolved)) {
+    throw new Error(`project.json not found: ${resolved}`);
   }
 
   const cfg = loadProjectConfigFromDir(resolved);
@@ -768,14 +979,19 @@ function setPluginRole(roleId, id) {
 
 module.exports = {
   getDefaultProjectDir,
+  getTemplatesRootDir,
   getProjectStartupState,
   getProjectDir,
   setProjectDir,
   getProjectInfo,
   getProjectsRootDir,
   listProjects,
+  listProjectTemplates,
+  getRecentProjects,
   createProject,
   createProjectInRoot,
+  createProjectInParent,
+  createProjectFromTemplate,
   openProject,
   openProjectByName,
   generateProject,

@@ -15,7 +15,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     root.dataset.pluginOwner = plugin.id;
   }
 
-  const reloadButton = mountReloadButton({ root, api, logger });
+  const autoReload = setupAutoReloadOnOpen({ root, api, logger });
 
   registerCapability('asset-manager', {
     pluginId: plugin.id,
@@ -234,7 +234,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   logger.debug('asset-manager renderer activated');
   return {
     deactivate() {
-      reloadButton?.remove();
+      autoReload?.disconnect?.();
       if (root?.dataset.pluginOwner === plugin.id) {
         delete root.dataset.pluginOwner;
       }
@@ -242,19 +242,22 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   };
 }
 
-function mountReloadButton({ root, api, logger }) {
-  const actions = root?.querySelector?.('.asset-list-header-actions');
-  if (!actions || actions.querySelector('[data-asset-manager-reload]')) return null;
+function setupAutoReloadOnOpen({ root, api, logger }) {
+  if (!root || typeof MutationObserver !== 'function') return null;
 
-  const button = document.createElement('button');
-  button.className = 'icon-btn';
-  button.type = 'button';
-  button.title = 'リソースを再読み込み';
-  button.setAttribute('aria-label', 'リソースを再読み込み');
-  button.dataset.assetManagerReload = 'true';
-  button.textContent = '↻';
-  button.addEventListener('click', async () => {
-    button.disabled = true;
+  let wasOpen = false;
+  let loading = false;
+
+  const reloadIfOpened = async () => {
+    const isOpen = root.isConnected && root.classList.contains('active') && !root.hidden;
+    if (!isOpen) {
+      wasOpen = false;
+      return;
+    }
+    if (wasOpen || loading) return;
+
+    wasOpen = true;
+    loading = true;
     try {
       const result = await api.assets?.reloadResources?.({ keepSelection: true });
       if (!result?.ok) {
@@ -263,13 +266,19 @@ function mountReloadButton({ root, api, logger }) {
     } catch (err) {
       logger.warn(`リソース再読み込み失敗: ${String(err?.message || err)}`);
     } finally {
-      button.disabled = false;
+      loading = false;
     }
-  });
+  };
 
-  const addButton = actions.querySelector('#btnAddAsset');
-  actions.insertBefore(button, addButton || null);
-  return button;
+  const observer = new MutationObserver(reloadIfOpened);
+  observer.observe(root, { attributes: true, attributeFilter: ['class', 'hidden'] });
+  queueMicrotask(reloadIfOpened);
+
+  return {
+    disconnect() {
+      observer.disconnect();
+    },
+  };
 }
 
 function dataUrlBytes(dataUrl) {

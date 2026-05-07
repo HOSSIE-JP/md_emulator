@@ -78,6 +78,8 @@ test('entryToResLine writes XGM2 WAV rate settings', () => {
 test('TMX MAP and TILEMAP entries round-trip layer_id through the tileset field', () => {
   const parsed = rescomp.parseResContent([
     'MAP stage_map maps/stage.tmx Ground FAST NONE 0 ROW',
+    'MAP stage_map_2 maps/stage.tmx "Layer 2" FAST NONE 0 ROW',
+    'MAP broken_layer maps/stage.tmx Layer 2 NONE NONE 0 ROW',
     'TILEMAP hud_map maps/stage.tmx HUD NONE ALL TILE_ATTR_FULL(PAL0,FALSE,FALSE,FALSE,0) COLUMN',
     'TILESET stage_tiles tilesets/stage.tsx NONE ALL ROW FALSE',
   ].join('\n'));
@@ -85,11 +87,16 @@ test('TMX MAP and TILEMAP entries round-trip layer_id through the tileset field'
   assert.equal(parsed.entries[0].type, 'MAP');
   assert.equal(parsed.entries[0].sourcePath, 'maps/stage.tmx');
   assert.equal(parsed.entries[0].tileset, 'Ground');
-  assert.equal(parsed.entries[1].type, 'TILEMAP');
-  assert.equal(parsed.entries[1].tileset, 'HUD');
-  assert.equal(parsed.entries[2].sourcePath, 'tilesets/stage.tsx');
+  assert.equal(parsed.entries[1].tileset, 'Layer 2');
+  assert.equal(parsed.entries[2].tileset, 'Layer 2');
+  assert.equal(parsed.entries[2].ordering, 'ROW');
+  assert.equal(parsed.entries[3].type, 'TILEMAP');
+  assert.equal(parsed.entries[3].tileset, 'HUD');
+  assert.equal(parsed.entries[4].sourcePath, 'tilesets/stage.tsx');
   assert.equal(rescomp.entryToResLine(parsed.entries[0]), 'MAP stage_map maps/stage.tmx Ground FAST NONE 0 ROW');
-  assert.equal(rescomp.entryToResLine(parsed.entries[1]), 'TILEMAP hud_map maps/stage.tmx HUD NONE ALL TILE_ATTR_FULL(PAL0,FALSE,FALSE,FALSE,0) COLUMN');
+  assert.equal(rescomp.entryToResLine(parsed.entries[1]), 'MAP stage_map_2 maps/stage.tmx "Layer 2" FAST NONE 0 ROW');
+  assert.equal(rescomp.entryToResLine(parsed.entries[2]), 'MAP broken_layer maps/stage.tmx "Layer 2" NONE NONE 0 ROW');
+  assert.equal(rescomp.entryToResLine(parsed.entries[3]), 'TILEMAP hud_map maps/stage.tmx HUD NONE ALL TILE_ATTR_FULL(PAL0,FALSE,FALSE,FALSE,0) COLUMN');
 });
 
 test('SPRITE entries parse pixel size suffix and write SGDK tile counts', () => {
@@ -180,6 +187,22 @@ test('resource file operations preserve comments through update and delete', () 
   rescomp.deleteResEntry(projectDir, 'resources.res', defs.files[0].entries[0].lineNumber);
   defs = rescomp.listResDefinitions(projectDir);
   assert.equal(defs.files[0].entryCount, 0);
+});
+
+test('deleteResFile removes a selected .res file', () => {
+  const projectDir = makeProject();
+
+  rescomp.createResFile(projectDir, 'stage/resources.res');
+  rescomp.createResFile(projectDir, 'extra.res');
+  const targetPath = path.join(projectDir, 'res', 'stage', 'resources.res');
+
+  assert.equal(fs.existsSync(targetPath), true);
+  const result = rescomp.deleteResFile(projectDir, 'stage/resources.res');
+
+  assert.equal(result.file, 'stage/resources.res');
+  assert.equal(fs.existsSync(targetPath), false);
+  const defs = rescomp.listResDefinitions(projectDir);
+  assert.deepEqual(defs.files.map((file) => file.file), ['extra.res']);
 });
 
 test('listResDefinitions rejects source paths escaping the resource directory', () => {

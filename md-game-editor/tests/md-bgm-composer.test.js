@@ -42,6 +42,31 @@ function midi(delta, bytes) {
   return Buffer.concat([vlq(delta), Buffer.from(bytes)]);
 }
 
+function withGd3(vgm, metadata = {}) {
+  const strings = [
+    metadata.title || '',
+    '',
+    '',
+    '',
+    'Sega Mega Drive',
+    '',
+    metadata.artist || '',
+    '',
+    '',
+    'MD Game Editor',
+    '',
+  ].join('\0') + '\0';
+  const payload = Buffer.from(strings, 'utf16le');
+  const gd3 = Buffer.alloc(12);
+  gd3.write('Gd3 ', 0, 4, 'ascii');
+  gd3.writeUInt32LE(0x00000100, 4);
+  gd3.writeUInt32LE(payload.length, 8);
+  const output = Buffer.concat([Buffer.from(vgm), gd3, payload]);
+  output.writeUInt32LE(output.length - 4, 0x04);
+  output.writeUInt32LE(vgm.length - 0x14, 0x14);
+  return output;
+}
+
 function makeMidiFixture() {
   const header = Buffer.alloc(6);
   header.writeUInt16BE(1, 0);
@@ -56,6 +81,7 @@ function makeMidiFixture() {
 
   const noteTrack = Buffer.concat([
     meta(0, 0x03, Buffer.from('Lead')),
+    meta(0, 0x02, Buffer.from('Composer Name')),
     midi(0, [0xC0, 0x10]),
     midi(0, [0xB0, 0x07, 0x64]),
     midi(0, [0x90, 60, 100]),
@@ -86,6 +112,20 @@ test('md-bgm-composer declares renderer and main hook capabilities', () => {
   assert.match(rendererSource, /registerCapability\(['"]music-import-handler['"]/);
   assert.match(rendererSource, /refreshAssets/);
   assert.match(rendererSource, /selectAsset/);
+  assert.match(rendererSource, /requestSelectAsset/);
+  assert.match(rendererSource, /setupPageAutoRefresh/);
+  assert.match(rendererSource, /MutationObserver/);
+  assert.match(rendererSource, /preserveDirty:\s*true/);
+  assert.match(rendererSource, /confirmUnsavedAssetSwitch/);
+  assert.match(rendererSource, /confirmCanReplaceCurrentSong/);
+  assert.match(rendererSource, /未保存の変更/);
+  assert.match(rendererSource, /保存して開く/);
+  assert.match(rendererSource, /破棄して開く/);
+  assert.match(rendererSource, /decision === ['"]save['"]/);
+  assert.match(rendererSource, /saveCurrentSong\(\{ plugin, api, state, els \}\)/);
+  assert.match(rendererSource, /action === ['"]create-empty['"][\s\S]*confirmCanReplaceCurrentSong/);
+  assert.match(rendererSource, /action === ['"]import-music-to-res['"][\s\S]*confirmCanReplaceCurrentSong/);
+  assert.match(rendererSource, /async function importMidiToRes[\s\S]*confirmCanReplaceCurrentSong/);
   assert.match(rendererSource, /importMidiToRes/);
   assert.match(rendererSource, /importMusicToRes/);
   assert.match(rendererSource, /importMidiViaConverterToRes/);
@@ -94,6 +134,7 @@ test('md-bgm-composer declares renderer and main hook capabilities', () => {
   assert.match(rendererSource, /writeAssetFile/);
   assert.match(rendererSource, /deleteCurrentAsset/);
   assert.match(rendererSource, /deleteResEntry/);
+  assert.match(rendererSource, /clearEditorSelection/);
   assert.match(rendererSource, /createEmptySong/);
   assert.match(rendererSource, /editExternalAsset/);
   assert.match(rendererSource, /saveCurrentSong/);
@@ -104,6 +145,13 @@ test('md-bgm-composer declares renderer and main hook capabilities', () => {
   assert.match(rendererSource, /data-action="create-empty"/);
   assert.match(rendererSource, /data-action="import-music-to-res"/);
   assert.match(rendererSource, /data-action="delete-current"/);
+  assert.match(rendererSource, /md-bgm-list-actions/);
+  assert.match(rendererSource, /md-bgm-filter[\s\S]*md-bgm-list-actions[\s\S]*data-role="asset-tree"/);
+  assert.match(rendererSource, /md-bgm-asset-actions/);
+  assert.match(rendererSource, /md-bgm-asset-icon/);
+  assert.match(rendererSource, /data-resize-column="left"/);
+  assert.match(rendererSource, /data-resize-column="right"/);
+  assert.match(rendererSource, /startColumnResize/);
   assert.match(rendererSource, /#icon-file-plus/);
   assert.match(rendererSource, /#icon-save/);
   assert.match(rendererSource, /#icon-trash/);
@@ -133,6 +181,9 @@ test('md-bgm-composer declares renderer and main hook capabilities', () => {
   assert.match(rendererSource, /changedPattern/);
   assert.match(rendererSource, /renderPatterns\(state, els\);\s*renderEditorMode\(state, els\);/);
   assert.doesNotMatch(rendererSource, /scrollIntoView/);
+  assert.doesNotMatch(rendererSource, /data-action="refresh"/);
+  assert.doesNotMatch(rendererSource, /<span>保存<\/span>/);
+  assert.doesNotMatch(rendererSource, /<span>削除<\/span>/);
   assert.doesNotMatch(rendererSource, /VGM から近似復元しました/);
   assert.doesNotMatch(rendererSource, />Import MIDI</);
   assert.doesNotMatch(rendererSource, />Export</);
@@ -150,9 +201,16 @@ test('md-bgm-composer shell aligns with sprite editor panes and uses collapsible
   assert.match(styleSource, /\.md-bgm-composer-shell\s*\{[^}]*margin:\s*-20px -24px;/s);
   assert.match(styleSource, /\.md-bgm-composer-shell\s*\{[^}]*overflow:\s*hidden;/s);
   assert.match(styleSource, /\.md-bgm-layout\s*\{[^}]*overflow:\s*hidden;/s);
+  assert.match(styleSource, /\.md-bgm-layout\s*\{[^}]*grid-template-columns:\s*var\(--md-bgm-left\) 6px minmax\(420px,\s*1fr\) 6px var\(--md-bgm-right\);/s);
+  assert.match(styleSource, /\.md-bgm-column-resizer\s*\{[^}]*cursor:\s*col-resize;/s);
   assert.match(styleSource, /\.md-bgm-main\s*\{[^}]*overflow:\s*hidden;/s);
   assert.match(styleSource, /\.md-bgm-sidebar\.right\s*\{[^}]*padding:\s*12px;/s);
   assert.match(styleSource, /\.md-bgm-res-title\s*\{[^}]*grid-template-columns:\s*16px minmax\(0,\s*1fr\) auto;/s);
+  assert.match(styleSource, /\.md-bgm-list-actions\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) 34px;/s);
+  assert.match(styleSource, /\.md-bgm-list-actions\s*\{[^}]*border-bottom:\s*1px solid var\(--border\);/s);
+  assert.match(styleSource, /\.md-bgm-asset-tree\s*\{[^}]*flex:\s*1 1 0;/s);
+  assert.match(styleSource, /\.md-bgm-asset\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;/s);
+  assert.match(styleSource, /\.md-bgm-asset-icon\s*\{/);
 });
 
 test('md-bgm-composer editor modes expose layer, keyboard, sticky scroll, and pattern controls', () => {
@@ -285,10 +343,22 @@ test('MIDI parser reads format 1 tempo, program, CC, pitch bend, and notes', () 
   assert.equal(parsed.ticksPerQuarter, 96);
   assert.equal(parsed.tracks.length, 2);
   assert.ok(parsed.tracks[0].events.some((event) => event.type === 'tempo'));
+  assert.ok(parsed.tracks[1].events.some((event) => event.type === 'copyright'));
   assert.ok(parsed.tracks[1].events.some((event) => event.type === 'programChange' && event.program === 0x10));
   assert.ok(parsed.tracks[1].events.some((event) => event.type === 'controlChange' && event.controller === 7));
   assert.ok(parsed.tracks[1].events.some((event) => event.type === 'pitchBend'));
   assert.ok(parsed.tracks[1].events.some((event) => event.type === 'noteOn' && event.note === 60));
+});
+
+test('MIDI metadata is used when importing without explicit title', () => {
+  const imported = core.convertMidiToSong(core.parseMidi(makeMidiFixture()), {
+    symbol: 'lead_theme',
+  });
+
+  assert.equal(imported.song.title, 'Lead');
+  assert.equal(imported.song.artist, 'Composer Name');
+  assert.equal(imported.song.metadata.midi.title, 'Lead');
+  assert.equal(imported.song.metadata.midi.artist, 'Composer Name');
 });
 
 test('MIDI import builds an XGM2-safe song and reports lossy conversions', () => {
@@ -431,6 +501,29 @@ test('VGM analyzer approximates editable song data from YM2612 and PSG writes', 
   assert.equal(result.song.symbol, 'theme');
   assert.ok(result.song.patterns[0].rows.some((row) => row.cells.FM1?.note));
   assert.ok(result.diagnostics.some((diag) => diag.code === 'vgm-approximation'));
+});
+
+test('VGM analyzer imports GD3 metadata and infers tempo/speed from wait stream', () => {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'md-bgm-composer-gd3-'));
+  const song = core.createDefaultSong({ symbol: 'gd3_theme', title: 'Ignored', artist: 'Ignored', tempo: 150, speed: 6 });
+  song.patterns[0].rows[0].cells.FM1 = { note: 'C4', midiNote: 60, instrument: 'fm_bell', volume: 12 };
+  const vgmPath = path.join(projectDir, 'theme.vgm');
+  fs.writeFileSync(vgmPath, withGd3(core.writeVgm(song), {
+    title: 'GD3 Title',
+    artist: 'GD3 Artist',
+  }));
+
+  const result = composer.analyzeVgm({ sourcePath: vgmPath, symbol: 'theme' }, { projectDir });
+
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.song.title, 'GD3 Title');
+  assert.equal(result.song.artist, 'GD3 Artist');
+  assert.equal(result.song.tempo, 150);
+  assert.equal(result.song.speed, 6);
+  assert.equal(result.song.metadata.source.type, 'VGM');
+  assert.ok(result.song.metadata.source.durationSec > 0);
+  assert.ok(result.diagnostics.some((diag) => diag.code === 'vgm-gd3-metadata'));
+  assert.ok(result.diagnostics.some((diag) => diag.code === 'vgm-grid-inferred'));
 });
 
 test('XGM analyzer creates a lossy editable scaffold instead of failing', () => {

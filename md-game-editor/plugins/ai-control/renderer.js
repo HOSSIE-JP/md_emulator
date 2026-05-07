@@ -52,11 +52,50 @@ export function activatePlugin({ root, api, registerCapability }) {
   };
 
   function appendLog(entry) {
-    const line = typeof entry === 'string'
-      ? entry
-      : `[${entry?.at || new Date().toISOString()}] ${entry?.level || 'info'} ${entry?.message || ''}`;
-    ui.log.textContent = `${ui.log.textContent}\n${line}`.trim().slice(-12000);
+    let line = entry;
+    if (typeof entry !== 'string') {
+      const time = entry?.at || new Date().toISOString();
+      const level = entry?.level || 'info';
+      const label = entry?.kind === 'tool'
+        ? `${entry.protocol || 'api'}:${entry.tool || 'tool'}`
+        : level;
+      const duration = Number.isFinite(entry?.durationMs) ? ` ${entry.durationMs}ms` : '';
+      line = `[${time}] ${label} ${entry?.message || ''}${duration}`;
+      const details = {};
+      if (entry?.arguments) details.arguments = entry.arguments;
+      if (entry?.result) details.result = entry.result;
+      if (Object.keys(details).length) {
+        line += `\n  ${JSON.stringify(details)}`;
+      } else if (entry?.details) {
+        line += `\n  ${JSON.stringify(entry.details)}`;
+      }
+    }
+    ui.log.textContent = `${ui.log.textContent}\n${line}`.trim().slice(-20000);
     ui.log.scrollTop = ui.log.scrollHeight;
+  }
+
+  function getSidebarButton() {
+    return document.querySelector('.nav-btn-plugin[data-plugin-id="ai-control"]');
+  }
+
+  function updateSidebarStatus(state = {}) {
+    const btn = getSidebarButton();
+    if (!btn) return;
+    const running = Boolean(state.running);
+    btn.dataset.aiControlRunning = running ? 'true' : 'false';
+    btn.dataset.aiControlPort = state.port ? String(state.port) : '';
+    btn.title = running
+      ? `AI Control running on ${state.baseUrl || `http://127.0.0.1:${state.port}`}`
+      : 'AI Control stopped';
+
+    let indicator = btn.querySelector('[data-ai-control-sidebar-status]');
+    if (!indicator) {
+      indicator = document.createElement('span');
+      indicator.className = 'ai-control-sidebar-status';
+      indicator.dataset.aiControlSidebarStatus = '';
+      btn.appendChild(indicator);
+    }
+    indicator.textContent = state.port ? String(state.port) : '';
   }
 
   function renderStatus(state) {
@@ -74,6 +113,7 @@ export function activatePlugin({ root, api, registerCapability }) {
       ui.log.textContent = '';
       state.logs.forEach(appendLog);
     }
+    updateSidebarStatus(state || {});
   }
 
   async function refresh() {

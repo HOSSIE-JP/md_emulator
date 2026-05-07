@@ -14,7 +14,7 @@
   },
   "renderer": {
     "page": "ai-control",
-    "script": "renderer.js",
+    "entry": "renderer.js",
     "styles": ["style.css"],
     "capabilities": ["page", "ai-control"]
   }

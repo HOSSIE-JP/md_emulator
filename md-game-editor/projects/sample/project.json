@@ -1,6 +1,0 @@
-{
-  "pluginRoles": {
-    "builder": "block-game-builder",
-    "testplay": "standard-emulator"
-  }
-}

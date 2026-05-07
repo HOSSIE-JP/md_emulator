@@ -37,6 +37,9 @@
     <symbol id="icon-folder-new" viewBox="0 0 24 24"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H10l2 2h4.5A2.5 2.5 0 0 1 19 8.5v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M3 8.5v9A2.5 2.5 0 0 0 5.5 20H12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M17 14v6M14 17h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="icon-unfold" viewBox="0 0 24 24"><path d="M6 7l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="icon-fold" viewBox="0 0 24 24"><path d="M6 17l6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-edit" viewBox="0 0 24 24"><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16.5 16.5L21 21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="icon-replace" viewBox="0 0 24 24"><path d="M4 7h11a4 4 0 0 1 0 8H8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 3L4 7l4 4M20 17h-8M16 13l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </svg>
 
   <!-- TOP BAR -->
@@ -90,8 +93,8 @@
                 <button class="icon-btn" id="btnCreateResFile" type="button" title=".res ファイル追加">
                   <svg class="icon"><use href="#icon-file-plus"></use></svg>
                 </button>
-                <div id="assetEditorActions" class="asset-editor-actions-inline" hidden>
-                  <button class="icon-btn danger-icon-btn" id="btnDeleteAssetEntry" type="button" title="定義を削除">
+                <div id="assetEditorActions" class="asset-editor-actions-inline">
+                  <button class="icon-btn danger-icon-btn" id="btnDeleteAssetEntry" type="button" title="選択中の .res ファイルを削除">
                     <svg class="icon"><use href="#icon-trash"></use></svg>
                   </button>
                 </div>
@@ -122,6 +125,7 @@
             </div>
             <p class="hint-text" id="assetTableHint">res/*.res を読み込み中...</p>
           </div>
+          <div class="asset-preview-resizer" id="assetPreviewResizer" role="separator" aria-orientation="vertical" aria-label="プレビューパネル幅"></div>
           <div class="asset-preview-panel" id="assetPreviewPanel">
             <div id="assetEditorPanel">
 
@@ -200,16 +204,6 @@
             <button class="icon-btn" id="btnCodeNewFolder" title="新規フォルダ">
               <svg class="icon"><use href="#icon-folder-new"></use></svg>
             </button>
-            <button class="icon-btn danger-icon-btn" id="btnCodeDelete" title="削除">
-              <svg class="icon"><use href="#icon-trash"></use></svg>
-            </button>
-            <div class="page-actions-sep"></div>
-            <button class="icon-btn" id="btnSaveCode" title="保存 (Ctrl+S)">
-              <svg class="icon"><use href="#icon-save"></use></svg>
-            </button>
-            <button class="icon-btn" id="btnCopyCode" title="クリップボードにコピー">
-              <svg class="icon"><use href="#icon-copy"></use></svg>
-            </button>
           </div>
         </div>
         <div class="code-layout">
@@ -223,36 +217,79 @@
                 <button class="icon-btn icon-btn-xs" id="btnCodeTreeCollapseAll" title="ツリーを全て閉じる">
                   <svg class="icon"><use href="#icon-fold"></use></svg>
                 </button>
-                <button class="icon-btn icon-btn-xs" id="btnOpenSrcFolder" title="プロジェクトフォルダを開く">
-                  <svg class="icon"><use href="#icon-folder-open"></use></svg>
-                </button>
-                <button class="icon-btn icon-btn-xs" id="btnCodeReload" title="プロジェクトツリーを再読み込み">
-                  ↻
-                </button>
               </div>
             </div>
-            <div id="codeNewEntryRow" class="code-new-entry-row" hidden>
-              <input type="text" id="codeNewEntryInput" class="code-new-entry-input" placeholder="ファイル名..." autocomplete="off" />
-              <button class="icon-btn icon-btn-xs" id="btnCodeNewEntryConfirm" title="作成">✓</button>
-              <button class="icon-btn icon-btn-xs" id="btnCodeNewEntryCancel" title="キャンセル">✕</button>
+            <div class="code-tree-filter-row">
+              <input id="codeTreeFilterInput" class="code-tree-filter-input" type="text" placeholder="検索語 / 正規表現 / glob" spellcheck="false" autocomplete="off" title="例: \\.(c|h)$ または src/**/main.*" />
             </div>
             <div id="codeTree" class="code-tree"></div>
           </aside>
           <div class="code-editor-panel">
-            <div class="code-area">
-              <div class="code-filename" id="codeFileName">📄 project/src/main.c</div>
+            <div class="code-area" id="codeArea">
+              <div class="code-filebar">
+                <div class="code-filename" id="codeFileName">📄 project/src/main.c</div>
+                <button class="icon-btn icon-btn-xs" id="btnCodeFindToggle" title="検索/置換 (Ctrl+F)">
+                  <svg class="icon"><use href="#icon-search"></use></svg>
+                </button>
+                <button class="icon-btn icon-btn-xs" id="btnSaveCode" title="保存 (Ctrl+S)">
+                  <svg class="icon"><use href="#icon-save"></use></svg>
+                </button>
+                <button class="icon-btn icon-btn-xs danger-icon-btn" id="btnCodeDelete" title="削除">
+                  <svg class="icon"><use href="#icon-trash"></use></svg>
+                </button>
+              </div>
+              <div class="code-find-panel" id="codeFindPanel" hidden>
+                <input id="codeFindInput" class="code-find-input" type="text" placeholder="検索" spellcheck="false" autocomplete="off" />
+                <input id="codeReplaceInput" class="code-find-input" type="text" placeholder="置換" spellcheck="false" autocomplete="off" />
+                <button class="icon-btn icon-btn-xs" id="btnCodeFindPrev" title="前を検索">↑</button>
+                <button class="icon-btn icon-btn-xs" id="btnCodeFindNext" title="次を検索">↓</button>
+                <button class="icon-btn icon-btn-xs" id="btnCodeReplaceOne" title="現在の一致を置換">
+                  <svg class="icon"><use href="#icon-replace"></use></svg>
+                </button>
+                <button class="btn-sm" id="btnCodeReplaceAll" type="button">すべて</button>
+              </div>
               <div class="code-editor-body">
                 <div class="code-line-numbers" id="codeLineNumbers" aria-hidden="true">1</div>
                 <div class="code-scroller" id="codeScroller">
                   <pre class="code-highlight" id="codeHighlight" aria-hidden="true"></pre>
-                  <textarea id="codeEditor" class="code-editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+                  <textarea id="codeEditor" class="code-editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" wrap="off"></textarea>
+                  <div class="code-completion-panel" id="codeCompletionPanel" hidden></div>
                 </div>
+              </div>
+              <div class="code-media-preview" id="codeMediaPreview" hidden></div>
+              <div class="code-editor-footer">
+                <select id="codeEncodingSelect" class="code-encoding-select" title="文字コード">
+                  <option value="auto">自動判定</option>
+                  <option value="utf8">UTF-8</option>
+                  <option value="shift_jis">SJIS / CP932</option>
+                </select>
+                <div class="code-status" id="codeStatus">プロジェクト内のファイルを選択してください。</div>
               </div>
             </div>
           </div>
         </div>
-        <div class="code-status" id="codeStatus">プロジェクト内のファイルを選択してください。</div>
       </section>
+
+      <div class="app-modal" id="codeEntryModal" aria-hidden="true">
+        <div class="app-backdrop" data-modal-close="codeEntryModal"></div>
+        <section class="app-panel app-panel-sm" role="dialog" aria-modal="true" aria-labelledby="codeEntryModalTitle">
+          <div class="page-header modal-header">
+            <h2 id="codeEntryModalTitle">ファイル名</h2>
+            <button class="icon-btn" id="btnCodeEntryModalClose" type="button">✕</button>
+          </div>
+          <div class="settings-form compact-form">
+            <div class="form-group">
+              <label class="form-label" for="codeEntryNameInput">名前</label>
+              <input class="form-input form-input-mono" id="codeEntryNameInput" type="text" autocomplete="off" />
+              <p class="form-error" id="codeEntryNameError"></p>
+            </div>
+            <div class="form-actions-inline">
+              <button class="btn-primary" id="btnCodeEntryConfirm" type="button">OK</button>
+              <button class="btn-sm" id="btnCodeEntryCancel" type="button">キャンセル</button>
+            </div>
+          </div>
+        </section>
+      </div>
 
       <!-- PLUGINS PAGE -->
       <section class="editor-page" id="page-plugins">
@@ -585,13 +622,21 @@
 
   <div class="app-modal" id="projectModal" aria-hidden="true">
     <div class="app-backdrop" data-modal-close="projectModal"></div>
-    <section class="app-panel app-panel-md" role="dialog" aria-modal="true" aria-labelledby="projectModalTitle">
+    <section class="app-panel app-panel-lg" role="dialog" aria-modal="true" aria-labelledby="projectModalTitle">
       <div class="page-header modal-header">
         <h2 id="projectModalTitle">新規プロジェクト</h2>
         <button class="icon-btn" id="btnProjectModalClose" type="button">✕</button>
       </div>
       <div class="settings-form compact-form">
         <div class="app-grid-2">
+          <div class="form-group app-grid-span-2">
+            <label class="form-label">作成場所</label>
+            <div class="project-path-picker">
+              <input type="text" class="form-input form-input-mono" id="projectParentDirInput" readonly />
+              <button class="btn-sm" id="btnProjectParentDirBrowse" type="button">フォルダを選択</button>
+            </div>
+            <p class="form-hint">未変更の場合は既定の projects フォルダ配下に作成します。</p>
+          </div>
           <div class="form-group app-grid-span-2">
             <label class="form-label">プロジェクトフォルダ名</label>
             <input type="text" class="form-input form-input-mono" id="projectSystemNameInput" placeholder="my_md_game" />
@@ -610,11 +655,10 @@
           </div>
           <div class="form-group app-grid-span-2">
             <label class="form-label">ゲームタイプ</label>
-            <select class="form-input" id="projectBuilderSelect"></select>
-            <p class="form-hint">インストール済みの Build プラグインを選択します。未選択の場合は空のプロジェクトを作成します。</p>
+            <select class="form-input" id="projectTemplateSelect"></select>
+            <p class="form-hint" id="projectTemplateHint">テンプレート未選択の場合は空のプロジェクトを作成します。</p>
           </div>
         </div>
-        <p class="form-hint">作成先は projects フォルダ配下です。</p>
         <div class="form-actions-inline modal-actions-end">
           <button class="btn-sm" id="btnProjectModalCancel" type="button">キャンセル</button>
           <button class="btn-primary" id="btnProjectModalCreate" type="button">作成</button>
@@ -625,13 +669,17 @@
 
   <div class="app-modal" id="projectPickerModal" aria-hidden="true">
     <div class="app-backdrop" data-modal-close="projectPickerModal"></div>
-    <section class="app-panel app-panel-md" role="dialog" aria-modal="true" aria-labelledby="projectPickerTitle">
+    <section class="app-panel app-panel-lg" role="dialog" aria-modal="true" aria-labelledby="projectPickerTitle">
       <div class="page-header modal-header">
         <h2 id="projectPickerTitle">プロジェクト選択</h2>
         <button class="icon-btn" id="btnProjectPickerClose" type="button">✕</button>
       </div>
       <div class="settings-form compact-form">
-        <p class="form-hint">projects 配下のプロジェクトを一覧表示します。</p>
+        <div class="project-picker-actions">
+          <button class="btn-sm" id="btnProjectPickerOpenFolder" type="button">フォルダを開く</button>
+          <button class="btn-primary" id="btnProjectPickerNew" type="button">新規プロジェクト</button>
+        </div>
+        <p class="form-hint">最近開いたプロジェクト、または既定の projects フォルダ配下のプロジェクトを選択します。</p>
         <div class="project-picker-root" id="projectPickerRoot">-</div>
         <div class="project-picker-list" id="projectPickerList"></div>
         <div class="form-actions-inline modal-actions-end">

@@ -39,6 +39,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     grid: computeFrameGrid(16, 16, '16p', '16p'),
     playbackTimer: 0,
     splitterDrag: null,
+    columnResizeStart: null,
+    dirty: false,
+    wasActive: root.classList.contains('active'),
   };
 
   root.innerHTML = buildShell();
@@ -52,6 +55,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   });
 
   bindEvents();
+  observePageActivation();
   void refresh();
 
   logger.debug('sprite-editor renderer activated');
@@ -63,8 +67,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   };
 
   function bindEvents() {
-    ui.refresh.addEventListener('click', () => void refresh());
-    ui.add.addEventListener('click', () => void addSprite());
+    ui.add.addEventListener('click', async () => {
+      if (await confirmCanReplaceCurrentSprite()) void addSprite();
+    });
     ui.fileFilter.addEventListener('change', () => {
       state.fileFilter = ui.fileFilter.value;
       renderTree();
@@ -82,9 +87,17 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         renderTree();
         return;
       }
+      const action = event.target.closest('[data-sprite-action]');
+      if (action) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (action.dataset.spriteAction === 'save') void saveProperties();
+        if (action.dataset.spriteAction === 'delete') void deleteSelectedSprite();
+        return;
+      }
       const item = event.target.closest('[data-sprite-key]');
       if (item) {
-        void selectSprite(item.dataset.spriteKey);
+        void requestSelectSprite(item.dataset.spriteKey);
       }
     });
 
@@ -107,6 +120,23 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     ui.splitter.addEventListener('pointerdown', (event) => {
       startSplitterDrag(event);
     });
+    const startColumnResize = (event, edge) => {
+      ui.rootShell.setPointerCapture(event.pointerId);
+      state.columnResizeStart = {
+        pointerId: event.pointerId,
+        edge,
+        startX: event.clientX,
+        leftWidth: ui.leftPane.getBoundingClientRect().width,
+        rightWidth: ui.propsPane.getBoundingClientRect().width,
+        shellWidth: ui.rootShell.getBoundingClientRect().width,
+      };
+      event.target.classList.add('active');
+    };
+    ui.leftColumnResizer.addEventListener('pointerdown', (event) => startColumnResize(event, 'left'));
+    ui.rightColumnResizer.addEventListener('pointerdown', (event) => startColumnResize(event, 'right'));
+    ui.rootShell.addEventListener('pointermove', (event) => resizeColumns(event));
+    ui.rootShell.addEventListener('pointerup', (event) => stopColumnResize(event));
+    ui.rootShell.addEventListener('pointercancel', (event) => stopColumnResize(event));
     ui.gridToggle.addEventListener('change', () => {
       state.showGrid = ui.gridToggle.checked;
       drawPreview();
@@ -147,6 +177,12 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       drawPreview();
       drawSheet();
     });
+    ui.form.addEventListener('input', (event) => {
+      if (event.target.closest('input, textarea')) markDirty();
+    });
+    ui.form.addEventListener('change', (event) => {
+      if (event.target.closest('input, select, textarea')) markDirty();
+    });
     ui.rowList.addEventListener('change', (event) => {
       const frameInput = event.target.closest('[data-row-frame-count]');
       if (frameInput) {
@@ -176,20 +212,29 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     });
     ui.frameWidth.addEventListener('change', () => {
       ui.frameWidth.value = String(snapSpritePixels(ui.frameWidth.value));
+      markDirty();
       updateGridFromInputs();
     });
     ui.frameHeight.addEventListener('change', () => {
       ui.frameHeight.value = String(snapSpritePixels(ui.frameHeight.value));
+      markDirty();
       updateGridFromInputs();
     });
     ui.sheetCanvas.addEventListener('click', (event) => {
       selectFrameFromSheet(event);
     });
-    ui.save.addEventListener('click', () => void saveProperties());
-    ui.delete.addEventListener('click', () => void deleteSelectedSprite());
   }
 
-  async function refresh() {
+  function observePageActivation() {
+    const observer = new MutationObserver(() => {
+      const active = root.classList.contains('active');
+      if (active && !state.wasActive) void refresh({ preserveDirty: state.dirty });
+      state.wasActive = active;
+    });
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  async function refresh(options = {}) {
     stopPlayback();
     setStatus('SPRITE 定義を読み込み中...');
     const result = await api.electronAPI.listResDefinitions();
@@ -209,12 +254,31 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     }
     renderFileFilter();
     renderTree();
-    await selectSprite(state.selectedKey, { keepTree: true });
+    if (options.preserveDirty && state.dirty && state.selectedKey && findSpriteByKey(state.selectedKey)) {
+      renderTree();
+    } else {
+      await selectSprite(state.selectedKey, { keepTree: true });
+    }
     setStatus(`SPRITE ${countSprites()} 件`);
+  }
+
+  async function requestSelectSprite(key) {
+    if (!key || key === state.selectedKey || !state.dirty) {
+      await selectSprite(key);
+      return true;
+    }
+    const ok = await confirmCanReplaceCurrentSprite();
+    if (!ok) {
+      renderTree();
+      return false;
+    }
+    await selectSprite(key);
+    return true;
   }
 
   async function selectSprite(key, options = {}) {
     state.selectedKey = key || '';
+    state.dirty = false;
     if (!options.keepTree) renderTree();
     const selected = getSelectedSprite();
     renderProperties(selected);
@@ -289,14 +353,21 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       const expanded = state.expandedFiles.has(file.file);
       const children = expanded ? file.entries.map((entry) => {
         const key = spriteKey(file.file, entry);
+        const active = key === selectedKey;
         return `
-          <button class="sprite-editor-item ${key === selectedKey ? 'active' : ''}" type="button" data-sprite-key="${esc(key)}">
+          <div class="sprite-editor-item ${active ? 'active' : ''}" role="button" tabindex="0" data-sprite-key="${esc(key)}">
             <canvas class="sprite-editor-thumb" width="48" height="40" data-thumb-key="${esc(key)}"></canvas>
             <span>
-              <span class="sprite-editor-item-title">${esc(entry.name)}</span>
+              <span class="sprite-editor-item-title">${esc(entry.name)}${active && state.dirty ? ' *' : ''}</span>
               <span class="sprite-editor-item-meta">${esc(entry.width || '')} x ${esc(entry.height || '')}</span>
             </span>
-          </button>
+            ${active ? `
+              <span class="sprite-editor-list-actions">
+                <button class="sprite-editor-list-icon sprite-editor-primary" type="button" data-sprite-action="save" title="保存" aria-label="保存"><svg class="icon"><use href="#icon-save"></use></svg></button>
+                <button class="sprite-editor-list-icon sprite-editor-danger" type="button" data-sprite-action="delete" title="削除" aria-label="削除"><svg class="icon"><use href="#icon-trash"></use></svg></button>
+              </span>
+            ` : ''}
+          </div>
         `;
       }).join('') : '';
       return `
@@ -336,7 +407,6 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const entry = selected?.entry;
     ui.propsDisabled.hidden = Boolean(entry);
     ui.form.hidden = !entry;
-    ui.actions.hidden = !entry;
     if (!entry) return;
 
     ui.name.value = entry.name || '';
@@ -558,6 +628,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       return false;
     }
     if (!options.silent) setStatus(`保存しました: ${entry.name}`);
+    state.dirty = false;
     await refreshAfterSave(selected.file.file, selected.entry.lineNumber);
     return true;
   }
@@ -831,12 +902,36 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     }
     ui.time.value = nextTime;
     if (rowIndex === state.frameRow) ui.frameTime.value = fillTime;
+    if (!options.persist) state.dirty = true;
     drawPreview();
     drawSheet();
     if (!options.persist) return;
     await saveProperties({ silent: true });
     syncFrameControls();
     setStatus(`ROW ${rowIndex} の time を ${fillTime} にしました`);
+  }
+
+  function markDirty() {
+    if (state.dirty) return;
+    state.dirty = true;
+    renderTree();
+  }
+
+  async function confirmCanReplaceCurrentSprite() {
+    if (!state.dirty) return true;
+    const selected = getSelectedSprite();
+    const decision = await confirmUnsavedSpriteSwitch(selected?.entry);
+    if (decision === 'cancel') {
+      setStatus('操作をキャンセルしました');
+      return false;
+    }
+    if (decision === 'save') {
+      await saveProperties();
+      return !state.dirty;
+    }
+    state.dirty = false;
+    renderTree();
+    return true;
   }
 
   async function readImageSize(sourcePath) {
@@ -927,13 +1022,39 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       state.splitterDrag.max,
       Math.floor(state.splitterDrag.height * 0.45),
     );
-    ui.center.style.gridTemplateRows = `${nextTop}px 6px minmax(180px, 1fr)`;
+    ui.center.style.gridTemplateRows = `${nextTop}px 6px minmax(0, 1fr)`;
   }
 
   function stopSplitterDrag() {
     state.splitterDrag = null;
     ui.splitter.classList.remove('is-dragging');
     window.removeEventListener('pointermove', handleSplitterDrag);
+  }
+
+  function resizeColumns(event) {
+    const drag = state.columnResizeStart;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    const minLeft = 220;
+    const minCenter = 360;
+    const minRight = 260;
+    if (drag.edge === 'left') {
+      const maxLeft = Math.max(minLeft, drag.shellWidth - drag.rightWidth - minCenter - 12);
+      const width = Math.max(minLeft, Math.min(maxLeft, Math.round(drag.leftWidth + dx)));
+      ui.rootShell.style.setProperty('--sprite-left-width', `${width}px`);
+    } else {
+      const maxRight = Math.max(minRight, drag.shellWidth - drag.leftWidth - minCenter - 12);
+      const width = Math.max(minRight, Math.min(maxRight, Math.round(drag.rightWidth - dx)));
+      ui.rootShell.style.setProperty('--sprite-right-width', `${width}px`);
+    }
+  }
+
+  function stopColumnResize(event) {
+    const drag = state.columnResizeStart;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    state.columnResizeStart = null;
+    ui.leftColumnResizer.classList.remove('active');
+    ui.rightColumnResizer.classList.remove('active');
   }
 
   function confirmModal(message, submitText) {
@@ -943,6 +1064,40 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       danger: true,
       body: `<p class="sprite-editor-status">${message}</p>`,
       collect: () => true,
+    });
+  }
+
+  function confirmUnsavedSpriteSwitch(entry) {
+    return new Promise((resolve) => {
+      const title = esc(entry?.name || '選択中のSPRITE');
+      const modalHtml = `
+        <div class="page-header modal-header">
+          <h2>未保存の変更</h2>
+          <button class="icon-btn" type="button" data-modal-decision="cancel">✕</button>
+        </div>
+        <div class="settings-form compact-form sprite-editor-modal-form">
+          <p class="sprite-editor-status">${title} に未保存の変更があります。</p>
+          <p class="sprite-editor-status">別のアセットを開く前に、変更を保存するか破棄してください。</p>
+          <div class="form-actions-inline modal-actions-end">
+            <button class="sprite-editor-secondary" type="button" data-modal-decision="cancel">キャンセル</button>
+            <button class="sprite-editor-danger" type="button" data-modal-decision="discard">破棄して開く</button>
+            <button class="sprite-editor-primary" type="button" data-modal-decision="save">保存して開く</button>
+          </div>
+        </div>
+      `;
+      const modal = api.createModal({
+        id: `${plugin.id}-unsaved-switch-modal`,
+        panelClassName: 'app-panel app-panel-sm',
+        html: modalHtml,
+      });
+      modal.panel.innerHTML = modalHtml;
+      modal.panel.querySelectorAll('[data-modal-decision]').forEach((button) => {
+        button.addEventListener('click', () => {
+          modal.close();
+          resolve(button.dataset.modalDecision || 'cancel');
+        }, { once: true });
+      });
+      modal.open();
     });
   }
 
@@ -986,11 +1141,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 
 function buildShell() {
   return `
-    <div class="sprite-editor-root">
-      <aside class="sprite-editor-pane">
+    <div class="sprite-editor-root" data-role="root-shell">
+      <aside class="sprite-editor-pane" data-role="left-pane">
         <div class="sprite-editor-toolbar">
           <h2>SPRITE</h2>
-          <button class="icon-btn" type="button" data-role="refresh" title="更新">↻</button>
           <button class="icon-btn" type="button" data-role="add" title="追加">＋</button>
         </div>
         <div class="sprite-editor-filter">
@@ -1003,6 +1157,7 @@ function buildShell() {
         </div>
         <div class="sprite-editor-tree" data-role="tree"></div>
       </aside>
+      <div class="sprite-editor-column-resizer" data-role="left-column-resizer" title="左列の幅を調整" aria-label="左列の幅を調整"></div>
       <main class="sprite-editor-center">
         <section class="sprite-editor-preview">
           <div class="sprite-editor-subtoolbar">
@@ -1035,19 +1190,10 @@ function buildShell() {
           </div>
         </section>
       </main>
-      <aside class="sprite-editor-pane sprite-editor-props">
+      <div class="sprite-editor-column-resizer" data-role="right-column-resizer" title="右列の幅を調整" aria-label="右列の幅を調整"></div>
+      <aside class="sprite-editor-pane sprite-editor-props" data-role="props-pane">
         <div class="sprite-editor-toolbar">
           <h2>Properties</h2>
-          <div class="sprite-editor-actions" data-role="actions" hidden>
-            <button class="sprite-editor-primary sprite-editor-action-button" data-role="save" type="button">
-              <svg class="icon"><use href="#icon-save"></use></svg>
-              <span>保存</span>
-            </button>
-            <button class="sprite-editor-danger sprite-editor-action-button" data-role="delete" type="button">
-              <svg class="icon"><use href="#icon-trash"></use></svg>
-              <span>削除</span>
-            </button>
-          </div>
         </div>
         <div class="sprite-editor-empty" data-role="props-disabled">SPRITE を選択してください</div>
         <form class="sprite-editor-form-grid" data-role="form" hidden>
@@ -1074,7 +1220,11 @@ function buildShell() {
 function bindUi(root) {
   const pick = (role) => root.querySelector(`[data-role="${role}"]`);
   return {
-    refresh: pick('refresh'),
+    rootShell: pick('root-shell'),
+    leftPane: pick('left-pane'),
+    propsPane: pick('props-pane'),
+    leftColumnResizer: pick('left-column-resizer'),
+    rightColumnResizer: pick('right-column-resizer'),
     add: pick('add'),
     fileFilter: pick('file-filter'),
     keyword: pick('keyword'),
@@ -1101,7 +1251,6 @@ function bindUi(root) {
     sheetCanvas: pick('sheet-canvas'),
     propsDisabled: pick('props-disabled'),
     form: pick('form'),
-    actions: pick('actions'),
     name: pick('name'),
     sourcePath: pick('source-path'),
     compression: pick('compression'),
@@ -1111,8 +1260,6 @@ function bindUi(root) {
     optLevel: pick('opt-level'),
     optDuplicate: pick('opt-duplicate'),
     comment: pick('comment'),
-    save: pick('save'),
-    delete: pick('delete'),
     status: pick('status'),
   };
 }

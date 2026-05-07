@@ -10,16 +10,11 @@ extraResources:
     to: plugins
     filter:
       - "**/*"
-  - from: projects/sample_block_game
-    to: projects/sample_block_game
+  - from: template
+    to: template
     filter:
       - "**/*"
-      - "!out/**"
-  - from: projects/sample_slideshow
-    to: projects/sample_slideshow
-    filter:
-      - "**/*"
-      - "!out/**"
+      - "!**/out/**"
 extraFiles:
   - from: build/portable
     to: portable

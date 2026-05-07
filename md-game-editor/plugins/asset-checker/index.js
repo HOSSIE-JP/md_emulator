@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const manifest = require('./manifest.json');
 
-const TARGET_TYPES = new Set(['IMAGE', 'SPRITE', 'TILEMAP', 'TILESET', 'PALETTE', 'XGM', 'XGM2', 'WAV']);
+const TARGET_TYPES = new Set(['IMAGE', 'SPRITE', 'MAP', 'TILEMAP', 'TILESET', 'PALETTE', 'XGM', 'XGM2', 'WAV']);
 
 function readTemplateSource() {
   return fs.readFileSync(path.join(__dirname, 'template', 'src', 'main.c'), 'utf-8');
@@ -48,6 +48,116 @@ function pathStem(value) {
   return path.basename(String(value || '').replace(/\\/g, '/')).replace(/\.[^.]*$/, '').toLowerCase();
 }
 
+function sourceBaseName(value) {
+  const raw = path.basename(String(value || '').replace(/\\/g, '/')).replace(/\.[^.]*$/, '');
+  const normalized = raw.replace(/[^A-Za-z0-9_]/g, '_').replace(/^[0-9]/, '_$&');
+  return normalized || 'tileset';
+}
+
+function normalizeAssetPath(value) {
+  const parts = [];
+  String(value || '').replace(/\\/g, '/').replace(/^res\//, '').split('/').forEach((part) => {
+    if (!part || part === '.') return;
+    if (part === '..') {
+      if (parts.length && parts[parts.length - 1] !== '..') parts.pop();
+      else parts.push(part);
+    } else {
+      parts.push(part);
+    }
+  });
+  return parts.join('/');
+}
+
+function resolveAssetRelative(basePath, relativePath) {
+  const baseDir = path.posix.dirname(String(basePath || '').replace(/\\/g, '/'));
+  return normalizeAssetPath(path.posix.join(baseDir, String(relativePath || '').replace(/\\/g, '/')));
+}
+
+function readAssetText(projectDir, sourcePath) {
+  if (!projectDir || !sourcePath) return '';
+  const fullPath = path.join(projectDir, 'res', normalizeAssetPath(sourcePath));
+  try {
+    return fs.readFileSync(fullPath, 'utf-8');
+  } catch (_) {
+    return '';
+  }
+}
+
+function parseTmxTilesets(text, tilemapSourcePath) {
+  const tilesets = [];
+  const re = /<tileset\b([^>]*?)(?:\/>|>[\s\S]*?<\/tileset>)/gi;
+  let match;
+  let index = 0;
+  while ((match = re.exec(String(text || '')))) {
+    const sourceMatch = /\bsource\s*=\s*"([^"]+)"/i.exec(match[1]);
+    const firstgidMatch = /\bfirstgid\s*=\s*"([0-9]+)"/i.exec(match[1]);
+    if (sourceMatch?.[1]) {
+      tilesets.push({
+        firstgid: firstgidMatch ? Number.parseInt(firstgidMatch[1], 10) || 1 : 1,
+        sourcePath: resolveAssetRelative(tilemapSourcePath, sourceMatch[1]),
+        tmxIndex: index,
+      });
+    }
+    index += 1;
+  }
+  return tilesets;
+}
+
+function parseTmxMapTileSize(text) {
+  const mapMatch = /<map\b([^>]*)>/i.exec(String(text || ''));
+  if (!mapMatch) return { width: 0, height: 0 };
+  const readNumber = (name) => {
+    const match = new RegExp(`\\b${name}\\s*=\\s*"([0-9]+)"`, 'i').exec(mapMatch[1]);
+    return match ? Number.parseInt(match[1], 10) || 0 : 0;
+  };
+  return { width: readNumber('width'), height: readNumber('height') };
+}
+
+function parseXmlAttributes(text) {
+  const attrs = {};
+  String(text || '').replace(/([:\w-]+)\s*=\s*"([^"]*)"/g, (_match, key, value) => {
+    attrs[key] = value;
+    return '';
+  });
+  return attrs;
+}
+
+function parseCsvTileData(text) {
+  return String(text || '')
+    .split(',')
+    .map((value) => Number.parseInt(value.trim(), 10) || 0)
+    .filter((value) => Number.isFinite(value) && value >= 0);
+}
+
+function parseTmxLayerData(text, layerName) {
+  const re = /<layer\b([^>]*)>([\s\S]*?)<\/layer>/gi;
+  let match;
+  while ((match = re.exec(String(text || '')))) {
+    const attrs = parseXmlAttributes(match[1]);
+    if (String(attrs.name || '') !== String(layerName || '')) continue;
+    const dataMatch = /<data\b([^>]*)>([\s\S]*?)<\/data>/i.exec(match[2]);
+    if (!dataMatch) return [];
+    const dataAttrs = parseXmlAttributes(dataMatch[1]);
+    if (String(dataAttrs.encoding || '').toLowerCase() !== 'csv') return [];
+    return parseCsvTileData(dataMatch[2]);
+  }
+  return [];
+}
+
+function parseTsxTileCount(text) {
+  const match = /<tileset\b([^>]*)>/i.exec(String(text || ''));
+  if (!match) return 0;
+  const attrs = parseXmlAttributes(match[1]);
+  return Number.parseInt(attrs.tilecount, 10) || 0;
+}
+
+function headerForResFile(value) {
+  const normalized = String(value || 'resources.res').replace(/\\/g, '/');
+  const base = path.basename(normalized).replace(/\.[^.]*$/, '');
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(base)) return 'resources.h';
+  return `${base}.h`;
+}
+
 function collectAssets(assets = []) {
   const normalized = (Array.isArray(assets) ? assets : [])
     .map((asset) => ({ ...asset, type: normalizeType(asset), name: String(asset?.name || '').trim() }))
@@ -55,7 +165,7 @@ function collectAssets(assets = []) {
 
   const images = normalized.filter((asset) => asset.type === 'IMAGE').sort(sortByName);
   const sprites = normalized.filter((asset) => asset.type === 'SPRITE').sort(sortByName);
-  const tilemaps = normalized.filter((asset) => asset.type === 'TILEMAP').sort(sortByName);
+  const tilemaps = normalized.filter((asset) => asset.type === 'MAP' || asset.type === 'TILEMAP').sort(sortByName);
   const tilesets = normalized.filter((asset) => asset.type === 'TILESET').sort(sortByName);
   const palettes = normalized.filter((asset) => asset.type === 'PALETTE').sort(sortByName);
   const bgms = normalized
@@ -86,38 +196,174 @@ function renderSpriteEntries(sprites) {
   );
 }
 
-function findTilesetForTilemap(tilemap, tilesets) {
+function renderResourceIncludes(assets) {
+  const headers = Array.from(new Set(
+    (Array.isArray(assets) ? assets : []).map((asset) => headerForResFile(asset.resFile)),
+  ));
+  const ordered = headers
+    .filter((header) => header !== 'resources.h')
+    .sort((left, right) => left.localeCompare(right));
+  return ['resources.h', ...ordered].map((header) => `#include "${header}"`).join('\n');
+}
+
+function findTilesetsForTilemap(tilemap, tilesets, context = {}) {
+  const tmxText = String(tilemap.sourcePath || '').toLowerCase().endsWith('.tmx')
+    ? readAssetText(context.projectDir, tilemap.sourcePath)
+    : '';
+  const tmxTilesets = parseTmxTilesets(tmxText, tilemap.sourcePath);
+  if (tmxTilesets.length) {
+    const byTmx = tmxTilesets.map((tmxTileset) => {
+      const registered = tilesets.find((entry) => normalizeAssetPath(entry.sourcePath) === tmxTileset.sourcePath);
+      if (registered) {
+        return {
+          ...registered,
+          symbol: registered.name,
+          firstgid: tmxTileset.firstgid,
+          tmxIndex: tmxTileset.tmxIndex,
+        };
+      }
+      const fallbackName = sourceBaseName(tmxTileset.sourcePath);
+      return {
+        type: 'TILESET',
+        name: `${tilemap.name}_tileset${tmxTileset.tmxIndex}`,
+        symbol: `${tilemap.name}_tileset${tmxTileset.tmxIndex}`,
+        sourcePath: tmxTileset.sourcePath,
+        firstgid: tmxTileset.firstgid,
+        tmxIndex: tmxTileset.tmxIndex,
+        fallbackName,
+      };
+    });
+    if (tilemap.type === 'MAP' && tilemap.tileset) {
+      const layerGids = parseTmxLayerData(tmxText, tilemap.tileset).filter((gid) => gid > 0);
+      if (layerGids.length) {
+        const layerTilesets = byTmx.map((entry, index) => {
+          const nextFirstgid = byTmx[index + 1]?.firstgid || Infinity;
+          const tsxText = readAssetText(context.projectDir, entry.sourcePath);
+          const tileCount = parseTsxTileCount(tsxText) || (Number.isFinite(nextFirstgid) ? Math.max(0, nextFirstgid - entry.firstgid) : 0);
+          const upper = tileCount > 0 ? entry.firstgid + tileCount : nextFirstgid;
+          return { ...entry, firstgid: 1, tileCount, tmxFirstgid: entry.firstgid, tmxUpper: upper };
+        }).filter((entry) => layerGids.some((gid) => gid >= entry.tmxFirstgid && gid < entry.tmxUpper));
+        if (layerTilesets.length) return layerTilesets;
+      }
+    }
+    if (byTmx.length) return byTmx;
+  }
   if (!tilesets.length) return null;
-  const explicit = tilesets.find((entry) => entry.name === tilemap.tileset);
-  if (explicit) return explicit;
+  const explicit = tilemap.type === 'TILEMAP'
+    ? tilesets.find((entry) => entry.name === tilemap.tileset)
+    : null;
+  if (explicit) return [{ ...explicit, symbol: explicit.name, firstgid: 1, tmxIndex: 0 }];
   const tilemapStem = pathStem(tilemap.sourcePath);
   const byStem = tilesets.find((entry) => pathStem(entry.sourcePath) === tilemapStem || pathStem(entry.name) === tilemapStem);
-  if (byStem) return byStem;
-  return tilesets.length === 1 ? tilesets[0] : null;
+  if (byStem) return [{ ...byStem, symbol: byStem.name, firstgid: 1, tmxIndex: 0 }];
+  return tilesets.length === 1 ? [{ ...tilesets[0], symbol: tilesets[0].name, firstgid: 1, tmxIndex: 0 }] : null;
+}
+
+function getTilemapSourceText(tilemap, context = {}) {
+  return String(tilemap?.sourcePath || '').toLowerCase().endsWith('.tmx')
+    ? readAssetText(context.projectDir, tilemap.sourcePath)
+    : '';
 }
 
 function findPaletteForTileset(tileset, palettes) {
   if (!tileset || !palettes.length) return null;
-  const bySource = palettes.find((entry) => String(entry.sourcePath || '') === String(tileset.sourcePath || ''));
+  const sourceStem = pathStem(tileset.sourcePath);
+  const bySource = palettes.find((entry) => {
+    const palettePath = normalizeAssetPath(entry.sourcePath);
+    const tilesetPath = normalizeAssetPath(tileset.sourcePath);
+    return palettePath === tilesetPath || pathStem(palettePath) === sourceStem;
+  });
   if (bySource) return bySource;
   const byName = palettes.find((entry) => entry.name === `${tileset.name}_palette` || entry.name === `${tileset.name}Palette`);
   if (byName) return byName;
   return palettes.length === 1 ? palettes[0] : null;
 }
 
-function renderTilemapEntries(tilemaps, tilesets, palettes) {
-  return arrayOrNone(
-    tilemaps,
-    (asset) => {
-      const tileset = findTilesetForTilemap(asset, tilesets);
-      const palette = findPaletteForTileset(tileset, palettes);
-      const tilesetPointer = tileset ? `&${tileset.name}` : 'NULL';
-      const palettePointer = palette ? `&${palette.name}` : 'NULL';
-      const note = tileset ? asset.name : `${asset.name} (no tileset)`;
-      return `    { "${escapeCString(note)}", &${asset.name}, ${tilesetPointer}, ${palettePointer} }`;
-    },
-    '{ "none", NULL, NULL, NULL }',
-  );
+function findPalettesForTilesets(tilesetList, palettes) {
+  const result = [];
+  const seen = new Set();
+  (tilesetList || []).forEach((tileset) => {
+    const palette = findPaletteForTileset(tileset, palettes);
+    if (!palette || seen.has(palette.name)) return;
+    seen.add(palette.name);
+    result.push(palette);
+  });
+  return result.slice(0, 3);
+}
+
+function paletteSlotsForTilesets(tilesetList, paletteList, allPalettes) {
+  return (tilesetList || []).slice(0, 8).map((tileset) => {
+    const palette = findPaletteForTileset(tileset, allPalettes);
+    const slot = palette ? paletteList.findIndex((entry) => entry.name === palette.name) : 0;
+    return slot >= 0 ? Math.min(slot, 2) : 0;
+  });
+}
+
+function renderTilesetArray(tilesetList) {
+  const values = (tilesetList || []).slice(0, 8).map((tileset) => `&${tileset.symbol || tileset.name}`);
+  while (values.length < 8) values.push('NULL');
+  return `{ ${values.join(', ')} }`;
+}
+
+function renderTileOffsetArray(tilesetList) {
+  let cumulative = 0;
+  const values = (tilesetList || []).slice(0, 8).map((tileset) => {
+    if (Number(tileset.firstgid) === 1 && Number(tileset.tileCount) > 0) {
+      const value = cumulative;
+      cumulative += Number(tileset.tileCount) || 0;
+      return String(value);
+    }
+    return String(Math.max(0, (Number(tileset.firstgid) || 1) - 1));
+  });
+  while (values.length < 8) values.push('0');
+  return `{ ${values.join(', ')} }`;
+}
+
+function renderPaletteSlotArray(slotList) {
+  const values = (slotList || []).slice(0, 8).map((slot) => String(slot));
+  while (values.length < 8) values.push('0');
+  return `{ ${values.join(', ')} }`;
+}
+
+function renderPaletteArray(paletteList) {
+  const values = (paletteList || []).slice(0, 3).map((palette) => `&${palette.name}`);
+  while (values.length < 3) values.push('NULL');
+  return `{ ${values.join(', ')} }`;
+}
+
+function renderMapDefinitionArray(mapList) {
+  const values = (mapList || []).slice(0, 8).map((asset) => (asset ? `&${asset.name}` : 'NULL'));
+  while (values.length < 8) values.push('NULL');
+  return `{ ${values.join(', ')} }`;
+}
+
+function renderTilemapData(tilemaps, tilesets, palettes, context = {}) {
+  const layerData = [];
+  const rendered = (tilemaps || []).map((asset) => {
+    const tmxText = getTilemapSourceText(asset, context);
+    const assetTilesets = findTilesetsForTilemap(asset, tilesets, context);
+    const assetPalettes = findPalettesForTilesets(assetTilesets || [], palettes);
+    const paletteSlots = paletteSlotsForTilesets(assetTilesets || [], assetPalettes, palettes);
+    const sourceSize = asset.type === 'MAP' ? parseTmxMapTileSize(tmxText) : { width: 0, height: 0 };
+    const previewLayer = 'NULL';
+    const tilesetArray = renderTilesetArray(assetTilesets || []);
+    const tileOffsetArray = renderTileOffsetArray(assetTilesets || []);
+    const paletteSlotArray = renderPaletteSlotArray(paletteSlots);
+    const paletteArray = renderPaletteArray(assetPalettes);
+    const tilesetCount = Math.min((assetTilesets || []).length, 8);
+    const paletteCount = Math.min(assetPalettes.length, 3);
+    const kind = asset.type === 'MAP' ? 'TILEMAP_KIND_MAP' : 'TILEMAP_KIND_TILEMAP';
+    const tilemapPointer = asset.type === 'TILEMAP' ? `&${asset.name}` : 'NULL';
+    const mapPointer = asset.type === 'MAP' ? `&${asset.name}` : 'NULL';
+    const mapDefinitionArray = renderMapDefinitionArray([]);
+    const priorityDefinitionArray = renderMapDefinitionArray([]);
+    const note = `${asset.name} (${asset.type}${tilesetCount ? '' : ' no tileset'})`;
+    return `    { "${escapeCString(note)}", ${kind}, ${tilemapPointer}, ${mapPointer}, ${mapDefinitionArray}, ${priorityDefinitionArray}, 0, ${previewLayer}, ${tilesetArray}, ${tileOffsetArray}, ${paletteSlotArray}, ${tilesetCount}, ${paletteArray}, ${paletteCount}, ${sourceSize.width}, ${sourceSize.height} }`;
+  });
+  const entries = rendered.length
+    ? rendered.join(',\n')
+    : '    { "none", TILEMAP_KIND_TILEMAP, NULL, NULL, { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL }, { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL }, 0, NULL, { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL }, { 0, 0, 0, 0, 0, 0, 0, 0 }, { 0, 0, 0, 0, 0, 0, 0, 0 }, 0, { NULL, NULL, NULL }, 0, 0, 0 }';
+  return { entries, layerData: layerData.join('\n\n'), count: rendered.length };
 }
 
 function renderBgmEntries(bgms) {
@@ -132,25 +378,28 @@ function renderBgmEntries(bgms) {
   );
 }
 
-function generateSource(assets = []) {
+function generateSource(assets = [], context = {}) {
   const grouped = collectAssets(assets);
   const total = grouped.images.length + grouped.sprites.length + grouped.tilemaps.length + grouped.bgms.length;
   if (total === 0) {
     return {
       ok: false,
-      error: 'IMAGE / SPRITE / TILEMAP / XGM / XGM2 / BGM 用 WAV アセットが見つかりません。',
+      error: 'IMAGE / SPRITE / MAP / TILEMAP / XGM / XGM2 / BGM 用 WAV アセットが見つかりません。',
     };
   }
 
+  const tilemapData = renderTilemapData(grouped.tilemaps, grouped.tilesets, grouped.palettes, context);
   const sourceCode = renderTemplate(readTemplateSource(), {
     VERSION: manifest.version,
+    RESOURCE_INCLUDES: renderResourceIncludes(grouped.images.concat(grouped.sprites, grouped.tilemaps, grouped.tilesets, grouped.palettes, grouped.bgms)),
     IMAGE_COUNT: grouped.images.length,
     SPRITE_COUNT: grouped.sprites.length,
-    TILEMAP_COUNT: grouped.tilemaps.length,
+    TILEMAP_COUNT: tilemapData.count,
     BGM_COUNT: grouped.bgms.length,
     IMAGE_ENTRIES: renderImageEntries(grouped.images),
     SPRITE_ENTRIES: renderSpriteEntries(grouped.sprites),
-    TILEMAP_ENTRIES: renderTilemapEntries(grouped.tilemaps, grouped.tilesets, grouped.palettes),
+    TILEMAP_LAYER_DATA: tilemapData.layerData,
+    TILEMAP_ENTRIES: tilemapData.entries,
     BGM_ENTRIES: renderBgmEntries(grouped.bgms),
   });
 
@@ -186,6 +435,8 @@ module.exports = {
   collectAssets,
   generateSource,
   readTemplateSource,
+  renderResourceIncludes,
+  findTilesetsForTilemap,
   onBuildStart,
   onBuildLog,
   onBuildEnd,

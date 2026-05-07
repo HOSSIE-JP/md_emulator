@@ -1,5 +1,7 @@
 .md-bgm-composer-shell {
+  width: calc(100% + 48px);
   height: 100%;
+  height: calc(100% + 40px);
   min-height: 0;
   margin: -20px -24px;
   overflow: hidden;
@@ -8,13 +10,30 @@
 }
 
 .md-bgm-layout {
+  --md-bgm-left: 300px;
+  --md-bgm-right: 320px;
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: 300px minmax(420px, 1fr) 320px;
+  grid-template-columns: var(--md-bgm-left) 6px minmax(420px, 1fr) 6px var(--md-bgm-right);
   gap: 1px;
   overflow: hidden;
   background: var(--border);
+}
+
+.md-bgm-column-resizer {
+  min-width: 6px;
+  cursor: col-resize;
+  background: #151c27;
+  border-left: 1px solid #26313c;
+  border-right: 1px solid #090d13;
+  touch-action: none;
+}
+
+.md-bgm-column-resizer:hover,
+.md-bgm-column-resizer:focus {
+  background: #2f5f88;
+  outline: none;
 }
 
 .md-bgm-sidebar {
@@ -71,6 +90,16 @@
   gap: 8px;
   padding: 10px;
   border-bottom: 1px solid var(--border);
+}
+
+.md-bgm-list-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  background: #111722;
+  flex: 0 0 auto;
 }
 
 .md-bgm-filter label,
@@ -142,7 +171,8 @@
 }
 
 .md-bgm-import-button .icon,
-.md-bgm-action-button .icon {
+.md-bgm-action-button .icon,
+.md-bgm-asset-icon .icon {
   width: 16px;
   height: 16px;
 }
@@ -610,6 +640,14 @@
   touch-action: none;
 }
 
+.md-bgm-piano-row button::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
 .md-bgm-piano-row button.beat-boundary {
   border-left-color: #314050;
 }
@@ -663,7 +701,23 @@
 }
 
 .md-bgm-piano-row button.is-hover-row {
-  background-color: #172432;
+  background-color: #10161d;
+}
+
+.md-bgm-piano-row.white-key button.is-hover-row {
+  background-color: #111a22;
+}
+
+.md-bgm-piano-row.black-key button.is-hover-row {
+  background-color: #0d1319;
+}
+
+.md-bgm-piano-row button.active.is-hover-row {
+  background-color: #4f8fda;
+}
+
+.md-bgm-piano-row button.is-hover-row::before {
+  background: rgba(119, 161, 205, 0.18);
 }
 
 .md-bgm-piano-row button.is-hover-col {
@@ -691,6 +745,7 @@
 
 .md-bgm-piano-ghost {
   position: absolute;
+  z-index: 2;
   width: 8px;
   height: 8px;
   right: 2px;
@@ -837,6 +892,7 @@
 
 .md-bgm-asset-tree {
   min-height: 0;
+  flex: 1 1 0;
   overflow: auto;
   padding: 8px;
 }
@@ -887,24 +943,51 @@
   border-radius: 0;
   margin: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 3px;
 }
 
-.md-bgm-asset span,
-.md-bgm-asset small {
-  display: block;
+.md-bgm-asset-meta {
+  min-width: 0;
 }
 
-.md-bgm-asset small {
+.md-bgm-asset-meta span,
+.md-bgm-asset-meta small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.md-bgm-asset-meta small {
   margin-top: 3px;
   color: #91a2b3;
   font-size: 11px;
 }
 
-.md-bgm-asset em {
+.md-bgm-asset-meta em {
   color: #8ea4b9;
   font-size: 11px;
   font-style: normal;
+}
+
+.md-bgm-asset-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.md-bgm-asset-icon {
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #3a4652;
+  border-radius: 6px;
+  background: #202833;
+  color: #edf2f7;
+  cursor: pointer;
 }
 
 .md-bgm-sidebar section + section {
@@ -974,6 +1057,8 @@
 
 @media (max-width: 1100px) {
   .md-bgm-layout {
-    grid-template-columns: 260px minmax(360px, 1fr) 300px;
+    --md-bgm-left: 260px;
+    --md-bgm-right: 300px;
+    grid-template-columns: var(--md-bgm-left) 6px minmax(360px, 1fr) 6px var(--md-bgm-right);
   }
 }

@@ -20,11 +20,20 @@ import {
   registerRuntimeCapability,
   waitForRuntimeCapability,
 } from './plugin-runtime.mjs';
+import {
+  appendLogLine,
+  formatLogEntryText,
+  getVisibleLogEntries as filterVisibleLogEntries,
+  isLogEntryVisible,
+  renderLogEntries,
+  renderLogSourceFilters as renderSharedLogSourceFilters,
+} from './log-viewer-core.mjs';
 
 // ------------------------------------------------------------------ state --
 const state = {
   currentPage: 'assets',
   logOpen: false,
+  logDetached: false,
   logOpenHeight: 220,
   building: false,
   lastRomPath: null,
@@ -39,6 +48,9 @@ const state = {
     name: '',
     projectsRootDir: '',
     availableProjects: [],
+    recentProjects: [],
+    templates: [],
+    newProjectParentDir: '',
   },
   preview: {
     audio: null,
@@ -58,6 +70,7 @@ const state = {
     paramsOpen: true,
     previewOpen: true,
     panelOpen: true,
+    panelWidth: 380,
   },
   rescomp: {
     resRoot: '',
@@ -72,6 +85,21 @@ const state = {
     tree: [],
     selectedPath: 'src/main.c',
     selectedIsDirectory: false,
+    selectedIsMedia: false,
+    selectedEncoding: 'auto',
+    activeEncoding: 'utf8',
+    treeFilterText: '',
+    treeFilterError: '',
+    initialCollapseApplied: false,
+    completions: [],
+    completionIndex: 0,
+    completionPrefix: '',
+    findOpen: false,
+    findText: '',
+    replaceText: '',
+    findMatches: [],
+    findIndex: -1,
+    cursorLine: 1,
     collapsedDirs: [],
     dirty: false,
   },
@@ -286,26 +314,39 @@ const el = {
   mainLayout: document.querySelector('.main-layout'),
   pageAssets: $('page-assets'),
   pageCode: $('page-code'),
+  codeArea: $('codeArea'),
   codeEditor: $('codeEditor'),
   codeFileName: $('codeFileName'),
+  btnCodeFindToggle: $('btnCodeFindToggle'),
+  codeFindPanel: $('codeFindPanel'),
+  codeFindInput: $('codeFindInput'),
+  codeReplaceInput: $('codeReplaceInput'),
+  btnCodeFindPrev: $('btnCodeFindPrev'),
+  btnCodeFindNext: $('btnCodeFindNext'),
+  btnCodeReplaceOne: $('btnCodeReplaceOne'),
+  btnCodeReplaceAll: $('btnCodeReplaceAll'),
   codeTree: $('codeTree'),
   codeStatus: $('codeStatus'),
   codeLineNumbers: $('codeLineNumbers'),
   codeHighlight: $('codeHighlight'),
   codeScroller: $('codeScroller'),
-  codeNewEntryRow: $('codeNewEntryRow'),
-  codeNewEntryInput: $('codeNewEntryInput'),
-  btnCodeNewEntryConfirm: $('btnCodeNewEntryConfirm'),
-  btnCodeNewEntryCancel: $('btnCodeNewEntryCancel'),
+  codeMediaPreview: $('codeMediaPreview'),
+  codeCompletionPanel: $('codeCompletionPanel'),
+  codeTreeFilterInput: $('codeTreeFilterInput'),
+  codeEncodingSelect: $('codeEncodingSelect'),
+  codeEntryModal: $('codeEntryModal'),
+  codeEntryModalTitle: $('codeEntryModalTitle'),
+  codeEntryNameInput: $('codeEntryNameInput'),
+  codeEntryNameError: $('codeEntryNameError'),
+  btnCodeEntryModalClose: $('btnCodeEntryModalClose'),
+  btnCodeEntryConfirm: $('btnCodeEntryConfirm'),
+  btnCodeEntryCancel: $('btnCodeEntryCancel'),
   btnCodeNewFile: $('btnCodeNewFile'),
   btnCodeNewFolder: $('btnCodeNewFolder'),
   btnCodeDelete: $('btnCodeDelete'),
-  btnCodeReload: $('btnCodeReload'),
   btnCodeTreeExpandAll: $('btnCodeTreeExpandAll'),
   btnCodeTreeCollapseAll: $('btnCodeTreeCollapseAll'),
   btnSaveCode: $('btnSaveCode'),
-  btnCopyCode: $('btnCopyCode'),
-  btnOpenSrcFolder: $('btnOpenSrcFolder'),
   settingTitle: $('settingTitle'),
   settingAuthor: $('settingAuthor'),
   settingSerial: $('settingSerial'),
@@ -371,10 +412,15 @@ const el = {
   projectTitleInput: $('projectTitleInput'),
   projectAuthorInput: $('projectAuthorInput'),
   projectSerialInput: $('projectSerialInput'),
-  projectBuilderSelect: $('projectBuilderSelect'),
+  projectParentDirInput: $('projectParentDirInput'),
+  btnProjectParentDirBrowse: $('btnProjectParentDirBrowse'),
+  projectTemplateSelect: $('projectTemplateSelect'),
+  projectTemplateHint: $('projectTemplateHint'),
   projectPickerModal: $('projectPickerModal'),
   btnProjectPickerClose: $('btnProjectPickerClose'),
   btnProjectPickerCancel: $('btnProjectPickerCancel'),
+  btnProjectPickerOpenFolder: $('btnProjectPickerOpenFolder'),
+  btnProjectPickerNew: $('btnProjectPickerNew'),
   projectPickerRoot: $('projectPickerRoot'),
   projectPickerList: $('projectPickerList'),
   resFileSelect: $('resFileSelect'),
@@ -388,6 +434,7 @@ const el = {
   btnDeleteAssetEntry: $('btnDeleteAssetEntry'),
   btnTogglePreviewPanel: $('btnTogglePreviewPanel'),
   assetsLayout: $('assetsLayout'),
+  assetPreviewResizer: $('assetPreviewResizer'),
   assetPreviewPanel: $('assetPreviewPanel'),
   btnAccordionParams: $('btnAccordionParams'),
   accordionParamsBody: $('accordionParamsBody'),
@@ -501,16 +548,6 @@ const SERIAL_RE = /^[A-Z]{2}\s[0-9A-Z]{8}-[0-9A-Z]{2}$/;
 
 // ============================================================ BUILD LOG ===
 
-function logLevelRank(level) {
-  switch (level) {
-    case 'debug': return 10;
-    case 'info': return 20;
-    case 'warn': return 30;
-    case 'error': return 40;
-    default: return 20;
-  }
-}
-
 function ensureLogSourceVisible(source) {
   if (!Object.prototype.hasOwnProperty.call(state.logs.sourceVisibility, source)) {
     state.logs.sourceVisibility[source] = true;
@@ -518,36 +555,7 @@ function ensureLogSourceVisible(source) {
 }
 
 function isEntryVisible(entry) {
-  if (!entry) return false;
-  if (!state.logs.sourceVisibility[entry.source]) return false;
-  const minLevel = state.logs.levelFilter || 'all';
-  const levelLimit = minLevel === 'all' ? -Infinity : logLevelRank(minLevel);
-  if (levelLimit !== -Infinity && logLevelRank(entry.level) < levelLimit) return false;
-  const search = (state.logs.searchText || '').trim().toLowerCase();
-  if (search) {
-    const hay = `${entry.source} ${entry.level} ${entry.text}`.toLowerCase();
-    if (!hay.includes(search)) return false;
-  }
-  return true;
-}
-
-function createLogLineElement(entry) {
-  const line = document.createElement('div');
-  line.className = `log-line log-level-${entry.level}`;
-
-  const t = new Date(entry.timestamp);
-  const hh = String(t.getHours()).padStart(2, '0');
-  const mm = String(t.getMinutes()).padStart(2, '0');
-  const ss = String(t.getSeconds()).padStart(2, '0');
-
-  const safeSource = String(entry.source || 'app');
-  const srcClass = safeSource.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-  line.innerHTML = `
-    <span class="log-time">${hh}:${mm}:${ss}</span>
-    <span class="log-src log-src-${srcClass}">${escHtml(safeSource)}</span>
-    <span class="log-text">${escHtml(entry.text)}</span>
-  `;
-  return line;
+  return isLogEntryVisible(entry, state.logs);
 }
 
 function appendLog(source, text, level = 'info') {
@@ -576,8 +584,7 @@ function appendLog(source, text, level = 'info') {
 
   const container = el.buildLog;
   if (!container || !isEntryVisible(entry)) return;
-  container.appendChild(createLogLineElement(entry));
-  container.scrollTop = container.scrollHeight;
+  appendLogLine(container, entry);
 }
 
 function appendBuildLog(text, level = 'info') {
@@ -585,25 +592,14 @@ function appendBuildLog(text, level = 'info') {
 }
 
 function getVisibleLogEntries() {
-  return state.logs.entries.filter((entry) => isEntryVisible(entry));
+  return filterVisibleLogEntries(state.logs.entries, state.logs);
 }
 
 function renderLogSourceFilters() {
   if (!el.logSourceFilters) return;
-  const sources = Object.keys(state.logs.sourceVisibility).sort((a, b) => a.localeCompare(b, 'ja'));
-  el.logSourceFilters.innerHTML = '';
-  sources.forEach((source) => {
-    const chip = document.createElement('label');
-    chip.className = 'log-source-chip';
-    chip.innerHTML = `
-      <input type="checkbox" ${state.logs.sourceVisibility[source] ? 'checked' : ''} />
-      <span>${escHtml(source)}</span>
-    `;
-    chip.querySelector('input')?.addEventListener('change', (event) => {
-      state.logs.sourceVisibility[source] = Boolean(event.target.checked);
-      renderLogPanel();
-    });
-    el.logSourceFilters.appendChild(chip);
+  renderSharedLogSourceFilters(el.logSourceFilters, state.logs.sourceVisibility, (source, checked) => {
+    state.logs.sourceVisibility[source] = checked;
+    renderLogPanel();
   });
 }
 
@@ -611,11 +607,7 @@ function renderLogPanel() {
   const container = el.buildLog;
   if (!container) return;
   renderLogSourceFilters();
-  container.innerHTML = '';
-  getVisibleLogEntries().forEach((entry) => {
-    container.appendChild(createLogLineElement(entry));
-  });
-  container.scrollTop = container.scrollHeight;
+  renderLogEntries(container, state.logs.entries, state.logs);
 }
 
 function clearBuildLog() {
@@ -634,13 +626,7 @@ function updateRomOutputActions() {
 
 async function copyBuildLog() {
   const text = getVisibleLogEntries()
-    .map((entry) => {
-      const t = new Date(entry.timestamp);
-      const hh = String(t.getHours()).padStart(2, '0');
-      const mm = String(t.getMinutes()).padStart(2, '0');
-      const ss = String(t.getSeconds()).padStart(2, '0');
-      return `${hh}:${mm}:${ss} [${entry.source}] ${entry.text}`;
-    })
+    .map(formatLogEntryText)
     .join('\n');
   if (!text.trim()) {
     return;
@@ -670,7 +656,9 @@ async function openLogPopout() {
     const result = await window.electronAPI.openLogWindow?.(getLogSnapshot());
     if (!result?.ok) {
       appendLog('app', `ログウィンドウを開けませんでした: ${result?.error || 'unknown'}`, 'warn');
+      return;
     }
+    setLogDetached(true);
   } catch (err) {
     appendLog('app', `ログウィンドウを開けませんでした: ${String(err?.message || err)}`, 'warn');
   }
@@ -687,10 +675,19 @@ function setLogOpen(open) {
   el.buildLogBar?.classList.toggle('open', open);
   el.mainLayout?.classList.toggle('log-open', open);
   if (el.buildLogResizer) {
-    el.buildLogResizer.style.display = open ? 'block' : 'none';
+    el.buildLogResizer.style.display = open && !state.logDetached ? 'block' : 'none';
   }
   const use = el.btnToggleLog?.querySelector('use');
   if (use) use.setAttribute('href', open ? '#icon-chevron-down' : '#icon-chevron-up');
+}
+
+function setLogDetached(detached) {
+  state.logDetached = Boolean(detached);
+  el.buildLogBar?.classList.toggle('detached', state.logDetached);
+  el.mainLayout?.classList.toggle('log-detached', state.logDetached);
+  if (el.buildLogResizer) {
+    el.buildLogResizer.style.display = state.logOpen && !state.logDetached ? 'block' : 'none';
+  }
 }
 
 function setLogOpenHeight(height) {
@@ -722,6 +719,11 @@ const pluginRuntime = createPluginRuntime();
 
 const SIDEBAR_PLUGIN_ORDER_KEY_PREFIX = 'md-editor.sidebarPluginOrder.v1';
 const LOG_VIEWER_STATE_KEY = 'md-editor.logViewerState.v1';
+const ASSET_PREVIEW_WIDTH_KEY = 'md-editor.assetPreviewWidth.v1';
+const ASSET_PREVIEW_MIN_WIDTH = 280;
+const ASSET_PREVIEW_MAX_WIDTH = 760;
+const PROJECT_PLUGIN_STATE_EXCLUDED_ROLES = ['builder', 'testplay'];
+let sidebarPluginContextMenu = null;
 
 function loadLogViewerState() {
   try {
@@ -792,6 +794,10 @@ function getEnabledPluginsByRole(roleId) {
 
 function getPluginsByRole(roleId) {
   return pluginState.plugins.filter((p) => pluginSupportsRole(p, roleId));
+}
+
+function isProjectPluginStateManaged(plugin) {
+  return !PROJECT_PLUGIN_STATE_EXCLUDED_ROLES.some((roleId) => pluginSupportsRole(plugin, roleId));
 }
 
 function getActiveRolePlugin(roleId) {
@@ -1122,8 +1128,61 @@ function getSidebarPluginOrderStorageKey() {
   return `${SIDEBAR_PLUGIN_ORDER_KEY_PREFIX}:${scope}`;
 }
 
+function getProjectPluginSettings() {
+  const settings = state.projectConfig?.pluginSettings;
+  return settings && typeof settings === 'object' ? settings : {};
+}
+
+function getProjectPluginEnabledSettings() {
+  const enabled = getProjectPluginSettings().enabled;
+  return enabled && typeof enabled === 'object' ? enabled : {};
+}
+
+function getProjectPluginSidebarOrder() {
+  const order = getProjectPluginSettings().sidebarOrder;
+  return Array.isArray(order) ? order.filter((id) => typeof id === 'string' && id.trim()) : [];
+}
+
+function getCurrentProjectPluginEnabledState() {
+  const enabled = {};
+  pluginState.plugins
+    .filter((plugin) => isProjectPluginStateManaged(plugin))
+    .forEach((plugin) => {
+      enabled[plugin.id] = Boolean(plugin.enabled);
+    });
+  return enabled;
+}
+
+async function persistProjectPluginSettings(patch = {}) {
+  const current = getProjectPluginSettings();
+  const next = {
+    ...current,
+    ...patch,
+  };
+  if (patch.enabled && typeof patch.enabled === 'object') {
+    next.enabled = { ...patch.enabled };
+  }
+  if (Array.isArray(patch.sidebarOrder)) {
+    next.sidebarOrder = patch.sidebarOrder.slice();
+  }
+
+  const result = await window.electronAPI.saveProjectConfig({ pluginSettings: next });
+  if (!result?.ok) {
+    throw new Error(result?.error || 'unknown');
+  }
+  if (result?.ok && result.config) {
+    state.projectConfig = result.config;
+  }
+  return result;
+}
+
 function loadSidebarPluginOrder() {
   try {
+    const projectOrder = getProjectPluginSidebarOrder();
+    if (projectOrder.length > 0) {
+      pluginState.sidebarOrder = projectOrder;
+      return;
+    }
     const raw = localStorage.getItem(getSidebarPluginOrderStorageKey());
     const parsed = raw ? JSON.parse(raw) : [];
     pluginState.sidebarOrder = Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string') : [];
@@ -1136,16 +1195,34 @@ function saveSidebarPluginOrder() {
   try {
     localStorage.setItem(getSidebarPluginOrderStorageKey(), JSON.stringify(pluginState.sidebarOrder));
   } catch (_) {}
+  persistProjectPluginSettings({ sidebarOrder: pluginState.sidebarOrder }).catch((err) => {
+    appendLog('app', `サイドパネル順序の保存に失敗: ${String(err?.message || err)}`, 'warn');
+  });
 }
 
 function getSidebarEnabledTabPlugins() {
   return pluginState.plugins.filter((plugin) => plugin.enabled && plugin.tab && resolvePluginPageId(plugin));
 }
 
+function isSidebarTogglePlugin(plugin) {
+  return Boolean(plugin?.tab && plugin?.hasRenderer && getPluginRendererPageId(plugin));
+}
+
+function getSidebarTogglePlugins() {
+  return pluginState.plugins
+    .filter((plugin) => isSidebarTogglePlugin(plugin))
+    .sort((a, b) => {
+      const orderA = Number(a?.tab?.order ?? 1000);
+      const orderB = Number(b?.tab?.order ?? 1000);
+      if (orderA !== orderB) return orderA - orderB;
+      return String(a?.tab?.label || a?.name || a?.id || '').localeCompare(String(b?.tab?.label || b?.name || b?.id || ''), 'ja');
+    });
+}
+
 function normalizeSidebarPluginOrder() {
   const orderedIds = [];
   const seen = new Set();
-  const validIds = new Set(getSidebarEnabledTabPlugins().map((p) => p.id));
+  const validIds = new Set(getSidebarTogglePlugins().map((p) => p.id));
 
   pluginState.sidebarOrder.forEach((id) => {
     if (validIds.has(id) && !seen.has(id)) {
@@ -1154,7 +1231,7 @@ function normalizeSidebarPluginOrder() {
     }
   });
 
-  const missing = getSidebarEnabledTabPlugins()
+  const missing = getSidebarTogglePlugins()
     .sort((a, b) => {
       const orderA = Number(a?.tab?.order ?? 1000);
       const orderB = Number(b?.tab?.order ?? 1000);
@@ -1239,6 +1316,81 @@ function bindPluginSidebarTabDnD() {
   });
 }
 
+function ensureSidebarPluginContextMenu() {
+  if (sidebarPluginContextMenu?.isConnected) return sidebarPluginContextMenu;
+  const menu = document.createElement('div');
+  menu.className = 'sidebar-plugin-context-menu';
+  menu.setAttribute('role', 'menu');
+  menu.hidden = true;
+  menu.addEventListener('click', (event) => event.stopPropagation());
+  document.body.appendChild(menu);
+  sidebarPluginContextMenu = menu;
+  return menu;
+}
+
+function closeSidebarPluginContextMenu() {
+  if (sidebarPluginContextMenu) {
+    sidebarPluginContextMenu.hidden = true;
+  }
+}
+
+function positionSidebarPluginContextMenu(menu, clientX, clientY) {
+  menu.hidden = false;
+  const rect = menu.getBoundingClientRect();
+  const left = clamp(clientX, 8, Math.max(8, window.innerWidth - rect.width - 8));
+  const top = clamp(clientY, 8, Math.max(8, window.innerHeight - rect.height - 8));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function renderSidebarPluginContextMenuContent() {
+  const menu = ensureSidebarPluginContextMenu();
+  const plugins = getSidebarTogglePlugins();
+  if (plugins.length === 0) {
+    menu.innerHTML = `
+      <div class="sidebar-plugin-menu-title">サイドパネル</div>
+      <p class="sidebar-plugin-menu-empty">表示可能なプラグインはありません</p>
+    `;
+    return menu;
+  }
+
+  menu.innerHTML = `
+    <div class="sidebar-plugin-menu-title">サイドパネル</div>
+    <div class="sidebar-plugin-menu-list">
+      ${plugins.map((plugin) => {
+        const label = String(plugin.tab?.label || plugin.name || plugin.id);
+        const iconId = resolvePluginIconId(plugin.icon || plugin.tab?.icon);
+        return `
+          <label class="sidebar-plugin-menu-item" title="${escHtml(plugin.name || plugin.id)}">
+            <input type="checkbox" data-sidebar-plugin-toggle="${escHtml(plugin.id)}" ${plugin.enabled ? 'checked' : ''} />
+            <svg class="icon-sm"><use href="#${escHtml(iconId)}"></use></svg>
+            <span>${escHtml(label)}</span>
+          </label>
+        `;
+      }).join('')}
+    </div>
+  `;
+
+  menu.querySelectorAll('[data-sidebar-plugin-toggle]').forEach((input) => {
+    input.addEventListener('change', async () => {
+      const plugin = getPluginById(input.dataset.sidebarPluginToggle || '');
+      if (!plugin) return;
+      input.disabled = true;
+      await setPluginEnabledFromUi(plugin, Boolean(input.checked), input);
+      if (sidebarPluginContextMenu && !sidebarPluginContextMenu.hidden) {
+        renderSidebarPluginContextMenuContent();
+      }
+    });
+  });
+  return menu;
+}
+
+function openSidebarPluginContextMenu(event) {
+  event.preventDefault();
+  const menu = renderSidebarPluginContextMenuContent();
+  positionSidebarPluginContextMenu(menu, event.clientX, event.clientY);
+}
+
 function renderPluginSidebarTabs() {
   if (!el.sidebarPluginTabs) return;
 
@@ -1313,7 +1465,7 @@ function applyPluginPageAvailability() {
   });
 
   if (el.pageCode?.hidden) {
-    hideCodeNewEntryRow();
+    closeCodeCompletion();
   }
 
   const currentSection = document.getElementById(`page-${state.currentPage}`);
@@ -1445,7 +1597,36 @@ async function restoreProjectPluginRoleState() {
   }
 }
 
-async function loadPlugins() {
+async function restoreProjectPluginEnabledState() {
+  const enabledSettings = getProjectPluginEnabledSettings();
+  const entries = Object.entries(enabledSettings);
+  if (entries.length === 0) return;
+
+  let changed = false;
+  for (const [pluginId, enabled] of entries) {
+    const plugin = getPluginById(pluginId);
+    if (!plugin || !isProjectPluginStateManaged(plugin)) continue;
+    if (Boolean(plugin.enabled) === Boolean(enabled)) continue;
+    try {
+      const result = await window.electronAPI.setPluginEnabled(pluginId, Boolean(enabled));
+      if (result?.ok && Array.isArray(result.changedIds) && result.changedIds.length > 0) {
+        changed = true;
+      }
+    } catch (_) {
+      // プロジェクト別の復元に失敗しても、残りのプラグイン復元を継続する。
+    }
+  }
+
+  if (changed) {
+    try {
+      pluginState.plugins = await window.electronAPI.listPlugins();
+    } catch (_) {
+      pluginState.plugins = [];
+    }
+  }
+}
+
+async function loadPlugins(options = {}) {
   if (!el.pluginList) return;
   el.pluginList.innerHTML = '<p class="hint-text">読み込み中...</p>';
   setPluginRoleStatus('');
@@ -1453,6 +1634,10 @@ async function loadPlugins() {
     pluginState.plugins = await window.electronAPI.listPlugins();
   } catch (_) {
     pluginState.plugins = [];
+  }
+
+  if (!options.skipProjectPluginStateRestore) {
+    await restoreProjectPluginEnabledState();
   }
 
   loadSidebarPluginOrder();
@@ -1583,6 +1768,50 @@ function renderPluginRoleSettings() {
   });
 }
 
+async function setPluginEnabledFromUi(plugin, desired, control = null) {
+  const syncResult = await window.electronAPI.setPluginEnabled(plugin.id, desired);
+  if (!syncResult?.ok) {
+    if (control && 'checked' in control) {
+      control.checked = !desired;
+    }
+    appendLog('app', `プラグイン "${plugin.name}" の更新に失敗: ${syncResult?.error || 'unknown'}`, 'error');
+    if (control) control.disabled = false;
+    return syncResult;
+  }
+
+  appendLog('app', `プラグイン "${plugin.name}" を${desired ? '有効化' : '無効化'}しました`);
+  const changedIds = Array.isArray(syncResult.changedIds) ? syncResult.changedIds : [];
+  if (changedIds.length > 1) {
+    appendLog('app', `依存関係を同期: ${changedIds.join(', ')}`);
+  }
+  const missingDeps = Array.isArray(syncResult.missingDependencies) ? syncResult.missingDependencies : [];
+  if (missingDeps.length > 0) {
+    appendLog('app', `不足している依存プラグイン: ${missingDeps.join(', ')}`, 'warn');
+  }
+
+  if (!desired && pluginState.activeBuilderPlugin === plugin.id) {
+    await setActiveBuilderPlugin(null);
+  }
+  if (!desired && pluginState.activeEmulatorPlugin === plugin.id) {
+    await setActiveEmulatorPlugin(null);
+  }
+  Object.entries(pluginState.activeRoles || {}).forEach(([roleId, activeId]) => {
+    if (!desired && activeId === plugin.id) {
+      pluginState.activeRoles[roleId] = null;
+      try { window.electronAPI.setPluginRole(roleId, null); } catch (_) {}
+    }
+  });
+
+  try {
+    pluginState.plugins = await window.electronAPI.listPlugins();
+    await persistProjectPluginSettings({ enabled: getCurrentProjectPluginEnabledState() });
+  } catch (err) {
+    appendLog('app', `プロジェクト別プラグイン状態の保存に失敗: ${String(err?.message || err)}`, 'warn');
+  }
+  await loadPlugins({ skipProjectPluginStateRestore: true });
+  return syncResult;
+}
+
 function renderPluginList() {
   if (!el.pluginList) return;
   const visiblePlugins = getFilteredPlugins();
@@ -1643,37 +1872,8 @@ function renderPluginList() {
     const toggle = card.querySelector('.plugin-toggle-input');
     toggle?.addEventListener('change', async () => {
       const desired = Boolean(toggle.checked);
-      const syncResult = await window.electronAPI.setPluginEnabled(plugin.id, desired);
-      if (!syncResult?.ok) {
-        toggle.checked = !desired;
-        appendLog('app', `プラグイン "${plugin.name}" の更新に失敗: ${syncResult?.error || 'unknown'}`, 'error');
-        return;
-      }
-
-      appendLog('app', `プラグイン "${plugin.name}" を${desired ? '有効化' : '無効化'}しました`);
-      const changedIds = Array.isArray(syncResult.changedIds) ? syncResult.changedIds : [];
-      if (changedIds.length > 1) {
-        appendLog('app', `依存関係を同期: ${changedIds.join(', ')}`);
-      }
-      const missingDeps = Array.isArray(syncResult.missingDependencies) ? syncResult.missingDependencies : [];
-      if (missingDeps.length > 0) {
-        appendLog('app', `不足している依存プラグイン: ${missingDeps.join(', ')}`, 'warn');
-      }
-
-      // アクティブビルダーが無効になった場合は解除
-      if (!desired && pluginState.activeBuilderPlugin === plugin.id) {
-        await setActiveBuilderPlugin(null);
-      }
-      if (!desired && pluginState.activeEmulatorPlugin === plugin.id) {
-        await setActiveEmulatorPlugin(null);
-      }
-      Object.entries(pluginState.activeRoles || {}).forEach(([roleId, activeId]) => {
-        if (!desired && activeId === plugin.id) {
-          pluginState.activeRoles[roleId] = null;
-          try { window.electronAPI.setPluginRole(roleId, null); } catch (_) {}
-        }
-      });
-      await loadPlugins();
+      toggle.disabled = true;
+      await setPluginEnabledFromUi(plugin, desired, toggle);
     });
 
     // 生成 & ビルドボタン
@@ -1739,6 +1939,9 @@ function switchPage(page) {
   document.querySelectorAll('.editor-page').forEach((sec) => {
     sec.classList.toggle('active', sec.id === `page-${next}`);
   });
+  if (next === 'code') {
+    void loadCodeTree(undefined, { refreshOnly: state.code.dirty });
+  }
 }
 
 // ============================================================= CODE FS ===
@@ -1753,22 +1956,42 @@ function formatProjectPath(pathValue = '') {
   return pathValue ? `project/${pathValue}` : 'project';
 }
 
+function normalizeCodePath(pathValue = '') {
+  return String(pathValue || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
+}
+
 function getCodeDisplayPath(pathValue = state.code.selectedPath) {
   return formatProjectPath(pathValue || '');
 }
 
 function getCodeEntryParentPath(pathValue = state.code.selectedPath) {
-  const current = String(pathValue || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  const current = normalizeCodePath(pathValue);
   if (!current || state.code.selectedIsDirectory) return current;
   const index = current.lastIndexOf('/');
   return index >= 0 ? current.slice(0, index) : '';
 }
 
+function getCodeBaseName(pathValue = state.code.selectedPath) {
+  const current = normalizeCodePath(pathValue);
+  const index = current.lastIndexOf('/');
+  return index >= 0 ? current.slice(index + 1) : current;
+}
+
+function joinCodePath(parent, name) {
+  const cleanParent = normalizeCodePath(parent);
+  const cleanName = normalizeCodePath(name);
+  return cleanParent ? `${cleanParent}/${cleanName}` : cleanName;
+}
+
 function buildCodeEntryPath(name) {
-  const cleanName = String(name || '').replace(/\\/g, '/').replace(/^\/+/, '').trim();
+  const cleanName = normalizeCodePath(String(name || '').trim());
   if (!cleanName) return '';
   const parent = getCodeEntryParentPath();
   return parent ? `${parent}/${cleanName}` : cleanName;
+}
+
+function codePathExists(nodes, pathValue) {
+  return Boolean(findCodeTreeNode(nodes, pathValue));
 }
 
 function setCodeDirectoryCollapsed(pathValue, collapsed) {
@@ -1820,6 +2043,9 @@ function setCodeDirty(dirty) {
   if (el.codeFileName) {
     el.codeFileName.textContent = `${state.code.selectedIsDirectory ? '📁' : '📄'} ${getCodeDisplayPath(fileName)}${state.code.dirty && !state.code.selectedIsDirectory ? ' *' : ''}`;
   }
+  if (el.btnSaveCode) {
+    el.btnSaveCode.disabled = state.code.selectedIsDirectory || state.code.selectedIsMedia;
+  }
 }
 
 // ------------------------------------------------ C syntax highlight ----
@@ -1836,6 +2062,19 @@ const C_TYPES = new Set([
   'int8_t','int16_t','int32_t','int64_t','VDPSprite','Sprite','Map','Palette',
   'SpriteDefinition','Animation','AnimationFrame','MAPDefinition',
 ]);
+const CODE_COMPLETION_ITEMS = [
+  ...Array.from(C_KEYWORDS).map((label) => ({ label, kind: 'keyword' })),
+  ...Array.from(C_TYPES).map((label) => ({ label, kind: 'type' })),
+  ...[
+    'SYS_doVBlankProcess', 'SYS_disableInts', 'SYS_enableInts',
+    'VDP_drawText', 'VDP_clearText', 'VDP_clearPlane', 'VDP_setPalette',
+    'VDP_setTextPalette', 'VDP_setTileMapEx', 'VDP_drawImageEx',
+    'PAL_setColor', 'PAL_setPalette', 'RGB24_TO_VDPCOLOR',
+    'JOY_init', 'JOY_readJoypad', 'BUTTON_START', 'BUTTON_A', 'BUTTON_B', 'BUTTON_C',
+    'SPR_init', 'SPR_addSprite', 'SPR_setPosition', 'SPR_setAnim', 'SPR_update',
+    'XGM_startPlay', 'XGM_stopPlay', 'XGM2_play', 'XGM2_stop',
+  ].map((label) => ({ label, kind: 'sgdk' })),
+].sort((a, b) => a.label.localeCompare(b.label));
 
 function _escHtmlCode(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -1936,17 +2175,113 @@ function highlightC(text) {
   return highlighted.join('\n');
 }
 
+function getCodeFindRegExp() {
+  const query = state.code.findText || '';
+  if (!query) return null;
+  try {
+    return new RegExp(query, 'gi');
+  } catch (_err) {
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(escaped, 'gi');
+  }
+}
+
+function getLineForOffset(text, offset) {
+  return text.slice(0, Math.max(0, Number(offset) || 0)).split('\n').length;
+}
+
+function getCodeLines(content) {
+  return String(content ?? '').split('\n');
+}
+
+function refreshCodeFindMatches() {
+  const editor = el.codeEditor;
+  const text = editor?.value || '';
+  const re = getCodeFindRegExp();
+  state.code.findMatches = [];
+  if (!re) {
+    state.code.findIndex = -1;
+    return;
+  }
+  let match;
+  while ((match = re.exec(text))) {
+    state.code.findMatches.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      line: getLineForOffset(text, match.index),
+    });
+    if (match[0].length === 0) re.lastIndex += 1;
+  }
+  if (state.code.findMatches.length === 0) {
+    state.code.findIndex = -1;
+  } else if (state.code.findIndex < 0 || state.code.findIndex >= state.code.findMatches.length) {
+    state.code.findIndex = 0;
+  }
+}
+
+function getCodeLineClass(lineNumber) {
+  const classes = ['code-highlight-line'];
+  if (lineNumber === state.code.cursorLine) classes.push('cursor-line');
+  if (state.code.findMatches.some((match) => match.line === lineNumber)) classes.push('find-line');
+  if (state.code.findIndex >= 0 && state.code.findMatches[state.code.findIndex]?.line === lineNumber) {
+    classes.push('find-current-line');
+  }
+  return classes.join(' ');
+}
+
+function wrapHighlightedCodeLines(highlighted, sourceText) {
+  const highlightedLines = highlighted.split('\n');
+  const sourceLines = getCodeLines(sourceText);
+  const count = Math.max(highlightedLines.length, sourceLines.length, 1);
+  return Array.from({ length: count }, (_, index) => {
+    const lineNumber = index + 1;
+    const html = highlightedLines[index] ?? '';
+    return `<span class="${getCodeLineClass(lineNumber)}">${html || ' '}</span>`;
+  }).join('');
+}
+
+function updateCodeEditorMetrics(content) {
+  const editor = el.codeEditor;
+  const highlight = el.codeHighlight;
+  const scroller = el.codeScroller;
+  if (!editor || !highlight || !scroller) return;
+
+  const lineCount = getCodeLines(content).length;
+  const computed = window.getComputedStyle(editor);
+  const lineHeight = Number.parseFloat(computed.lineHeight) || 20;
+  const paddingTop = Number.parseFloat(computed.paddingTop) || 0;
+  const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0;
+  const contentHeight = Math.ceil(lineCount * lineHeight + paddingTop + paddingBottom + 2);
+  const minHeight = Math.max(contentHeight, scroller.clientHeight || 0);
+  editor.style.height = `${minHeight}px`;
+  highlight.style.height = `${minHeight}px`;
+  highlight.style.minHeight = `${minHeight}px`;
+}
+
 function updateCodeEditor(content) {
   const lnEl = el.codeLineNumbers;
   const hlEl = el.codeHighlight;
+  refreshCodeFindMatches();
   if (lnEl) {
-    const count = (content.match(/\n/g) || []).length + 1;
-    lnEl.textContent = Array.from({ length: count }, (_, i) => i + 1).join('\n');
+    const count = getCodeLines(content).length;
+    lnEl.innerHTML = Array.from(
+      { length: count },
+      (_, i) => `<span class="code-line-number">${i + 1}</span>`
+    ).join('');
   }
   if (hlEl) {
-    // trailing newline prevents height collapse on last empty line
-    hlEl.innerHTML = highlightC(content) + '\n';
+    hlEl.innerHTML = wrapHighlightedCodeLines(highlightC(content), content);
   }
+  updateCodeEditorMetrics(content);
+}
+
+function setCodeTextEditorVisible(visible) {
+  el.codeArea?.classList.toggle('media-mode', !visible);
+  if (el.codeMediaPreview) el.codeMediaPreview.hidden = visible;
+  if (el.codeEditor) el.codeEditor.disabled = !visible || state.code.selectedIsDirectory;
+  if (el.btnSaveCode) el.btnSaveCode.disabled = !visible || state.code.selectedIsDirectory;
+  if (el.codeEncodingSelect) el.codeEncodingSelect.disabled = !visible;
+  if (!visible) closeCodeCompletion();
 }
 
 // sync line numbers scroll with the code scroller
@@ -1958,12 +2293,143 @@ function bindCodeScrollSync() {
   });
 }
 
+function updateCodeCursorLine() {
+  const editor = el.codeEditor;
+  if (!editor) return;
+  const nextLine = getLineForOffset(editor.value || '', editor.selectionStart || 0);
+  if (nextLine === state.code.cursorLine) return;
+  state.code.cursorLine = nextLine;
+  updateCodeEditor(editor.value || '');
+}
+
+function openCodeFindPanel() {
+  state.code.findOpen = true;
+  if (el.codeFindPanel) el.codeFindPanel.hidden = false;
+  requestAnimationFrame(() => {
+    el.codeFindInput?.focus();
+    el.codeFindInput?.select();
+  });
+  updateCodeEditor(el.codeEditor?.value || '');
+}
+
+function closeCodeFindPanel() {
+  state.code.findOpen = false;
+  state.code.findText = '';
+  state.code.replaceText = '';
+  state.code.findMatches = [];
+  state.code.findIndex = -1;
+  if (el.codeFindPanel) el.codeFindPanel.hidden = true;
+  if (el.codeFindInput) el.codeFindInput.value = '';
+  if (el.codeReplaceInput) el.codeReplaceInput.value = '';
+  updateCodeEditor(el.codeEditor?.value || '');
+}
+
+function selectCodeFindMatch(index) {
+  const editor = el.codeEditor;
+  if (!editor || !state.code.findMatches.length) return;
+  const count = state.code.findMatches.length;
+  state.code.findIndex = ((index % count) + count) % count;
+  const match = state.code.findMatches[state.code.findIndex];
+  editor.focus();
+  editor.setSelectionRange(match.start, match.end);
+  state.code.cursorLine = match.line;
+  updateCodeEditor(editor.value || '');
+  const lineHeight = Number.parseFloat(window.getComputedStyle(editor).lineHeight) || 20;
+  if (el.codeScroller) {
+    el.codeScroller.scrollTop = Math.max(0, (match.line - 3) * lineHeight);
+  }
+}
+
+function updateCodeFindQuery() {
+  state.code.findText = el.codeFindInput?.value || '';
+  state.code.replaceText = el.codeReplaceInput?.value || '';
+  refreshCodeFindMatches();
+  updateCodeEditor(el.codeEditor?.value || '');
+}
+
+function findCodeNext(direction = 1) {
+  refreshCodeFindMatches();
+  if (!state.code.findMatches.length) {
+    updateCodeEditor(el.codeEditor?.value || '');
+    return;
+  }
+  selectCodeFindMatch(state.code.findIndex + direction);
+}
+
+function replaceCurrentCodeMatch() {
+  const editor = el.codeEditor;
+  if (!editor || !state.code.findMatches.length || state.code.findIndex < 0) return;
+  const match = state.code.findMatches[state.code.findIndex];
+  const replacement = state.code.replaceText || '';
+  editor.value = `${editor.value.slice(0, match.start)}${replacement}${editor.value.slice(match.end)}`;
+  const cursor = match.start + replacement.length;
+  editor.setSelectionRange(cursor, cursor);
+  setCodeDirty(true);
+  updateCodeFindQuery();
+  findCodeNext(0);
+}
+
+function replaceAllCodeMatches() {
+  const editor = el.codeEditor;
+  const re = getCodeFindRegExp();
+  if (!editor || !re || !state.code.findText) return;
+  const next = editor.value.replace(re, state.code.replaceText || '');
+  if (next === editor.value) return;
+  editor.value = next;
+  setCodeDirty(true);
+  state.code.findIndex = 0;
+  updateCodeFindQuery();
+}
+
+function globToRegExp(pattern) {
+  const escaped = String(pattern || '').replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped.replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i');
+}
+
+function getCodeTreeFilter() {
+  const raw = (state.code.treeFilterText || '').trim();
+  if (!raw) return { matches: () => true, error: '' };
+  try {
+    return { matches: (node) => new RegExp(raw, 'i').test(`${node.path} ${node.name}`), error: '' };
+  } catch (_regexErr) {
+    try {
+      const glob = globToRegExp(raw);
+      return { matches: (node) => glob.test(node.path || node.name || ''), error: '' };
+    } catch (err) {
+      return { matches: () => false, error: String(err?.message || err) };
+    }
+  }
+}
+
+function filterCodeTreeNodes(nodes, filter) {
+  if (!Array.isArray(nodes)) return [];
+  return nodes.reduce((result, node) => {
+    if (node.type === 'directory') {
+      const children = filterCodeTreeNodes(node.children || [], filter);
+      if (filter.matches(node) || children.length > 0) {
+        result.push({ ...node, children });
+      }
+      return result;
+    }
+    if (filter.matches(node)) result.push(node);
+    return result;
+  }, []);
+}
+
 function renderCodeTreeNodes(nodes, level = 0) {
   if (!Array.isArray(nodes) || nodes.length === 0) {
-    return level === 0 ? '<div class="code-tree-empty">プロジェクト内にファイルがありません。</div>' : '';
+    const message = state.code.treeFilterText
+      ? (state.code.treeFilterError ? `フィルタ式が不正です: ${state.code.treeFilterError}` : '一致するファイルがありません。')
+      : 'プロジェクト内にファイルがありません。';
+    return level === 0 ? `<div class="code-tree-empty">${escHtml(message)}</div>` : '';
   }
   return `<ul class="code-tree-list">${nodes.map((node) => {
     const isActive = node.path === state.code.selectedPath;
+    const renameButton = isActive ? `
+      <button class="code-tree-action code-tree-rename" data-path="${escHtml(node.path)}" title="リネーム">
+        <svg class="icon"><use href="#icon-edit"></use></svg>
+      </button>
+    ` : '';
     if (node.type === 'directory') {
       const collapsed = isCodeDirectoryCollapsed(node.path);
       const hasChildren = Array.isArray(node.children) && node.children.length > 0;
@@ -1972,15 +2438,23 @@ function renderCodeTreeNodes(nodes, level = 0) {
           <span class="code-tree-toggle">${hasChildren ? (collapsed ? '▸' : '▾') : ''}</span>
           <span class="code-tree-icon">📁</span>
           <span class="code-tree-label">${escHtml(node.name)}</span>
+          ${renameButton}
         </div>
         ${collapsed ? '' : `<div class="code-tree-children">${renderCodeTreeNodes(node.children || [], level + 1)}</div>`}
       </li>`;
     }
-    return `<li class="code-tree-item"><div class="code-tree-node${isActive ? ' active' : ''}" data-path="${escHtml(node.path)}" data-kind="file"><span class="code-tree-toggle"></span><span class="code-tree-icon">📄</span><span class="code-tree-label">${escHtml(node.name)}</span></div></li>`;
+    return `<li class="code-tree-item"><div class="code-tree-node${isActive ? ' active' : ''}" data-path="${escHtml(node.path)}" data-kind="file"><span class="code-tree-toggle"></span><span class="code-tree-icon">📄</span><span class="code-tree-label">${escHtml(node.name)}</span>${renameButton}</div></li>`;
   }).join('')}</ul>`;
 }
 
 function bindCodeTreeEvents() {
+  el.codeTree?.querySelectorAll('.code-tree-rename').forEach((button) => {
+    button.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      await renameSelectedCodeEntry();
+    });
+  });
   el.codeTree?.querySelectorAll('.code-tree-node').forEach((node) => {
     node.addEventListener('click', async () => {
       const nextPath = node.getAttribute('data-path') || '';
@@ -1992,10 +2466,12 @@ function bindCodeTreeEvents() {
         }
         state.code.selectedPath = nextPath;
         state.code.selectedIsDirectory = true;
+        state.code.selectedIsMedia = false;
         const treeNode = findCodeTreeNode(state.code.tree, nextPath);
         if (treeNode?.children?.length) {
           setCodeDirectoryCollapsed(nextPath, !isCodeDirectoryCollapsed(nextPath));
         }
+        setCodeTextEditorVisible(true);
         setCodeDirty(false);
         updateCodeStatus(`フォルダを選択中: ${getCodeDisplayPath(nextPath)}`);
         renderCodeTree();
@@ -2008,7 +2484,10 @@ function bindCodeTreeEvents() {
 
 function renderCodeTree() {
   if (!el.codeTree) return;
-  el.codeTree.innerHTML = renderCodeTreeNodes(state.code.tree);
+  const filter = getCodeTreeFilter();
+  state.code.treeFilterError = filter.error || '';
+  el.codeTreeFilterInput?.classList.toggle('invalid', Boolean(state.code.treeFilterError));
+  el.codeTree.innerHTML = renderCodeTreeNodes(filterCodeTreeNodes(state.code.tree, filter));
   bindCodeTreeEvents();
   setCodeDirty(state.code.dirty);
 }
@@ -2018,43 +2497,81 @@ async function openCodeFile(pathValue) {
     const ok = window.confirm(`${getCodeDisplayPath(state.code.selectedPath)} の未保存変更を破棄して切り替えますか？`);
     if (!ok) return;
   }
-  const result = await window.electronAPI.readCodeFile({ path: pathValue });
+  const result = await window.electronAPI.readCodeFile({
+    path: pathValue,
+    encoding: state.code.selectedEncoding,
+  });
   if (!result?.ok) {
     updateCodeStatus(`読み込み失敗: ${result?.error || 'unknown'}`);
     return;
   }
   state.code.selectedPath = pathValue;
   state.code.selectedIsDirectory = false;
-  if (el.codeEditor) {
-    el.codeEditor.value = result.content || '';
-    updateCodeEditor(result.content || '');
+  state.code.selectedIsMedia = Boolean(result.media);
+  if (result.media) {
+    setCodeTextEditorVisible(false);
+    if (el.codeMediaPreview) {
+      if (result.previewKind === 'image') {
+        el.codeMediaPreview.innerHTML = `<img src="${escHtml(result.dataUrl || '')}" alt="${escHtml(getCodeDisplayPath(pathValue))}" />`;
+      } else if (result.previewKind === 'audio') {
+        el.codeMediaPreview.innerHTML = `
+          <div class="code-media-card">
+            <strong>${escHtml(getCodeDisplayPath(pathValue))}</strong>
+            <audio controls src="${escHtml(result.dataUrl || '')}"></audio>
+          </div>
+        `;
+      } else {
+        el.codeMediaPreview.innerHTML = `
+          <div class="code-media-card">
+            <strong>${escHtml(getCodeDisplayPath(pathValue))}</strong>
+            <span>${Number(result.size || 0).toLocaleString()} bytes</span>
+          </div>
+        `;
+      }
+    }
+    if (el.codeEditor) {
+      el.codeEditor.value = '';
+      updateCodeEditor('');
+    }
+  } else {
+    state.code.activeEncoding = result.encoding || 'utf8';
+    setCodeTextEditorVisible(true);
+    if (el.codeMediaPreview) el.codeMediaPreview.innerHTML = '';
+    if (el.codeEditor) {
+      el.codeEditor.value = result.content || '';
+      updateCodeEditor(result.content || '');
+    }
   }
   setCodeDirty(false);
   renderCodeTree();
-  updateCodeStatus(`${getCodeDisplayPath(pathValue)} を読み込みました`);
+  const suffix = result.media ? 'をプレビュー中' : `を読み込みました (${state.code.activeEncoding === 'shift_jis' ? 'SJIS' : 'UTF-8'})`;
+  updateCodeStatus(`${getCodeDisplayPath(pathValue)} ${suffix}`);
 }
 
-async function loadCodeTree(openPath) {
+async function loadCodeTree(openPath, options = {}) {
   const result = await window.electronAPI.listCodeTree({ path: '' });
   if (!result?.ok) {
     updateCodeStatus(`プロジェクトツリー取得失敗: ${result?.error || 'unknown'}`);
     return;
   }
   state.code.tree = Array.isArray(result.entries) ? result.entries : [];
+  if (!state.code.initialCollapseApplied) {
+    state.code.collapsedDirs = collectAllDirPaths(state.code.tree);
+    state.code.initialCollapseApplied = true;
+  }
   renderCodeTree();
+  if (options.refreshOnly) return;
   if (openPath) {
     await openCodeFile(openPath);
     return;
   }
   if (!state.code.selectedIsDirectory && state.code.selectedPath) {
-    const fileStillExists = JSON.stringify(state.code.tree).includes(`"path":"${state.code.selectedPath}"`);
-    if (fileStillExists) {
+    if (codePathExists(state.code.tree, state.code.selectedPath)) {
       await openCodeFile(state.code.selectedPath);
       return;
     }
   }
-  const mainExists = JSON.stringify(state.code.tree).includes('"path":"src/main.c"');
-  if (mainExists) {
+  if (codePathExists(state.code.tree, 'src/main.c')) {
     await openCodeFile('src/main.c');
   }
 }
@@ -2064,46 +2581,85 @@ async function saveCurrentCodeFile() {
     updateCodeStatus('フォルダは保存できません。ファイルを選択してください。');
     return false;
   }
+  if (state.code.selectedIsMedia) {
+    updateCodeStatus('メディアファイルはエディタから保存できません。');
+    return false;
+  }
   const targetPath = state.code.selectedPath || 'src/main.c';
+  const writeEncoding = state.code.selectedEncoding === 'auto'
+    ? state.code.activeEncoding
+    : state.code.selectedEncoding;
   const result = await window.electronAPI.writeCodeFile({
     path: targetPath,
     content: el.codeEditor?.value || '',
+    encoding: writeEncoding,
   });
   if (!result?.ok) {
     updateCodeStatus(`保存失敗: ${result?.error || 'unknown'}`);
     return false;
   }
+  state.code.activeEncoding = result.encoding || writeEncoding || 'utf8';
   setCodeDirty(false);
   updateCodeStatus(`✓ ${getCodeDisplayPath(targetPath)} を保存しました`);
   await loadCodeTree(targetPath);
   return true;
 }
 
-// インラインで新規エントリ名を入力させる
-let _codeNewEntryKind = 'file';
-function showCodeNewEntryRow(kind) {
-  _codeNewEntryKind = kind;
-  if (!el.codeNewEntryRow || !el.codeNewEntryInput) return;
-  el.codeNewEntryInput.value = '';
-  el.codeNewEntryInput.disabled = false;
-  el.codeNewEntryInput.readOnly = false;
-  el.codeNewEntryInput.placeholder = kind === 'directory' ? 'フォルダ名...' : 'ファイル名（例: enemy.c）';
-  el.codeNewEntryRow.hidden = false;
+const codeNameDialogState = {
+  resolve: null,
+  mode: 'create',
+  kind: 'file',
+};
+
+function closeCodeNameDialog(value = null) {
+  closeModal(el.codeEntryModal);
+  const resolve = codeNameDialogState.resolve;
+  codeNameDialogState.resolve = null;
+  if (resolve) resolve(value);
+}
+
+function submitCodeNameDialog() {
+  const value = normalizeCodePath((el.codeEntryNameInput?.value || '').trim());
+  if (!value) {
+    if (el.codeEntryNameError) el.codeEntryNameError.textContent = '名前を入力してください。';
+    return;
+  }
+  if (value.includes('/')) {
+    if (el.codeEntryNameError) el.codeEntryNameError.textContent = '名前には / や \\ を含められません。';
+    return;
+  }
+  closeCodeNameDialog(value);
+}
+
+function openCodeNameDialog({ mode, kind, initialName = '' }) {
+  if (!el.codeEntryModal || !el.codeEntryNameInput) {
+    return Promise.resolve(window.prompt(mode === 'rename' ? '新しい名前' : '名前', initialName) || null);
+  }
+  codeNameDialogState.mode = mode;
+  codeNameDialogState.kind = kind;
+  if (el.codeEntryModalTitle) {
+    if (mode === 'rename') {
+      el.codeEntryModalTitle.textContent = 'リネーム';
+    } else {
+      el.codeEntryModalTitle.textContent = kind === 'directory' ? '新規フォルダ' : '新規ファイル';
+    }
+  }
+  if (el.codeEntryNameError) el.codeEntryNameError.textContent = '';
+  el.codeEntryNameInput.value = initialName || '';
+  openModal(el.codeEntryModal);
   requestAnimationFrame(() => {
-    el.codeNewEntryInput?.focus();
+    el.codeEntryNameInput?.focus();
+    el.codeEntryNameInput?.select();
+  });
+  return new Promise((resolve) => {
+    codeNameDialogState.resolve = resolve;
   });
 }
 
-function hideCodeNewEntryRow() {
-  if (el.codeNewEntryRow) el.codeNewEntryRow.hidden = true;
-  if (el.codeNewEntryInput) el.codeNewEntryInput.value = '';
-}
-
-async function confirmCodeNewEntry() {
-  const name = (el.codeNewEntryInput?.value || '').trim();
-  hideCodeNewEntryRow();
+async function promptCreateCodeEntry(kind) {
+  const name = await openCodeNameDialog({ mode: 'create', kind });
   if (!name) return;
-  await createCodeEntry(_codeNewEntryKind, name);
+  await createCodeEntry(kind, name);
 }
 
 async function createCodeEntry(kind, name) {
@@ -2124,6 +2680,35 @@ async function createCodeEntry(kind, name) {
   await loadCodeTree(kind === 'file' ? targetPath : state.code.selectedPath);
 }
 
+async function renameSelectedCodeEntry() {
+  const fromPath = state.code.selectedPath;
+  if (!fromPath) {
+    updateCodeStatus('リネーム対象が選択されていません。');
+    return;
+  }
+  const currentNode = findCodeTreeNode(state.code.tree, fromPath);
+  if (!currentNode) {
+    updateCodeStatus('リネーム対象が見つかりません。');
+    return;
+  }
+  const name = await openCodeNameDialog({
+    mode: 'rename',
+    kind: currentNode.type || 'file',
+    initialName: getCodeBaseName(fromPath),
+  });
+  if (!name || name === getCodeBaseName(fromPath)) return;
+  const parent = normalizeCodePath(fromPath).split('/').slice(0, -1).join('/');
+  const toPath = joinCodePath(parent, name);
+  const result = await window.electronAPI.renameCodeEntry?.({ fromPath, toPath });
+  if (!result?.ok) {
+    updateCodeStatus(`リネーム失敗: ${result?.error || 'unknown'}`);
+    return;
+  }
+  state.code.selectedPath = toPath;
+  updateCodeStatus(`✓ ${getCodeDisplayPath(fromPath)} を ${getCodeDisplayPath(toPath)} に変更しました`);
+  await loadCodeTree(currentNode.type === 'file' ? toPath : undefined);
+}
+
 async function deleteSelectedCodeEntry() {
   if (!state.code.selectedPath) {
     updateCodeStatus('削除対象が選択されていません。');
@@ -2138,7 +2723,9 @@ async function deleteSelectedCodeEntry() {
   }
   state.code.selectedPath = 'src/main.c';
   state.code.selectedIsDirectory = false;
+  state.code.selectedIsMedia = false;
   if (el.codeEditor) el.codeEditor.value = '';
+  setCodeTextEditorVisible(true);
   setCodeDirty(false);
   updateCodeStatus(`✓ ${getCodeDisplayPath(result.path || '')} を削除しました`);
   await loadCodeTree();
@@ -2188,6 +2775,8 @@ function loadSampleCode() {
   el.codeEditor.value = HELLO_WORLD_C;
   state.code.selectedPath = 'src/main.c';
   state.code.selectedIsDirectory = false;
+  state.code.selectedIsMedia = false;
+  setCodeTextEditorVisible(true);
   updateCodeEditor(HELLO_WORLD_C);
   setCodeDirty(true);
   updateCodeStatus('Hello World サンプルを読み込みました。保存後に Build できます。');
@@ -2312,6 +2901,11 @@ async function refreshProjectList() {
   }
   state.project.projectsRootDir = result.projectsRootDir || '';
   state.project.availableProjects = Array.isArray(result.projects) ? result.projects : [];
+  state.project.recentProjects = Array.isArray(result.recentProjects) ? result.recentProjects : [];
+  state.project.templates = Array.isArray(result.templates) ? result.templates : [];
+  if (!state.project.newProjectParentDir) {
+    state.project.newProjectParentDir = state.project.projectsRootDir || '';
+  }
   return result;
 }
 
@@ -2327,70 +2921,94 @@ function renderProjectPicker() {
   if (!el.projectPickerList) return;
   el.projectPickerList.innerHTML = '';
   if (el.projectPickerRoot) {
-    el.projectPickerRoot.textContent = state.project.projectsRootDir || '-';
+    el.projectPickerRoot.textContent = `既定のプロジェクトフォルダ: ${state.project.projectsRootDir || '-'}`;
     el.projectPickerRoot.title = state.project.projectsRootDir || '';
   }
 
-  const projects = state.project.availableProjects || [];
-  if (projects.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'project-picker-root';
-    empty.textContent = 'projects 配下にプロジェクトがありません。';
-    el.projectPickerList.appendChild(empty);
-  }
-
-  projects.forEach((project) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `project-picker-item${project.current ? ' current' : ''}`;
-    button.innerHTML = `
-      <span class="project-picker-main">
-        <span class="project-picker-name">${escHtml(project.projectName || '')}</span>
-        <span class="project-picker-title">${escHtml(project.title || '')}</span>
-        <span class="project-picker-path">${escHtml(project.projectDir || '')}</span>
-      </span>
-      ${project.current ? '<span class="project-picker-badge">現在</span>' : ''}
-    `;
-    button.addEventListener('click', async () => {
-      const result = await window.electronAPI.openExistingProject({ projectName: project.projectName });
-      if (!result?.ok) {
-        if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `プロジェクトを開けませんでした: ${result?.error || 'unknown'}`;
-        return;
-      }
-      state.startup.projectSelected = true;
-      state.startup.projectSelectionRequired = false;
-      appendLog('app', `プロジェクトを開きました: ${result.projectDir || project.projectDir || project.projectName}`);
-      closeModal(el.projectPickerModal);
-      await loadProjectConfig();
-      await loadResDefinitions({ keepSelection: false });
-      await loadPlugins();
-      await refreshProjectList();
-      if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `✓ プロジェクトを切り替えました: ${result.projectDir}`;
+  const openProjectFromItem = async (project) => {
+    if (project?.exists === false && project?.projectDir) {
+      if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `プロジェクトが見つかりません: ${project.projectDir}`;
+      return;
+    }
+    const result = await window.electronAPI.openExistingProject({
+      projectDir: project.projectDir || '',
+      projectName: project.projectName || '',
     });
-    el.projectPickerList.appendChild(button);
-  });
-
-  const addButton = document.createElement('button');
-  addButton.type = 'button';
-  addButton.className = 'project-picker-item add-new';
-  addButton.innerHTML = `
-    <span class="project-picker-main">
-      <span class="project-picker-name">新規プロジェクトを追加</span>
-      <span class="project-picker-title">projects 配下に新しいフォルダを作成します</span>
-    </span>
-  `;
-  addButton.addEventListener('click', () => {
+    if (!result?.ok) {
+      if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `プロジェクトを開けませんでした: ${result?.error || 'unknown'}`;
+      return;
+    }
+    state.startup.projectSelected = true;
+    state.startup.projectSelectionRequired = false;
+    appendLog('app', `プロジェクトを開きました: ${result.projectDir || project.projectDir || project.projectName}`);
     closeModal(el.projectPickerModal);
-    openProjectModal();
-  });
-  el.projectPickerList.appendChild(addButton);
+    await loadProjectConfig();
+    await loadResDefinitions({ keepSelection: false });
+    await loadPlugins();
+    await refreshProjectList();
+    if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `✓ プロジェクトを切り替えました: ${result.projectDir}`;
+  };
+
+  const appendSection = (title, hint, projects, emptyText) => {
+    const section = document.createElement('section');
+    section.className = 'project-picker-section';
+    section.innerHTML = `
+      <div class="project-picker-section-head">
+        <h3>${escHtml(title)}</h3>
+        ${hint ? `<span>${escHtml(hint)}</span>` : ''}
+      </div>
+    `;
+    const list = document.createElement('div');
+    list.className = 'project-picker-section-list';
+    section.appendChild(list);
+
+    if (!projects.length) {
+      const empty = document.createElement('div');
+      empty.className = 'project-picker-empty';
+      empty.textContent = emptyText;
+      list.appendChild(empty);
+      el.projectPickerList.appendChild(section);
+      return;
+    }
+
+    projects.forEach((project) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      const exists = project.exists !== false;
+      button.className = `project-picker-item${project.current ? ' current' : ''}${exists ? '' : ' missing'}`;
+      button.disabled = !exists;
+      button.innerHTML = `
+        <span class="project-picker-main">
+          <span class="project-picker-name">${escHtml(project.projectName || '')}</span>
+          <span class="project-picker-title">${escHtml(project.title || '')}</span>
+          <span class="project-picker-path">${escHtml(project.projectDir || '')}</span>
+        </span>
+        ${project.current ? '<span class="project-picker-badge">現在</span>' : ''}
+        ${!exists ? '<span class="project-picker-badge warn">なし</span>' : ''}
+      `;
+      button.addEventListener('click', () => openProjectFromItem(project));
+      list.appendChild(button);
+    });
+    el.projectPickerList.appendChild(section);
+  };
+
+  appendSection(
+    '最近開いたプロジェクト',
+    '任意パスを含みます',
+    state.project.recentProjects || [],
+    '最近開いたプロジェクトはありません。',
+  );
+  appendSection(
+    'projects 配下',
+    state.project.projectsRootDir || '',
+    state.project.availableProjects || [],
+    'projects 配下に通常プロジェクトがありません。',
+  );
 }
 
 async function openProjectPicker() {
   try {
-    if (state.startup.projectSelectionRequired) {
-      await loadPluginCatalogForProjectCreation();
-    }
+    await loadPluginCatalogForProjectCreation();
     await refreshProjectList();
     renderProjectPicker();
     openModal(el.projectPickerModal);
@@ -2399,6 +3017,34 @@ async function openProjectPicker() {
       el.settingsSavedMsg.textContent = `プロジェクト一覧取得失敗: ${err?.message || err}`;
     }
   }
+}
+
+async function openProjectFolderFromDialog() {
+  const picked = await window.electronAPI.pickFile({
+    title: 'プロジェクトフォルダを開く',
+    properties: ['openDirectory'],
+  });
+  if (picked?.canceled) return;
+  const projectDir = picked?.sourcePath || picked?.filePaths?.[0] || '';
+  if (!projectDir) return;
+
+  const result = await window.electronAPI.openExistingProject({ projectDir });
+  if (!result?.ok) {
+    const message = `プロジェクトを開けませんでした: ${result?.error || 'project.json が見つかりません'}`;
+    appendLog('app', message, 'warn');
+    if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = message;
+    return;
+  }
+
+  state.startup.projectSelected = true;
+  state.startup.projectSelectionRequired = false;
+  appendLog('app', `プロジェクトを開きました: ${result.projectDir || projectDir}`);
+  closeModal(el.projectPickerModal);
+  await loadProjectConfig();
+  await loadResDefinitions({ keepSelection: false });
+  await loadPlugins();
+  await refreshProjectList();
+  if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `✓ プロジェクトを切り替えました: ${result.projectDir}`;
 }
 
 async function ensureStartupProjectSelection() {
@@ -2446,7 +3092,7 @@ async function loadProjectConfig() {
         serial: cfg.serial || state.projectConfig.serial,
         region: cfg.region || 'JUE',
       };
-      state.projectConfig = { ...state.projectConfig, ...normalized };
+      state.projectConfig = { ...state.projectConfig, ...cfg, ...normalized };
       if (el.settingTitle) el.settingTitle.value = state.projectConfig.title;
       if (el.settingAuthor) el.settingAuthor.value = state.projectConfig.author;
       if (el.settingSerial) el.settingSerial.value = state.projectConfig.serial;
@@ -2818,6 +3464,10 @@ function renderResFileSelect() {
   if (state.rescomp.selectedFile) {
     el.resFileSelect.value = state.rescomp.selectedFile;
   }
+
+  if (el.btnDeleteAssetEntry) {
+    el.btnDeleteAssetEntry.disabled = !state.rescomp.selectedFile;
+  }
 }
 
 function renderEntryMeta(entry) {
@@ -2968,6 +3618,88 @@ function renderPaletteSwatches(container, colors) {
     sw.title = transparent ? `${index}: ${hex} (transparent)` : `${index}: ${hex}`;
     container.appendChild(sw);
   });
+}
+
+function getCodeCompletionContext() {
+  const editor = el.codeEditor;
+  if (!editor || editor.disabled) return null;
+  const cursor = editor.selectionStart || 0;
+  const before = editor.value.slice(0, cursor);
+  const match = before.match(/[A-Za-z_][A-Za-z0-9_]*$/);
+  return {
+    cursor,
+    prefix: match ? match[0] : '',
+    start: match ? cursor - match[0].length : cursor,
+  };
+}
+
+function closeCodeCompletion() {
+  state.code.completions = [];
+  state.code.completionIndex = 0;
+  state.code.completionPrefix = '';
+  if (el.codeCompletionPanel) {
+    el.codeCompletionPanel.hidden = true;
+    el.codeCompletionPanel.innerHTML = '';
+  }
+}
+
+function renderCodeCompletionPanel() {
+  const panel = el.codeCompletionPanel;
+  if (!panel) return;
+  if (!state.code.completions.length) {
+    closeCodeCompletion();
+    return;
+  }
+  panel.hidden = false;
+  panel.innerHTML = state.code.completions.map((item, index) => `
+    <div class="code-completion-item${index === state.code.completionIndex ? ' active' : ''}" data-index="${index}">
+      <span>${escHtml(item.label)}</span>
+      <span class="code-completion-kind">${escHtml(item.kind)}</span>
+    </div>
+  `).join('');
+  panel.querySelectorAll('.code-completion-item').forEach((row) => {
+    row.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      state.code.completionIndex = Number(row.getAttribute('data-index')) || 0;
+      applyCodeCompletion();
+    });
+  });
+}
+
+function updateCodeCompletion({ force = false } = {}) {
+  const context = getCodeCompletionContext();
+  if (!context) {
+    closeCodeCompletion();
+    return;
+  }
+  const prefix = context.prefix;
+  if (!force && prefix.length < 2) {
+    closeCodeCompletion();
+    return;
+  }
+  const lower = prefix.toLowerCase();
+  const completions = CODE_COMPLETION_ITEMS
+    .filter((item) => !prefix || item.label.toLowerCase().startsWith(lower))
+    .slice(0, 24);
+  state.code.completions = completions;
+  state.code.completionIndex = 0;
+  state.code.completionPrefix = prefix;
+  renderCodeCompletionPanel();
+}
+
+function applyCodeCompletion() {
+  const item = state.code.completions[state.code.completionIndex];
+  const context = getCodeCompletionContext();
+  if (!item || !context) return false;
+  const editor = el.codeEditor;
+  const next = `${editor.value.slice(0, context.start)}${item.label}${editor.value.slice(context.cursor)}`;
+  editor.value = next;
+  const nextCursor = context.start + item.label.length;
+  editor.setSelectionRange(nextCursor, nextCursor);
+  updateCodeEditor(editor.value);
+  setCodeDirty(true);
+  closeCodeCompletion();
+  return true;
 }
 
 const IMAGE_PREVIEW_ZOOM_PRESETS = ['25', '50', '100', '200', '300', '400', '800'];
@@ -3512,6 +4244,52 @@ function setPreviewPanelOpen(open) {
   }
 }
 
+function loadAssetPreviewWidth() {
+  try {
+    const saved = Number(localStorage.getItem(ASSET_PREVIEW_WIDTH_KEY));
+    if (Number.isFinite(saved) && saved > 0) {
+      state.preview.panelWidth = clamp(saved, ASSET_PREVIEW_MIN_WIDTH, ASSET_PREVIEW_MAX_WIDTH);
+    }
+  } catch (_) {}
+  applyAssetPreviewWidth();
+}
+
+function applyAssetPreviewWidth() {
+  if (!el.assetsLayout) return;
+  el.assetsLayout.style.setProperty('--asset-preview-width', `${state.preview.panelWidth}px`);
+}
+
+function saveAssetPreviewWidth() {
+  try {
+    localStorage.setItem(ASSET_PREVIEW_WIDTH_KEY, String(Math.round(state.preview.panelWidth)));
+  } catch (_) {}
+}
+
+function beginAssetPreviewResize(event) {
+  if (!el.assetsLayout || !state.preview.panelOpen) return;
+  event.preventDefault();
+  el.assetPreviewResizer?.classList.add('is-dragging');
+  const layoutRect = el.assetsLayout.getBoundingClientRect();
+  const maxWidth = Math.min(ASSET_PREVIEW_MAX_WIDTH, Math.max(ASSET_PREVIEW_MIN_WIDTH, layoutRect.width - 320));
+
+  const resize = (moveEvent) => {
+    const nextWidth = clamp(layoutRect.right - moveEvent.clientX, ASSET_PREVIEW_MIN_WIDTH, maxWidth);
+    state.preview.panelWidth = nextWidth;
+    applyAssetPreviewWidth();
+  };
+  const finish = () => {
+    el.assetPreviewResizer?.classList.remove('is-dragging');
+    saveAssetPreviewWidth();
+    window.removeEventListener('pointermove', resize);
+    window.removeEventListener('pointerup', finish);
+    window.removeEventListener('pointercancel', finish);
+  };
+
+  window.addEventListener('pointermove', resize);
+  window.addEventListener('pointerup', finish, { once: true });
+  window.addEventListener('pointercancel', finish, { once: true });
+}
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -3824,14 +4602,12 @@ function renderAssetEditor(entry) {
   if (!el.assetEditForm || !el.assetEditorPanel) return;
 
   if (!entry) {
-    if (el.assetEditorActions) el.assetEditorActions.hidden = true;
     if (el.assetNoSelectionHint) el.assetNoSelectionHint.hidden = false;
     el.assetEditForm.innerHTML = '';
     syncInlinePreview(null);
     return;
   }
 
-  if (el.assetEditorActions) el.assetEditorActions.hidden = false;
   if (el.assetNoSelectionHint) el.assetNoSelectionHint.hidden = true;
 
   // restore accordion state
@@ -3967,6 +4743,34 @@ async function deleteEntry(entry) {
 
   state.rescomp.selectedEntryLine = null;
   await loadResDefinitions({ keepSelection: true });
+}
+
+async function deleteCurrentResFile() {
+  const fileName = state.rescomp.selectedFile || el.resFileSelect?.value || '';
+  if (!fileName) {
+    if (el.assetTableHint) el.assetTableHint.textContent = '削除する .res ファイルがありません';
+    return;
+  }
+
+  const selectedFile = getSelectedFile();
+  const countText = selectedFile ? `${selectedFile.entryCount || 0} 件の定義を含む ` : '';
+  const ok = window.confirm(`${countText}.res ファイルを削除しますか？\n${fileName}`);
+  if (!ok) return;
+
+  const result = await window.electronAPI.deleteResFile(fileName);
+  if (!result?.ok) {
+    if (el.assetTableHint) {
+      el.assetTableHint.textContent = `.res ファイル削除失敗: ${result?.error || 'unknown'}`;
+    }
+    return;
+  }
+
+  state.rescomp.selectedFile = '';
+  state.rescomp.selectedEntryLine = null;
+  await loadResDefinitions({ keepSelection: false });
+  if (el.assetTableHint) {
+    el.assetTableHint.textContent = `.res ファイルを削除しました: ${fileName}`;
+  }
 }
 
 async function reorderEntry(fromLine, toLine) {
@@ -6574,28 +7378,67 @@ async function submitAssetModal() {
 }
 
 function openProjectModal() {
+  state.project.newProjectParentDir = state.project.newProjectParentDir || state.project.projectsRootDir || '';
+  if (el.projectParentDirInput) {
+    el.projectParentDirInput.value = state.project.newProjectParentDir || '';
+    el.projectParentDirInput.title = state.project.newProjectParentDir || '';
+  }
   if (el.projectSystemNameInput) el.projectSystemNameInput.value = 'my_md_game';
   if (el.projectTitleInput) el.projectTitleInput.value = state.projectConfig.title || 'MY GAME';
   if (el.projectAuthorInput) el.projectAuthorInput.value = state.projectConfig.author || 'AUTHOR';
   if (el.projectSerialInput) el.projectSerialInput.value = state.projectConfig.serial || 'GM 00000000-00';
-  populateProjectBuilderSelect();
+  populateProjectTemplateSelect();
   openModal(el.projectModal);
 }
 
-function getInstalledBuilderPlugins() {
-  return getPluginsByRole('builder')
-    .sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), 'ja'));
+function getBuilderPluginDisplayName(builderId) {
+  const id = String(builderId || '').trim();
+  if (!id) return '';
+  const plugin = getPluginById(id);
+  return plugin ? String(plugin.name || plugin.id) : id;
 }
 
-function populateProjectBuilderSelect() {
-  if (!el.projectBuilderSelect) return;
-  const builders = getInstalledBuilderPlugins();
+function populateProjectTemplateSelect() {
+  if (!el.projectTemplateSelect) return;
+  const templates = Array.isArray(state.project.templates) ? state.project.templates : [];
   const options = ['<option value="">空のプロジェクト</option>'];
-  builders.forEach((plugin) => {
-    const suffix = plugin.enabled ? '' : '（無効: 作成時に有効化）';
-    options.push(`<option value="${escHtml(plugin.id)}">${escHtml(`${plugin.name}${suffix}`)}</option>`);
+  templates.forEach((template) => {
+    const builder = template.builderPlugin ? ` / ${getBuilderPluginDisplayName(template.builderPlugin)}` : '';
+    options.push(`<option value="${escHtml(template.templateId)}">${escHtml(`${template.title || template.projectName}${builder}`)}</option>`);
   });
-  el.projectBuilderSelect.innerHTML = options.join('');
+  el.projectTemplateSelect.innerHTML = options.join('');
+  updateProjectTemplateHint();
+}
+
+function updateProjectTemplateHint() {
+  if (!el.projectTemplateHint) return;
+  const templateId = String(el.projectTemplateSelect?.value || '').trim();
+  if (!templateId) {
+    el.projectTemplateHint.textContent = 'テンプレート未選択の場合は空のプロジェクトを作成します。';
+    return;
+  }
+  const template = (state.project.templates || []).find((item) => item.templateId === templateId);
+  if (!template) {
+    el.projectTemplateHint.textContent = '選択したテンプレート情報を取得できません。';
+    return;
+  }
+  const builder = template.builderPlugin ? ` / ビルダー: ${getBuilderPluginDisplayName(template.builderPlugin)}` : '';
+  el.projectTemplateHint.textContent = `コピー元: ${template.projectDir}${builder}`;
+}
+
+async function chooseProjectParentDirectory() {
+  const picked = await window.electronAPI.pickFile({
+    title: '新規プロジェクトの作成場所を選択',
+    properties: ['openDirectory'],
+  });
+  if (picked?.canceled) return;
+  const parentDir = picked?.sourcePath || picked?.filePaths?.[0] || '';
+  if (!parentDir) return;
+  state.project.newProjectParentDir = parentDir;
+  if (el.projectParentDirInput) {
+    el.projectParentDirInput.value = parentDir;
+    el.projectParentDirInput.title = parentDir;
+  }
 }
 
 async function submitProjectModal() {
@@ -6606,6 +7449,8 @@ async function submitProjectModal() {
   }
   const payload = {
     projectName,
+    parentDir: el.projectParentDirInput?.value.trim() || state.project.projectsRootDir || '',
+    templateId: String(el.projectTemplateSelect?.value || '').trim(),
     config: {
       title: el.projectTitleInput?.value.trim() || 'MY GAME',
       author: el.projectAuthorInput?.value.trim() || 'AUTHOR',
@@ -6613,10 +7458,6 @@ async function submitProjectModal() {
       region: 'JUE',
     },
   };
-  const selectedBuilder = String(el.projectBuilderSelect?.value || '').trim();
-  if (selectedBuilder) {
-    payload.config.pluginRoles = { builder: selectedBuilder };
-  }
   const result = await window.electronAPI.createNewProject(payload);
   if (!result?.ok) {
     if (!result?.canceled && el.settingsSavedMsg) {
@@ -6679,6 +7520,7 @@ async function openAboutDialog() {
 
 function bindEvents() {
   el.sidebar?.addEventListener('click', (event) => {
+    closeSidebarPluginContextMenu();
     if (pluginState.draggingSidebarPluginId) return;
     const btn = event.target.closest('.nav-btn');
     if (!btn) return;
@@ -6688,6 +7530,16 @@ function bindEvents() {
     switchPage(page);
     if (page === 'plugins') loadPlugins();
   });
+  el.sidebar?.addEventListener('contextmenu', openSidebarPluginContextMenu);
+  document.addEventListener('click', (event) => {
+    if (sidebarPluginContextMenu && !sidebarPluginContextMenu.hidden && !sidebarPluginContextMenu.contains(event.target)) {
+      closeSidebarPluginContextMenu();
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeSidebarPluginContextMenu();
+  });
+  window.addEventListener('resize', closeSidebarPluginContextMenu);
 
   el.btnOpenPluginsFolder?.addEventListener('click', async () => {
     const result = await window.electronAPI.openPluginsFolder();
@@ -6723,18 +7575,13 @@ function bindEvents() {
   });
 
   el.btnCodeNewFile?.addEventListener('click', () => {
-    showCodeNewEntryRow('file');
+    void promptCreateCodeEntry('file');
   });
   el.btnCodeNewFolder?.addEventListener('click', () => {
-    showCodeNewEntryRow('directory');
+    void promptCreateCodeEntry('directory');
   });
   el.btnCodeDelete?.addEventListener('click', async () => {
     await deleteSelectedCodeEntry();
-  });
-  el.btnCodeReload?.addEventListener('click', async () => {
-    const keepPath = state.code.selectedIsDirectory ? undefined : state.code.selectedPath;
-    await loadCodeTree(keepPath);
-    updateCodeStatus('プロジェクトツリーを再読み込みしました');
   });
   el.btnCodeTreeExpandAll?.addEventListener('click', () => {
     expandAllCodeDirs();
@@ -6742,45 +7589,114 @@ function bindEvents() {
   el.btnCodeTreeCollapseAll?.addEventListener('click', () => {
     collapseAllCodeDirs();
   });
-  el.btnCodeNewEntryConfirm?.addEventListener('click', async () => {
-    await confirmCodeNewEntry();
+  el.codeTreeFilterInput?.addEventListener('input', () => {
+    state.code.treeFilterText = el.codeTreeFilterInput.value || '';
+    renderCodeTree();
   });
-  el.btnCodeNewEntryCancel?.addEventListener('click', () => {
-    hideCodeNewEntryRow();
-  });
-  el.codeNewEntryInput?.addEventListener('keydown', async (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); await confirmCodeNewEntry(); }
-    if (e.key === 'Escape') { hideCodeNewEntryRow(); }
-  });
-  el.codeNewEntryInput?.addEventListener('click', (e) => {
-    e.stopPropagation();
-  });
-  el.btnOpenSrcFolder?.addEventListener('click', async () => {
-    const rootResult = await window.electronAPI.getCodeRoot();
-    if (rootResult?.ok && rootResult.root) {
-      await window.electronAPI.openPathInExplorer(rootResult.root);
+  el.btnCodeEntryConfirm?.addEventListener('click', submitCodeNameDialog);
+  el.btnCodeEntryCancel?.addEventListener('click', () => closeCodeNameDialog(null));
+  el.btnCodeEntryModalClose?.addEventListener('click', () => closeCodeNameDialog(null));
+  el.codeEntryModal?.querySelector('.app-backdrop')?.addEventListener('click', () => closeCodeNameDialog(null));
+  el.codeEntryNameInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      submitCodeNameDialog();
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeCodeNameDialog(null);
     }
   });
-
   el.btnPluginRoleAccordion?.addEventListener('click', () => {
     setPluginRoleAccordionOpen(!state.pluginUi.roleAccordionOpen);
   });
   el.btnSaveCode?.addEventListener('click', async () => {
     await saveCurrentCodeFile();
   });
-  el.btnCopyCode?.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(el.codeEditor.value);
-      updateCodeStatus('✓ クリップボードにコピーしました');
-      setTimeout(() => { updateCodeStatus(''); }, 2000);
-    } catch (_err) {
-      updateCodeStatus('コピーに失敗しました');
+  el.btnCodeFindToggle?.addEventListener('click', () => {
+    if (state.code.findOpen) closeCodeFindPanel();
+    else openCodeFindPanel();
+  });
+  el.codeFindInput?.addEventListener('input', updateCodeFindQuery);
+  el.codeReplaceInput?.addEventListener('input', updateCodeFindQuery);
+  el.codeFindInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      findCodeNext(event.shiftKey ? -1 : 1);
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeCodeFindPanel();
+    }
+  });
+  el.codeReplaceInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      replaceCurrentCodeMatch();
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeCodeFindPanel();
+    }
+  });
+  el.btnCodeFindPrev?.addEventListener('click', () => findCodeNext(-1));
+  el.btnCodeFindNext?.addEventListener('click', () => findCodeNext(1));
+  el.btnCodeReplaceOne?.addEventListener('click', replaceCurrentCodeMatch);
+  el.btnCodeReplaceAll?.addEventListener('click', replaceAllCodeMatches);
+  el.codeEncodingSelect?.addEventListener('change', async () => {
+    const nextEncoding = el.codeEncodingSelect.value || 'auto';
+    if (state.code.dirty && !state.code.selectedIsDirectory && !state.code.selectedIsMedia) {
+      const ok = window.confirm(`${getCodeDisplayPath(state.code.selectedPath)} の未保存変更を破棄して文字コードを切り替えますか？`);
+      if (!ok) {
+        el.codeEncodingSelect.value = state.code.selectedEncoding;
+        return;
+      }
+      setCodeDirty(false);
+    }
+    state.code.selectedEncoding = nextEncoding;
+    if (!state.code.selectedIsDirectory && !state.code.selectedIsMedia && state.code.selectedPath) {
+      await openCodeFile(state.code.selectedPath);
     }
   });
   el.codeEditor?.addEventListener('input', () => {
     if (!state.code.selectedIsDirectory) {
       setCodeDirty(true);
       updateCodeEditor(el.codeEditor.value);
+      updateCodeCompletion();
+      updateCodeCursorLine();
+    }
+  });
+  el.codeEditor?.addEventListener('click', updateCodeCursorLine);
+  el.codeEditor?.addEventListener('keyup', updateCodeCursorLine);
+  el.codeEditor?.addEventListener('select', updateCodeCursorLine);
+  el.codeEditor?.addEventListener('keydown', (event) => {
+    if (!el.codeCompletionPanel?.hidden && state.code.completions.length) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        state.code.completionIndex = (state.code.completionIndex + 1) % state.code.completions.length;
+        renderCodeCompletionPanel();
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        state.code.completionIndex = (state.code.completionIndex - 1 + state.code.completions.length) % state.code.completions.length;
+        renderCodeCompletionPanel();
+        return;
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        applyCodeCompletion();
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeCodeCompletion();
+        return;
+      }
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key === ' ') {
+      event.preventDefault();
+      updateCodeCompletion({ force: true });
     }
   });
 
@@ -7019,7 +7935,14 @@ function bindEvents() {
     if (cancelRequiredProjectSelection()) return;
     closeModal(el.projectModal);
   });
+  el.btnProjectParentDirBrowse?.addEventListener('click', chooseProjectParentDirectory);
+  el.projectTemplateSelect?.addEventListener('change', updateProjectTemplateHint);
   el.btnProjectModalCreate?.addEventListener('click', submitProjectModal);
+  el.btnProjectPickerOpenFolder?.addEventListener('click', openProjectFolderFromDialog);
+  el.btnProjectPickerNew?.addEventListener('click', () => {
+    closeModal(el.projectPickerModal);
+    openProjectModal();
+  });
   el.btnProjectPickerClose?.addEventListener('click', () => {
     if (cancelRequiredProjectSelection()) return;
     closeModal(el.projectPickerModal);
@@ -7048,10 +7971,8 @@ function bindEvents() {
     renderAssetTable();
   });
 
-  el.btnDeleteAssetEntry?.addEventListener('click', async () => {
-    const entry = getEntryByLine(state.rescomp.selectedEntryLine);
-    if (entry) await deleteEntry(entry);
-  });
+  el.btnDeleteAssetEntry?.addEventListener('click', deleteCurrentResFile);
+  el.assetPreviewResizer?.addEventListener('pointerdown', beginAssetPreviewResize);
 
   el.resizeMode?.addEventListener('change', () => {
     const mode = el.resizeMode.value;
@@ -7195,6 +8116,9 @@ function bindEvents() {
   window.electronAPI.onPluginLog?.((payload) => {
     appendLog(payload?.source || payload?.pluginId || 'plugin', payload?.text || '', payload?.level || 'info');
   });
+  window.electronAPI.onLogWindowClosed?.(() => {
+    setLogDetached(false);
+  });
 
   window.electronAPI.onBuildEnd((payload) => {
     if (payload.success) {
@@ -7227,9 +8151,9 @@ function bindEvents() {
     const typingInInput = activeTag === 'INPUT' || activeTag === 'TEXTAREA';
 
     if (e.key === 'Escape') {
-      if (document.activeElement === el.codeNewEntryInput) {
+      if (state.code.findOpen && state.currentPage === 'code') {
         e.preventDefault();
-        hideCodeNewEntryRow();
+        closeCodeFindPanel();
         return;
       }
       if (el.aboutModal?.classList.contains('open')) {
@@ -7258,6 +8182,11 @@ function bindEvents() {
         closeModal(el.resFileModal);
         return;
       }
+      if (el.codeEntryModal?.classList.contains('open')) {
+        e.preventDefault();
+        closeCodeNameDialog(null);
+        return;
+      }
       if (el.projectModal?.classList.contains('open')) {
         e.preventDefault();
         if (cancelRequiredProjectSelection()) return;
@@ -7269,6 +8198,13 @@ function bindEvents() {
     if ((e.ctrlKey || e.metaKey) && e.key === 'b' && !typingInInput) {
       e.preventDefault();
       runBuild();
+    }
+
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && state.currentPage === 'code') {
+      e.preventDefault();
+      if (state.code.findOpen) closeCodeFindPanel();
+      else openCodeFindPanel();
+      return;
     }
 
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && state.currentPage === 'code') {
@@ -7285,8 +8221,10 @@ async function bootstrap() {
   setLogOpenHeight(savedLogState.openHeight);
   setLogOpen(false);
   if (el.logLevelFilter) el.logLevelFilter.value = state.logs.levelFilter;
+  if (el.codeEncodingSelect) el.codeEncodingSelect.value = state.code.selectedEncoding;
   bindEvents();
   bindCodeScrollSync();
+  loadAssetPreviewWidth();
   setPreviewPanelOpen(true);
   setAccordionOpen('params', true);
   setAccordionOpen('preview', true);
