@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openTestPlayWindow: (romPath) => ipcRenderer.invoke('window:openTestPlay', romPath),
   generateProject: (sourceCode, config) => ipcRenderer.invoke('build:generateProject', sourceCode, config),
   generateStructureOnly: (config) => ipcRenderer.invoke('build:generateStructureOnly', config),
-  runBuild: () => ipcRenderer.invoke('build:run'),
+  runBuild: (options) => ipcRenderer.invoke('build:run', options || {}),
   getRomPath: () => ipcRenderer.invoke('build:getRomPath'),
   getAppInfo: () => ipcRenderer.invoke('app:getInfo'),
   openPathInExplorer: (targetPath, options) => ipcRenderer.invoke('fs:openPathInExplorer', targetPath, options || {}),

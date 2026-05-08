@@ -851,22 +851,27 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 
   function renderAnimationRows(counts = getRowFrameCounts()) {
     const matrix = parseSpriteTime(getTimeValue(), state.grid.rows, state.grid.columns);
-    ui.rowList.innerHTML = counts.map((count, rowIndex) => {
+    const rows = counts.map((count, rowIndex) => {
       const rowTime = matrix[rowIndex]?.find((cell) => String(cell).trim() !== '') || matrix[rowIndex]?.[0] || '0';
       const selected = rowIndex === state.frameRow;
       return `
         <div class="sprite-editor-row-config ${selected ? 'is-selected' : ''}">
           <button class="sprite-editor-secondary" type="button" data-row-select="${rowIndex}">ROW ${rowIndex}</button>
-          <label class="sprite-editor-inline-field">有効
-            <input class="sprite-editor-input" data-row-frame-count="${rowIndex}" type="number" min="1" max="${state.grid.columns}" value="${count}" />
-          </label>
-          <label class="sprite-editor-inline-field">既定 time
-            <input class="sprite-editor-input" data-row-default-time="${rowIndex}" type="number" min="0" value="${esc(rowTime)}" />
-          </label>
+          <input class="sprite-editor-input" data-row-frame-count="${rowIndex}" type="number" min="1" max="${state.grid.columns}" value="${count}" aria-label="ROW ${rowIndex} 有効フレーム数" />
+          <input class="sprite-editor-input" data-row-default-time="${rowIndex}" type="number" min="0" value="${esc(rowTime)}" aria-label="ROW ${rowIndex} 既定 time" />
           <span class="sprite-editor-status">${selected ? '選択中' : ''}</span>
         </div>
       `;
     }).join('');
+    ui.rowList.innerHTML = `
+      <div class="sprite-editor-row-header" aria-hidden="true">
+        <span>ROW</span>
+        <span>有効</span>
+        <span>既定 time</span>
+        <span>状態</span>
+      </div>
+      ${rows}
+    `;
   }
 
   async function saveRowFrameCount(input) {

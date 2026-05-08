@@ -249,8 +249,8 @@ test('asset-checker previews sibling MAP layer_id entries individually', () => {
   assert.match(result.sourceCode, /#define TILEMAP_COUNT 4/);
   assert.doesNotMatch(result.sourceCode, /static const u16 map001_checker_layer/);
   assert.match(result.sourceCode, /\{ "map001 \(MAP\)", TILEMAP_KIND_MAP, NULL, &map001, \{ NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}, \{ NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}, 0, NULL, \{ &bga, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}/);
-  assert.match(result.sourceCode, /\{ "map001_layer_2 \(MAP\)", TILEMAP_KIND_MAP, NULL, &map001_layer_2, \{ NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}, \{ NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}, 0, NULL, \{ &enemies, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}/);
-  assert.match(result.sourceCode, /\{ "map001_layer_2_priority \(MAP\)", TILEMAP_KIND_MAP, NULL, &map001_layer_2_priority, \{ NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}, \{ NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}, 0, NULL, \{ &bga, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}/);
+  assert.match(result.sourceCode, /\{ "map001_layer_2 \(MAP\)", TILEMAP_KIND_MAP, NULL, NULL, \{ &map001_layer_2, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}, \{ &map001_layer_2_priority, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}, 1, NULL, \{ &enemies, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}/);
+  assert.match(result.sourceCode, /\{ "map001_layer_2_priority \(MAP\)", TILEMAP_KIND_MAP, NULL, NULL, \{ &map001_layer_2, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}, \{ &map001_layer_2_priority, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}, 1, NULL, \{ &enemies, NULL, NULL, NULL, NULL, NULL, NULL, NULL \}/);
 });
 
 test('asset-checker build hook limits SGDK source scan to generated main.c', () => {

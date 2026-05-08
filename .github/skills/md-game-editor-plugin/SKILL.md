@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-05 / Plugin Runtime v2.4 / AI Control API / TileMap collision
+> § Last Updated: 2026-05 / Plugin Runtime v2.4 / AI Control API / TileMap collision / Editor UX guardrails
 
 ---
 
@@ -319,7 +319,7 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `slideshow` | `build` | imageXXX アセットのスライドショー生成 |
 | `code-editor` | `editor` | src/ ファイルツリー + コードエディタ |
 | `asset-manager` | `editor`, `asset` | resources.res アセット管理 |
-| `sprite-editor` | `editor`, `asset` | SPRITE 定義編集 + スプライトシート/フレームプレビュー |
+| `sprite-editor` | `editor`, `asset` | SPRITE 定義編集 + スプライトシート/フレームプレビュー。ROW 有効フレーム数は `time` 行列長で表現し、preview は animation / `time=0` 停止 / collision overlay を反映する |
 | `tilemap-editor` | `editor`, `asset` | Tiled 互換 TMX/TSX サブセット編集 + SGDK TILESET/MAP/TILEMAP 登録 + tile collision data 生成 |
 | `image-resize-converter` | `converter` | 8px 境界リサイズ |
 | `image-quantize-converter` | `converter` | 16 色減色変換 |
@@ -354,3 +354,22 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | ブラウザ API (fetch, DOM) を使う | プラグインはメインプロセス (Node.js) で動作するため使用不可 |
 | generateSource でエラー時に例外を throw | `{ ok: false, error: "メッセージ" }` を返す |
 | editor plugin の root class に `display: flex/grid` を指定 | root 直下の wrapper に指定する。root は `.editor-page` なので、`display` を上書きすると別タブでも前の plugin 画面が表示される |
+| アセット一覧や select を初回読込時のまま使う | 画面表示時・sidebar 再アクティブ時に `.res` / source data を再読込し、一覧・select・preview を同期する |
+| 未保存変更のある asset を暗黙に切り替える | 保存 / 破棄 / キャンセルを選べる plugin-owned modal を挟む |
+| 保存 / 削除をプロパティフォーム末尾にだけ置く | 選択中リスト項目の右端に保存・削除 action を置き、未保存状態をリスト上にも出す |
+| 繰り返し行の入力に同じ説明ラベルを重ねる | ヘッダー行 + テーブル型 UI にして、各 ROW は input と状態表示だけにする |
+| SPRITE preview でシート全体だけを表示する | frame size / animation ROW / time / collision を反映した再生 preview を表示する |
+
+---
+
+## Editor UI 実装ノウハウ
+
+- editor plugin の root はホストの `.editor-page` なので、`display` を直接指定しない。root 直下の wrapper に grid / flex を指定する。
+- アセット編集画面は左に一覧、中央に preview / editor、右に property form の 3 列を基本とする。左右列や中央上下 preview は resizer / splitter で調整可能にする。
+- pane header / toolbar は端まで通し、padding はフォームや空状態メッセージ側に持たせる。pane 自体に padding を入れると特定列のヘッダーだけ内側へずれる。
+- アセット参照を持つ editor は、画面表示時と sidebar 再アクティブ時に `.res` / source data を再読込する。更新ボタンだけに頼らない。
+- 別アセット選択・新規追加・import・reload で未保存内容が消える場合は、`api.createModal()` で保存 guard を実装する。
+- 保存 / 削除 action は、選択中アセットのリスト項目右端に置く。プロパティフォーム末尾だけに置かない。
+- 繰り返し UI は各行に同じ label を置かず、ヘッダー行 + テーブル型にする。Animation Rows では `ROW / 有効 / 既定 time / 状態` のような列にする。
+- 再生・停止・先頭・末尾・loop は icon button を使う。周辺文脈で意味が明確な select label は `1 (4 frames)` のように簡潔にする。
+- SPRITE は画像ファイルではなく RESCOMP 定義として preview する。`imageSmoothingEnabled = false`、`time=0` 停止、ROW ごとの有効フレーム数、time 数字 overlay、collision overlay を反映する。

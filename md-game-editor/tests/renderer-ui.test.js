@@ -215,6 +215,12 @@ test('sidebar context menu toggles installed tab plugins', () => {
   assert.match(renderer, /plugin\?\.tab && plugin\?\.hasRenderer && getPluginRendererPageId\(plugin\)/);
   assert.match(renderer, /function getSidebarTogglePlugins\(\)/);
   assert.match(renderer, /\.filter\(\(plugin\) => isSidebarTogglePlugin\(plugin\)\)/);
+  assert.match(renderer, /function isDedicatedBuilderEditorPlugin\(plugin\)/);
+  assert.match(renderer, /pluginSupportsRole\(candidate,\s*'builder'\)/);
+  assert.match(renderer, /pluginHasDependency\(plugin,\s*candidate\.id\)/);
+  assert.match(renderer, /pluginHasDependency\(candidate,\s*plugin\.id\)/);
+  assert.match(renderer, /function getSidebarContextMenuPlugins\(\)/);
+  assert.match(renderer, /const plugins = getSidebarContextMenuPlugins\(\)/);
   assert.match(renderer, /function openSidebarPluginContextMenu\(event\)/);
   assert.match(renderer, /el\.sidebar\?\.addEventListener\('contextmenu',\s*openSidebarPluginContextMenu\)/);
   assert.match(renderer, /data-sidebar-plugin-toggle/);
@@ -280,8 +286,10 @@ test('test play rebuilds before opening so ROM header matches project settings',
   const renderer = readRendererFile('renderer.js');
 
   assert.match(renderer, /async function openTestPlay\(\)/);
-  assert.match(renderer, /Test Play 前にビルドします/);
-  assert.match(renderer, /const buildResult = await runBuild\(\)/);
+  assert.match(renderer, /Test Play 前に差分ビルドします/);
+  assert.match(renderer, /const buildResult = await runBuild\(\{\s*skipClean:\s*true\s*\}\)/);
+  assert.match(renderer, /window\.electronAPI\.runBuild\(\{\s*skipClean:\s*Boolean\(opts\.skipClean\),\s*\}\)/);
+  assert.match(renderer, /return runBuild\(\{\s*\.\.\.opts,\s*_generatedByPlugin:\s*builderPluginId\s*\}\)/);
   assert.match(renderer, /if \(!buildResult\?\.success\)/);
   assert.match(renderer, /const romPath = buildResult\.romPath \|\| state\.lastRomPath/);
 });

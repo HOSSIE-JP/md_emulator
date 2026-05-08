@@ -198,12 +198,13 @@ test('tilemap-editor renderer exposes resource-driven layout and wheel zoom', ()
   assert.match(rendererSource, /function resizeColumns\(event\)/);
   assert.match(rendererSource, /data-ui="inactiveOpacity"/);
   assert.match(rendererSource, /state\.inactiveLayerOpacity/);
-  assert.match(rendererSource, /<h2>Layers<\/h2>[\s\S]*レイヤ透明度[\s\S]*data-ui="inactiveOpacity"/);
+  assert.match(rendererSource, /<span class="tilemap-accordion-title">Layers<\/span>[\s\S]*レイヤ透明度[\s\S]*data-ui="inactiveOpacity"/);
   assert.doesNotMatch(rendererSource, /data-ui="collisionToggle"/);
   assert.doesNotMatch(rendererSource, /showCollision/);
   assert.match(rendererSource, /data-toggle-right-section="tiles"/);
   assert.match(rendererSource, /data-toggle-right-section="palette"/);
   assert.match(rendererSource, /data-toggle-right-section="layers"/);
+  assert.match(rendererSource, /class="tilemap-accordion-header"[\s\S]*<svg class="icon tilemap-accordion-chevron"/);
   assert.match(rendererSource, /function syncRightAccordion\(\)/);
   assert.match(rendererSource, /data-action="add-collision-layer"/);
   assert.match(rendererSource, /data-ui="collisionPalette"/);

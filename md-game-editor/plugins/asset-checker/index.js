@@ -151,6 +151,14 @@ function parseTsxTileCount(text) {
   return Number.parseInt(attrs.tilecount, 10) || 0;
 }
 
+function isPriorityLayerId(value) {
+  return /(?:^|\s)(priority|prio)$/i.test(String(value || '').trim());
+}
+
+function priorityBaseLayerId(value) {
+  return String(value || '').trim().replace(/\s+(priority|prio)$/i, '');
+}
+
 function headerForResFile(value) {
   const normalized = String(value || 'resources.res').replace(/\\/g, '/');
   const base = path.basename(normalized).replace(/\.[^.]*$/, '');
@@ -337,11 +345,51 @@ function renderMapDefinitionArray(mapList) {
   return `{ ${values.join(', ')} }`;
 }
 
+function findSiblingMapLayer(asset, tilemaps, layerId) {
+  const source = normalizeAssetPath(asset?.sourcePath);
+  const layer = String(layerId || '');
+  if (!source || !layer) return null;
+  return (tilemaps || []).find((candidate) => (
+    candidate !== asset
+    && candidate.type === 'MAP'
+    && normalizeAssetPath(candidate.sourcePath) === source
+    && String(candidate.tileset || '') === layer
+  )) || null;
+}
+
+function findPrioritySibling(asset, tilemaps) {
+  if (!asset || asset.type !== 'MAP' || !asset.tileset || isPriorityLayerId(asset.tileset)) return null;
+  return (tilemaps || []).find((candidate) => (
+    candidate !== asset
+    && candidate.type === 'MAP'
+    && normalizeAssetPath(candidate.sourcePath) === normalizeAssetPath(asset.sourcePath)
+    && isPriorityLayerId(candidate.tileset)
+    && priorityBaseLayerId(candidate.tileset) === String(asset.tileset || '')
+  )) || null;
+}
+
+function mapPreviewPairForAsset(asset, tilemaps) {
+  if (!asset || asset.type !== 'MAP') {
+    return { mapPointer: asset?.type === 'MAP' ? `&${asset.name}` : 'NULL', definitions: [], priorityDefinitions: [] };
+  }
+  if (isPriorityLayerId(asset.tileset)) {
+    const baseLayer = priorityBaseLayerId(asset.tileset);
+    const base = findSiblingMapLayer(asset, tilemaps, baseLayer);
+    if (base) return { mapPointer: 'NULL', definitions: [base], priorityDefinitions: [asset] };
+    return { mapPointer: `&${asset.name}`, definitions: [], priorityDefinitions: [] };
+  }
+  const priority = findPrioritySibling(asset, tilemaps);
+  if (priority) return { mapPointer: 'NULL', definitions: [asset], priorityDefinitions: [priority] };
+  return { mapPointer: `&${asset.name}`, definitions: [], priorityDefinitions: [] };
+}
+
 function renderTilemapData(tilemaps, tilesets, palettes, context = {}) {
   const layerData = [];
   const rendered = (tilemaps || []).map((asset) => {
     const tmxText = getTilemapSourceText(asset, context);
-    const assetTilesets = findTilesetsForTilemap(asset, tilesets, context);
+    const previewPair = mapPreviewPairForAsset(asset, tilemaps);
+    const tilesetSourceAsset = previewPair.definitions[0] || asset;
+    const assetTilesets = findTilesetsForTilemap(tilesetSourceAsset, tilesets, context);
     const assetPalettes = findPalettesForTilesets(assetTilesets || [], palettes);
     const paletteSlots = paletteSlotsForTilesets(assetTilesets || [], assetPalettes, palettes);
     const sourceSize = asset.type === 'MAP' ? parseTmxMapTileSize(tmxText) : { width: 0, height: 0 };
@@ -354,11 +402,12 @@ function renderTilemapData(tilemaps, tilesets, palettes, context = {}) {
     const paletteCount = Math.min(assetPalettes.length, 3);
     const kind = asset.type === 'MAP' ? 'TILEMAP_KIND_MAP' : 'TILEMAP_KIND_TILEMAP';
     const tilemapPointer = asset.type === 'TILEMAP' ? `&${asset.name}` : 'NULL';
-    const mapPointer = asset.type === 'MAP' ? `&${asset.name}` : 'NULL';
-    const mapDefinitionArray = renderMapDefinitionArray([]);
-    const priorityDefinitionArray = renderMapDefinitionArray([]);
+    const mapPointer = asset.type === 'MAP' ? previewPair.mapPointer : 'NULL';
+    const mapDefinitionArray = renderMapDefinitionArray(previewPair.definitions);
+    const priorityDefinitionArray = renderMapDefinitionArray(previewPair.priorityDefinitions);
+    const mapDefinitionCount = Math.min(previewPair.definitions.length, 8);
     const note = `${asset.name} (${asset.type}${tilesetCount ? '' : ' no tileset'})`;
-    return `    { "${escapeCString(note)}", ${kind}, ${tilemapPointer}, ${mapPointer}, ${mapDefinitionArray}, ${priorityDefinitionArray}, 0, ${previewLayer}, ${tilesetArray}, ${tileOffsetArray}, ${paletteSlotArray}, ${tilesetCount}, ${paletteArray}, ${paletteCount}, ${sourceSize.width}, ${sourceSize.height} }`;
+    return `    { "${escapeCString(note)}", ${kind}, ${tilemapPointer}, ${mapPointer}, ${mapDefinitionArray}, ${priorityDefinitionArray}, ${mapDefinitionCount}, ${previewLayer}, ${tilesetArray}, ${tileOffsetArray}, ${paletteSlotArray}, ${tilesetCount}, ${paletteArray}, ${paletteCount}, ${sourceSize.width}, ${sourceSize.height} }`;
   });
   const entries = rendered.length
     ? rendered.join(',\n')

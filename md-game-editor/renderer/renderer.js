@@ -1208,6 +1208,27 @@ function isSidebarTogglePlugin(plugin) {
   return Boolean(plugin?.tab && plugin?.hasRenderer && getPluginRendererPageId(plugin));
 }
 
+function pluginHasDependency(plugin, dependencyId) {
+  const id = String(dependencyId || '').trim();
+  if (!id) return false;
+  return Array.isArray(plugin?.dependencies) && plugin.dependencies.includes(id);
+}
+
+function isDedicatedBuilderEditorPlugin(plugin) {
+  if (!isSidebarTogglePlugin(plugin) || pluginSupportsRole(plugin, 'builder')) return false;
+  return pluginState.plugins.some((candidate) => (
+    candidate?.id
+    && candidate.id !== plugin.id
+    && pluginSupportsRole(candidate, 'builder')
+    && pluginHasDependency(plugin, candidate.id)
+    && pluginHasDependency(candidate, plugin.id)
+  ));
+}
+
+function isSidebarContextMenuPlugin(plugin) {
+  return isSidebarTogglePlugin(plugin) && !isDedicatedBuilderEditorPlugin(plugin);
+}
+
 function getSidebarTogglePlugins() {
   return pluginState.plugins
     .filter((plugin) => isSidebarTogglePlugin(plugin))
@@ -1217,6 +1238,11 @@ function getSidebarTogglePlugins() {
       if (orderA !== orderB) return orderA - orderB;
       return String(a?.tab?.label || a?.name || a?.id || '').localeCompare(String(b?.tab?.label || b?.name || b?.id || ''), 'ja');
     });
+}
+
+function getSidebarContextMenuPlugins() {
+  return getSidebarTogglePlugins()
+    .filter((plugin) => isSidebarContextMenuPlugin(plugin));
 }
 
 function normalizeSidebarPluginOrder() {
@@ -1345,7 +1371,7 @@ function positionSidebarPluginContextMenu(menu, clientX, clientY) {
 
 function renderSidebarPluginContextMenuContent() {
   const menu = ensureSidebarPluginContextMenu();
-  const plugins = getSidebarTogglePlugins();
+  const plugins = getSidebarContextMenuPlugins();
   if (plugins.length === 0) {
     menu.innerHTML = `
       <div class="sidebar-plugin-menu-title">サイドパネル</div>
@@ -3151,6 +3177,7 @@ async function persistProjectSettings(config, { showMessage = false } = {}) {
 /**
  * @param {object} [opts]
  * @param {string} [opts._generatedByPlugin] - このプラグイン ID が既に main.c を書き込み済み
+ * @param {boolean} [opts.skipClean] - clean ターゲットを省略して差分ビルドする
  */
 async function runBuild(opts = {}) {
   if (state.building) return { success: false, error: 'building' };
@@ -3174,7 +3201,7 @@ async function runBuild(opts = {}) {
       return { success: false, error: genResult.error || 'プラグイン生成失敗' };
     }
     appendBuildLog(`[Plugin] ${builderPluginId}: main.c を生成しました`);
-    return runBuild({ _generatedByPlugin: builderPluginId });
+    return runBuild({ ...opts, _generatedByPlugin: builderPluginId });
   }
 
   // ---- プラグイン生成済みでない通常ビルド: 現在のコードファイルを保存 ----
@@ -3231,7 +3258,9 @@ async function runBuild(opts = {}) {
     }
     appendBuildLog(`[INFO] プロジェクト生成: ${genResult.projectDir}`);
 
-    const buildResult = await window.electronAPI.runBuild();
+    const buildResult = await window.electronAPI.runBuild({
+      skipClean: Boolean(opts.skipClean),
+    });
 
     if (buildResult.success) {
       state.lastRomPath = buildResult.romPath;
@@ -3269,8 +3298,8 @@ async function openTestPlay() {
     return;
   }
   appendLog('emulator', 'テストプレイ起動を開始します');
-  appendLog('emulator', '最新のプロジェクト設定を ROM ヘッダーへ反映するため、Test Play 前にビルドします');
-  const buildResult = await runBuild();
+  appendLog('emulator', '最新のプロジェクト設定を ROM ヘッダーへ反映するため、Test Play 前に差分ビルドします');
+  const buildResult = await runBuild({ skipClean: true });
   if (!buildResult?.success) {
     appendLog('emulator', `テストプレイを中止しました: ${buildResult?.error || 'ビルド失敗'}`, 'warn');
     return;

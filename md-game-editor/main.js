@@ -1760,7 +1760,7 @@ ipcMain.handle('build:generateStructureOnly', async (_event, config) => {
 
 // ── ビルド共通ロジック ──────────────────────────────────────────────────────
 
-async function runBuildFull() {
+async function runBuildFull(options = {}) {
   try {
     const toolchainPath = setupManager.getToolchainDir();
     const javaPath = setupManager.getJavaExePath();
@@ -1785,7 +1785,9 @@ async function runBuildFull() {
       assets: collectProjectAssets(projectDir),
     };
 
-    const buildOptions = {};
+    const buildOptions = {
+      skipClean: Boolean(options?.skipClean),
+    };
     if (builderPluginId) {
       const buildStartResult = await invokePluginHookSafe(builderPluginId, 'onBuildStart', {
         projectDir,
@@ -2355,8 +2357,10 @@ async function handleExportHtml() {
   return { ok: true, path: saveResult.filePath };
 }
 
-ipcMain.handle('build:run', async () => {
-  return runBuildFull();
+ipcMain.handle('build:run', async (_event, options = {}) => {
+  return runBuildFull({
+    skipClean: Boolean(options?.skipClean),
+  });
 });
 
 ipcMain.handle('export:rom', async () => {

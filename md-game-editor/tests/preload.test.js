@@ -40,6 +40,7 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   await api.deleteResFile('resources.res');
   await api.setPluginRole('builder', 'slideshow');
   await api.saveProjectConfig({ title: 'Saved' });
+  await api.runBuild({ skipClean: true });
   await api.getPluginRendererAssets('asset-manager');
   await api.invokePluginHook('audio-converter', 'convertAudio', { sourcePath: 'in.wav' });
   await api.loadOptionalAudioEngine('nuked-opn2');
@@ -67,6 +68,10 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.deepEqual(invocations.find((entry) => entry.channel === 'build:saveProjectConfig'), {
     channel: 'build:saveProjectConfig',
     args: [{ title: 'Saved' }],
+  });
+  assert.deepEqual(invocations.find((entry) => entry.channel === 'build:run'), {
+    channel: 'build:run',
+    args: [{ skipClean: true }],
   });
   assert.deepEqual(invocations.find((entry) => entry.channel === 'setup:loadOptionalAudioEngine'), {
     channel: 'setup:loadOptionalAudioEngine',

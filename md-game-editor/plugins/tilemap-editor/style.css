@@ -111,25 +111,65 @@
   margin-right: auto;
 }
 
-.tilemap-accordion-button {
-  font-size: 12px;
-  line-height: 1;
-}
-
-.tilemap-palette-header {
+.tilemap-accordion-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px;
+  gap: 8px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
+  background: var(--panel);
 }
 
-.tilemap-palette-header .tilemap-section-title {
-  margin-right: 0;
+.tilemap-accordion-header {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 4px 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.tilemap-accordion-header:hover {
+  color: var(--accent);
+}
+
+.tilemap-accordion-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tilemap-accordion-chevron {
+  flex: 0 0 auto;
+  color: var(--muted);
+  transition: transform 0.18s ease;
+}
+
+.tilemap-accordion-header[aria-expanded="false"] .tilemap-accordion-chevron {
+  transform: rotate(180deg);
+}
+
+.tilemap-accordion-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 
 .tilemap-palette-header .tilemap-zoom {
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .tilemap-layer-opacity input {

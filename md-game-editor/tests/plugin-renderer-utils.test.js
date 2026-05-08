@@ -257,6 +257,8 @@ test('sprite-editor declares plugin-local page and uses v2.4 capabilities', () =
   assert.match(rendererSource, /min="0\.25" max="12" step="0\.25"/);
   assert.match(rendererSource, /selectFrameFromSheet/);
   assert.match(rendererSource, /data-role="row-list"/);
+  assert.match(rendererSource, /class="sprite-editor-row-header"[\s\S]*<span>ROW<\/span>[\s\S]*<span>有効<\/span>[\s\S]*<span>既定 time<\/span>/);
+  assert.doesNotMatch(rendererSource, /<label class="sprite-editor-inline-field">有効[\s\S]*data-row-frame-count/);
   assert.match(rendererSource, /resizeSpriteTimeRow/);
   assert.match(rendererSource, /function applyRowDefaultTime\(input,\s*options = \{\}\)/);
   assert.match(rendererSource, /ui\.time\.value = nextTime/);
@@ -290,6 +292,10 @@ test('sprite-editor declares plugin-local page and uses v2.4 capabilities', () =
   assert.match(styleSource, /--sprite-right-width/);
   assert.match(styleSource, /grid-template-rows:\s*minmax\(0,\s*0\.9fr\)\s*6px\s*minmax\(0,\s*1\.1fr\)/);
   assert.match(styleSource, /\.sprite-editor-animation-rows\s*\{[\s\S]*max-height:\s*min\(220px,\s*38%\)/);
+  assert.match(styleSource, /\.sprite-editor-row-header,\s*[\s\S]*\.sprite-editor-row-config\s*\{/);
+  assert.match(styleSource, /\.sprite-editor-row-config\s*\{[\s\S]*min-height:\s*32px;/);
+  assert.match(styleSource, /\.sprite-editor-props\s*\{[\s\S]*padding:\s*0;/);
+  assert.match(styleSource, /\.sprite-editor-form-grid\s*\{[\s\S]*padding:\s*10px;/);
   assert.doesNotMatch(rendererSource, /window\.prompt|window\.alert|window\.confirm/);
 });
 

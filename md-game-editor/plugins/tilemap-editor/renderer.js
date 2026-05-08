@@ -2519,7 +2519,6 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       if (body) body.hidden = !open;
       const button = section?.querySelector(`[data-toggle-right-section="${name}"]`);
       if (button) {
-        button.textContent = open ? '▾' : '▸';
         button.setAttribute('aria-expanded', String(open));
       }
     });
@@ -2778,10 +2777,14 @@ function buildShell() {
       <div class="tilemap-column-resizer" data-ui="rightColumnResizer" role="separator" aria-orientation="vertical" title="右列の幅を調整"></div>
       <aside class="tilemap-right">
         <section class="tilemap-right-section tilemap-tileset-browser">
-          <div class="tilemap-toolbar">
-            <h2>Tiles</h2>
-            <button class="icon-btn icon-btn-xs tilemap-accordion-button" type="button" data-toggle-right-section="tiles" title="Tiles を開閉" aria-expanded="true">▾</button>
-            <button class="icon-btn" type="button" data-action="tileset-add" title="TILESETを登録"><svg class="icon"><use href="#icon-file-plus"></use></svg></button>
+          <div class="tilemap-accordion-head">
+            <button class="tilemap-accordion-header" type="button" data-toggle-right-section="tiles" title="Tiles を開閉" aria-expanded="true">
+              <span class="tilemap-accordion-title">Tiles</span>
+              <svg class="icon tilemap-accordion-chevron"><use href="#icon-chevron-up"></use></svg>
+            </button>
+            <div class="tilemap-accordion-actions">
+              <button class="icon-btn" type="button" data-action="tileset-add" title="TILESETを登録"><svg class="icon"><use href="#icon-file-plus"></use></svg></button>
+            </div>
           </div>
           <div class="tilemap-section-body" data-ui="tilesetBrowserBody">
             <div class="tilemap-filter">
@@ -2793,10 +2796,14 @@ function buildShell() {
         </section>
         <div class="tilemap-panel-resizer" data-ui="paletteTopResizer" role="separator" aria-orientation="horizontal" title="Tiles / Tile Palette の境界をドラッグ"></div>
         <section class="tilemap-right-section tilemap-palette-section">
-          <div class="tilemap-palette-header">
-            <div class="tilemap-section-title">Tile Palette</div>
-            <button class="icon-btn icon-btn-xs tilemap-accordion-button" type="button" data-toggle-right-section="palette" title="Tile Palette を開閉" aria-expanded="true">▾</button>
-            <label class="tilemap-zoom">Zoom <input type="range" min="0.5" max="8" step="0.25" value="2" data-ui="paletteZoom"></label>
+          <div class="tilemap-accordion-head tilemap-palette-header">
+            <button class="tilemap-accordion-header" type="button" data-toggle-right-section="palette" title="Tile Palette を開閉" aria-expanded="true">
+              <span class="tilemap-accordion-title">Tile Palette</span>
+              <svg class="icon tilemap-accordion-chevron"><use href="#icon-chevron-up"></use></svg>
+            </button>
+            <div class="tilemap-accordion-actions">
+              <label class="tilemap-zoom">Zoom <input type="range" min="0.5" max="8" step="0.25" value="2" data-ui="paletteZoom"></label>
+            </div>
           </div>
           <div class="tilemap-section-body" data-ui="paletteBody">
             <div class="tilemap-brush-info" data-ui="brushInfo">1 x 1 / gid 1</div>
@@ -2806,15 +2813,19 @@ function buildShell() {
         </section>
         <div class="tilemap-panel-resizer" data-ui="rightPanelResizer" role="separator" aria-orientation="horizontal" title="Tile Palette / Layers の境界をドラッグ"></div>
         <section class="tilemap-right-section tilemap-layer-section">
-          <div class="tilemap-toolbar">
-            <h2>Layers</h2>
-            <button class="icon-btn icon-btn-xs tilemap-accordion-button" type="button" data-toggle-right-section="layers" title="Layers を開閉" aria-expanded="true">▾</button>
-            <button class="icon-btn" type="button" data-action="add-layer" title="Layer 追加"><svg class="icon"><use href="#icon-add"></use></svg></button>
-            <button class="icon-btn" type="button" data-action="add-priority-layer" title="Priority layer 追加"><svg class="icon"><use href="#icon-grid"></use></svg></button>
-            <button class="icon-btn" type="button" data-action="add-collision-layer" title="Collision layer 追加"><svg class="icon"><use href="#icon-square"></use></svg></button>
-            <button class="icon-btn" type="button" data-action="layer-up" title="上へ"><svg class="icon"><use href="#icon-chevron-up"></use></svg></button>
-            <button class="icon-btn" type="button" data-action="layer-down" title="下へ"><svg class="icon"><use href="#icon-chevron-down"></use></svg></button>
-            <button class="icon-btn danger-icon-btn" type="button" data-action="delete-layer" title="Layer削除"><svg class="icon"><use href="#icon-trash"></use></svg></button>
+          <div class="tilemap-accordion-head">
+            <button class="tilemap-accordion-header" type="button" data-toggle-right-section="layers" title="Layers を開閉" aria-expanded="true">
+              <span class="tilemap-accordion-title">Layers</span>
+              <svg class="icon tilemap-accordion-chevron"><use href="#icon-chevron-up"></use></svg>
+            </button>
+            <div class="tilemap-accordion-actions">
+              <button class="icon-btn" type="button" data-action="add-layer" title="Layer 追加"><svg class="icon"><use href="#icon-add"></use></svg></button>
+              <button class="icon-btn" type="button" data-action="add-priority-layer" title="Priority layer 追加"><svg class="icon"><use href="#icon-grid"></use></svg></button>
+              <button class="icon-btn" type="button" data-action="add-collision-layer" title="Collision layer 追加"><svg class="icon"><use href="#icon-square"></use></svg></button>
+              <button class="icon-btn" type="button" data-action="layer-up" title="上へ"><svg class="icon"><use href="#icon-chevron-up"></use></svg></button>
+              <button class="icon-btn" type="button" data-action="layer-down" title="下へ"><svg class="icon"><use href="#icon-chevron-down"></use></svg></button>
+              <button class="icon-btn danger-icon-btn" type="button" data-action="delete-layer" title="Layer削除"><svg class="icon"><use href="#icon-trash"></use></svg></button>
+            </div>
           </div>
           <div class="tilemap-layer-controls">
             <label class="tilemap-zoom tilemap-layer-opacity" title="選択していない layer の透明度">レイヤ透明度 <input type="range" min="0.1" max="1" step="0.05" value="0.45" data-ui="inactiveOpacity"></label>

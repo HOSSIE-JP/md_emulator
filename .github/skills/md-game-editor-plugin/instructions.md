@@ -137,6 +137,8 @@ Build / Test Play など単一選択 plugin は `roles` で宣言し、project.j
 3. UI、modal、preview、converter 連携は plugin の `renderer.js` で実装し、本体 HTML / renderer / main / preload へ個別追記しない
 4. main process の処理が必要な場合は `hooks` と `mainApi.hooks` に同じ hook 名を宣言し、renderer から `api.plugins.invokeHook()` で呼ぶ
 5. asset 登録拡張は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として提供する
+6. アセット参照を持つ editor plugin は、画面表示時または sidebar 再アクティブ時に `.res` / source data を再読込し、一覧・select・preview を最新化する
+7. 未保存変更がある状態で別アセット選択・新規追加・import を行う場合は、保存 / 破棄 / キャンセルを選べる plugin-owned modal を出す
 
 ### Step 4: 配置場所を案内する
 
@@ -224,6 +226,18 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 
 ---
 
+## Editor UI / preview ノウハウ
+
+- editor plugin の `root` は `.editor-page` なので `display` を直接指定しない。ページ内 wrapper に grid / flex を指定する。
+- アセット編集画面は、左に一覧、中央に preview / editor、右に property form の 3 列を基本とする。左右列や中央上下 preview は resizer / splitter で調整可能にする。
+- pane header / toolbar は端まで通し、padding はフォームや空状態メッセージ側に持たせる。pane 自体に padding を入れると特定列のヘッダーだけ内側へずれる。
+- 保存 / 削除 action は選択中アセットのリスト項目右端に置き、未保存状態もリスト上で分かるようにする。
+- 繰り返し UI は各行に同じ label を置かず、ヘッダー行 + テーブル型にする。Animation Rows では `ROW / 有効 / 既定 time / 状態` のような列にする。
+- 再生・停止・先頭・末尾・loop は icon button を使う。select の表示は `1 (4 frames)` のように、周辺文脈と重複しない短い表記にする。
+- SPRITE preview はスプライトシート全体ではなく、RESCOMP 定義の frame size / ROW animation / time / collision を反映する。`time=0` は SGDK に合わせて再生停止として扱い、canvas では `imageSmoothingEnabled = false` を指定する。
+
+---
+
 ## フック早見表
 
 | フック | 呼ばれるタイミング | payload の主要フィールド |
@@ -277,4 +291,4 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 
 ---
 
-*Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.4 / AI Control API / TileMap collision*
+*Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.4 / AI Control API / TileMap collision / Editor UX guardrails*

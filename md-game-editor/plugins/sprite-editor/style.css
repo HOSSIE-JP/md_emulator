@@ -255,9 +255,10 @@
 
 .sprite-editor-row-list {
   display: grid;
-  gap: 6px;
+  gap: 2px;
 }
 
+.sprite-editor-row-header,
 .sprite-editor-row-config {
   display: grid;
   grid-template-columns: 74px minmax(104px, 128px) minmax(118px, 148px) 1fr;
@@ -265,22 +266,42 @@
   align-items: center;
 }
 
+.sprite-editor-row-header {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 4px 2px;
+}
+
 .sprite-editor-row-config.is-selected {
   background: rgba(74, 163, 255, 0.08);
   border-radius: 6px;
-  padding: 4px;
-  margin: -4px;
+}
+
+.sprite-editor-row-config {
+  min-height: 32px;
+  padding: 2px 4px;
+}
+
+.sprite-editor-row-config .sprite-editor-input {
+  padding: 5px 8px;
 }
 
 .sprite-editor-props {
   overflow: auto;
-  padding: 12px;
-  gap: 10px;
+  padding: 0;
 }
 
 .sprite-editor-form-grid {
   display: grid;
   gap: 10px;
+  padding: 10px;
+}
+
+.sprite-editor-props .sprite-editor-empty,
+.sprite-editor-props .sprite-editor-status {
+  margin: 0;
+  padding: 10px;
 }
 
 .sprite-editor-row {
