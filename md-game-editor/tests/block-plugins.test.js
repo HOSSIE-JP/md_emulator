@@ -101,6 +101,12 @@ test('block-stage-editor exposes stage reorder controls', () => {
   assert.match(rendererSource, /updateMoveStageButtons/);
 });
 
+test('block-stage-editor allows up to 99 initial lives in settings UI', () => {
+  const rendererSource = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'block-stage-editor', 'renderer.js'), 'utf8');
+
+  assert.match(rendererSource, /data-setting="initial_lives"[^>]+max="99"/);
+});
+
 test('block-game-builder declares builder role and stage-editor dependency', () => {
   const userData = makeTempDir('md-editor-block-builder-plugin-test-');
   const pluginManager = loadWithMockedElectron(path.join(__dirname, '..', 'plugin-manager.js'), { userData });
@@ -350,7 +356,7 @@ test('block-stage-editor saves game-wide asset bindings and parameters', () => {
       game_settings: {
         ball_speed: 5,
         paddle_speed: 4,
-        initial_lives: 9,
+        initial_lives: 99,
         bgm_volume: 35,
         system_font_symbol: 'font_system',
         screen_wait_seconds: {
@@ -391,7 +397,7 @@ test('block-stage-editor saves game-wide asset bindings and parameters', () => {
   assert.match(gameResources, /#define RES_SYSTEM_FONT_PALETTE font_system_palette/);
   assert.match(gameResources, /#define BALL_BASE_SPEED FIX16\(5\)/);
   assert.match(gameResources, /#define PADDLE_SPEED FIX16\(4\)/);
-  assert.match(gameResources, /#define INITIAL_LIVES 9/);
+  assert.match(gameResources, /#define INITIAL_LIVES 99/);
   assert.match(gameResources, /#define BGM_VOLUME 35/);
   assert.match(gameResources, /#define RES_BGM_TITLE_SCREEN bgm_title/);
   assert.match(gameResources, /#define RES_BGM_TITLE_SCREEN_HALF_RATE FALSE/);

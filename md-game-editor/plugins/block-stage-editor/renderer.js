@@ -132,7 +132,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       <div class="bse-settings-panel">
         <label class="bse-range">ボール速度<input data-setting="ball_speed" type="range" min="1" max="5" step="1"><output></output></label>
         <label class="bse-range">パドル速度<input data-setting="paddle_speed" type="range" min="1" max="5" step="1"><output></output></label>
-        <label class="bse-range">初期残機数<input data-setting="initial_lives" type="range" min="1" max="9" step="1"><output></output></label>
+        <label class="bse-range">初期残機数<input data-setting="initial_lives" type="range" min="1" max="99" step="1"><output></output></label>
         <label class="bse-range">BGMボリューム<input data-setting="bgm_volume" type="range" min="0" max="100" step="5"><output></output></label>
         <div class="bse-settings-group">
           <label class="bse-field">タイトル画面BGM<select class="bse-screen-bgm-select" data-screen-bgm="title_screen"></select></label>

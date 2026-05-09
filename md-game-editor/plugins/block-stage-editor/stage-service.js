@@ -155,7 +155,7 @@ function normalizeSettings(settings = {}) {
     game_settings: {
       ball_speed: clampInt(game.ball_speed, 1, 5, DEFAULT_SETTINGS.game_settings.ball_speed),
       paddle_speed: clampInt(game.paddle_speed, 1, 5, DEFAULT_SETTINGS.game_settings.paddle_speed),
-      initial_lives: clampInt(game.initial_lives, 1, 9, DEFAULT_SETTINGS.game_settings.initial_lives),
+      initial_lives: clampInt(game.initial_lives, 1, 99, DEFAULT_SETTINGS.game_settings.initial_lives),
       bgm_volume: clampInt(game.bgm_volume, 0, 100, DEFAULT_SETTINGS.game_settings.bgm_volume),
       system_font_symbol: String(game.system_font_symbol || ''),
       screen_wait_seconds: screenWaitSeconds,
