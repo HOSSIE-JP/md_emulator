@@ -902,25 +902,18 @@ let screenRotation = 0; // 0 or 90 while fullscreen
 
 function applyStageRotation(rotation) {
   const stage = document.querySelector(".screen-stage");
-  if (!stage) return;
+  const rotator = document.querySelector(".screen-rotator");
+  if (!stage || !rotator) return;
 
   screenRotation = rotation;
   if (document.fullscreenElement === stage && rotation === 90) {
-    stage.style.position = "fixed";
-    stage.style.left = "50%";
-    stage.style.top = "50%";
-    stage.style.margin = "0";
-    stage.style.width = "100vh";
-    stage.style.height = "100vw";
-    stage.style.transform = "translate(-50%, -50%) rotate(90deg)";
+    rotator.style.width = "100vh";
+    rotator.style.height = "100vw";
+    rotator.style.transform = "translate(-50%, -50%) rotate(90deg)";
   } else {
-    stage.style.position = "";
-    stage.style.left = "";
-    stage.style.top = "";
-    stage.style.margin = "";
-    stage.style.width = "";
-    stage.style.height = "";
-    stage.style.transform = "";
+    rotator.style.width = "";
+    rotator.style.height = "";
+    rotator.style.transform = "";
   }
 }
 
@@ -1128,6 +1121,80 @@ document.querySelectorAll("[data-btn]").forEach((btn) => {
     event.preventDefault();
     up();
   }, { passive: false });
+});
+
+document.querySelectorAll("[data-stick='direction']").forEach((stick) => {
+  const thumb = stick.querySelector(".stick-thumb");
+  const stickDirections = new Set();
+  let activePointerId = null;
+
+  const setStickDirections = (nextDirections) => {
+    for (const direction of stickDirections) {
+      if (!nextDirections.has(direction)) touchPressed.delete(direction);
+    }
+    for (const direction of nextDirections) {
+      touchPressed.add(direction);
+    }
+    stickDirections.clear();
+    nextDirections.forEach((direction) => stickDirections.add(direction));
+    setButtons();
+  };
+
+  const resetStick = () => {
+    activePointerId = null;
+    setStickDirections(new Set());
+    stick.classList.remove("active");
+    if (thumb) thumb.style.transform = "translate(-50%, -50%)";
+  };
+
+  const updateStick = (event) => {
+    const rect = stick.getBoundingClientRect();
+    const radius = Math.max(1, Math.min(rect.width, rect.height) / 2);
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const rawX = event.clientX - centerX;
+    const rawY = event.clientY - centerY;
+    const threshold = radius * 0.16;
+    const inputX = screenRotation === 90 ? rawY : rawX;
+    const inputY = screenRotation === 90 ? -rawX : rawY;
+    const distance = Math.hypot(inputX, inputY);
+    const maxTravel = radius * 0.46;
+    const scale = distance > maxTravel ? maxTravel / distance : 1;
+    const x = inputX * scale;
+    const y = inputY * scale;
+    const nextDirections = new Set();
+
+    if (inputX < -threshold) nextDirections.add("left");
+    if (inputX > threshold) nextDirections.add("right");
+    if (inputY < -threshold) nextDirections.add("up");
+    if (inputY > threshold) nextDirections.add("down");
+
+    stick.classList.add("active");
+    if (thumb) thumb.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+    setStickDirections(nextDirections);
+  };
+
+  stick.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    activePointerId = event.pointerId;
+    stick.setPointerCapture?.(event.pointerId);
+    updateStick(event);
+  });
+  stick.addEventListener("pointermove", (event) => {
+    if (activePointerId !== event.pointerId) return;
+    event.preventDefault();
+    updateStick(event);
+  });
+  stick.addEventListener("pointerup", (event) => {
+    if (activePointerId !== event.pointerId) return;
+    event.preventDefault();
+    resetStick();
+  });
+  stick.addEventListener("pointercancel", (event) => {
+    if (activePointerId !== event.pointerId) return;
+    event.preventDefault();
+    resetStick();
+  });
 });
 
 setupDragAndDrop();

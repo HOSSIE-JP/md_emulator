@@ -2095,6 +2095,21 @@ function generateExportHtml({
     .screen-stage:fullscreen { width: 100vw; height: 100vh; border-radius: 0;
       max-height: none;
       display: flex; align-items: center; justify-content: center; }
+    .screen-rotator {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      transform-origin: center;
+      transition: transform 0.3s ease;
+    }
+    .screen-stage:fullscreen .screen-rotator {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 100vw;
+      height: 100vh;
+      transform: translate(-50%, -50%);
+    }
     canvas#screen { width: 100%; height: 100%; object-fit: contain;
       image-rendering: pixelated; display: block; }
     .controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -2125,12 +2140,55 @@ function generateExportHtml({
       opacity: 0.58;
     }
     .screen-stage:fullscreen .virtual-gamepad:active { opacity: 0.82; }
-    .dpad {
-      display: grid;
-      grid-template-columns: repeat(3, 46px);
-      grid-template-rows: repeat(3, 46px);
-      gap: 5px;
+    .analog-stick {
+      position: relative;
+      width: 132px;
+      height: 132px;
+      border-radius: 999px;
+      border: 1px solid rgba(235, 243, 255, 0.26);
+      background:
+        radial-gradient(circle at 50% 50%, rgba(54, 133, 210, 0.28), transparent 34%),
+        rgba(7, 15, 28, 0.52);
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.38);
       pointer-events: auto;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .analog-stick::before,
+    .analog-stick::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      background: rgba(235, 243, 255, 0.18);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    .analog-stick::before {
+      width: 70%;
+      height: 1px;
+    }
+    .analog-stick::after {
+      width: 1px;
+      height: 70%;
+    }
+    .stick-thumb {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 58px;
+      height: 58px;
+      border-radius: 999px;
+      border: 1px solid rgba(235, 243, 255, 0.34);
+      background: rgba(22, 55, 94, 0.9);
+      box-shadow: 0 7px 18px rgba(0, 0, 0, 0.42);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      transition: background 120ms ease;
+    }
+    .analog-stick.active .stick-thumb {
+      background: rgba(57, 130, 205, 0.96);
     }
     .face-buttons {
       display: grid;
@@ -2255,10 +2313,8 @@ function generateExportHtml({
     @media (max-width: 480px) {
       .info-grid { grid-template-columns: 1fr; }
       .controls button { flex: 1 1 auto; }
-      .dpad {
-        grid-template-columns: repeat(3, 40px);
-        grid-template-rows: repeat(3, 40px);
-      }
+      .analog-stick { width: 116px; height: 116px; }
+      .stick-thumb { width: 52px; height: 52px; }
       .face-buttons {
         grid-template-columns: repeat(3, 46px);
         grid-template-rows: 46px 26px;
@@ -2278,22 +2334,21 @@ function generateExportHtml({
   <main>
     <div id="dropZone">
       <div class="screen-stage">
-        <canvas id="screen" width="320" height="224"></canvas>
-        <div class="virtual-gamepad" aria-label="Virtual gamepad">
-          <div class="dpad" aria-label="Direction pad">
-            <button class="gamepad-btn up" data-btn="up" type="button" aria-label="Up">▲</button>
-            <button class="gamepad-btn left" data-btn="left" type="button" aria-label="Left">◀</button>
-            <button class="gamepad-btn right" data-btn="right" type="button" aria-label="Right">▶</button>
-            <button class="gamepad-btn down" data-btn="down" type="button" aria-label="Down">▼</button>
+        <div class="screen-rotator">
+          <canvas id="screen" width="320" height="224"></canvas>
+          <div class="virtual-gamepad" aria-label="Virtual gamepad">
+            <div class="analog-stick" data-stick="direction" role="application" aria-label="Analog direction stick">
+              <span class="stick-thumb" aria-hidden="true"></span>
+            </div>
+            <div class="face-buttons" aria-label="Action buttons">
+              <button class="gamepad-btn a" data-btn="a" type="button" aria-label="Button A">A</button>
+              <button class="gamepad-btn b" data-btn="b" type="button" aria-label="Button B">B</button>
+              <button class="gamepad-btn c" data-btn="c" type="button" aria-label="Button C">C</button>
+              <button class="gamepad-btn start" data-btn="start" type="button" aria-label="Start">START</button>
+            </div>
           </div>
-          <div class="face-buttons" aria-label="Action buttons">
-            <button class="gamepad-btn a" data-btn="a" type="button" aria-label="Button A">A</button>
-            <button class="gamepad-btn b" data-btn="b" type="button" aria-label="Button B">B</button>
-            <button class="gamepad-btn c" data-btn="c" type="button" aria-label="Button C">C</button>
-            <button class="gamepad-btn start" data-btn="start" type="button" aria-label="Start">START</button>
-          </div>
+          <button id="fsFullscreen" class="fs-stage-btn fs-fullscreen-btn" title="フルスクリーン解除" type="button">&#x26F6;</button>
         </div>
-        <button id="fsFullscreen" class="fs-stage-btn fs-fullscreen-btn" title="フルスクリーン解除" type="button">&#x26F6;</button>
       </div>
     </div>
     <div id="status">読み込み中...</div>
