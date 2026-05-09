@@ -188,6 +188,13 @@ test('startup selects the first sidebar plugin and project creation exposes temp
   assert.match(html, /id="projectParentDirInput"/);
   assert.match(html, /id="btnProjectParentDirBrowse"/);
   assert.match(html, /id="projectTemplateSelect"/);
+  assert.match(renderer, /const NEW_PROJECT_DEFAULT_CONFIG = \{[\s\S]*title:\s*'MY NEW GAME'[\s\S]*author:\s*'YOUR NAME'[\s\S]*serial:\s*'GM 00000000-00'/);
+  assert.match(renderer, /el\.projectTitleInput\.value = NEW_PROJECT_DEFAULT_CONFIG\.title/);
+  assert.match(renderer, /el\.projectAuthorInput\.value = NEW_PROJECT_DEFAULT_CONFIG\.author/);
+  assert.match(renderer, /el\.projectSerialInput\.value = NEW_PROJECT_DEFAULT_CONFIG\.serial/);
+  assert.doesNotMatch(renderer, /el\.projectTitleInput\.value = state\.projectConfig\.title/);
+  assert.doesNotMatch(renderer, /el\.projectAuthorInput\.value = state\.projectConfig\.author/);
+  assert.doesNotMatch(renderer, /el\.projectSerialInput\.value = state\.projectConfig\.serial/);
   assert.match(renderer, /function getFirstSidebarPluginPageId\(\)/);
   assert.match(renderer, /selectedDefaultSidebarPage:\s*false/);
   assert.match(renderer, /switchPage\(getFirstSidebarPluginPageId\(\)\s*\|\|\s*getFirstVisiblePageId\(\)\)/);

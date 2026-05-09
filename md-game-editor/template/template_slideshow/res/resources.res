@@ -8,4 +8,4 @@ IMAGE image007 gfx/image007.png NONE ALL 0
 IMAGE image008 gfx/image008.png NONE ALL 0
 IMAGE image009 gfx/image009.png NONE ALL 0
 IMAGE image010 gfx/image010.png NONE ALL 0
-WAV bgm sfx/bgm.wav XGM2 TRUE TRUE
+WAV bgm sfx/bgm.wav XGM2 TRUE

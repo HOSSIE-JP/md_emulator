@@ -141,6 +141,11 @@ const WAV_OUT_RATE_DEFAULT_BY_DRIVER = {
   PCM: '16000',
   XGM2: '13300',
 };
+const NEW_PROJECT_DEFAULT_CONFIG = {
+  title: 'MY NEW GAME',
+  author: 'YOUR NAME',
+  serial: 'GM 00000000-00',
+};
 const FORM_FIELDS_BY_TYPE = {
   PALETTE: [
     { key: 'name', label: 'シンボル名', type: 'text' },
@@ -7513,9 +7518,9 @@ function openProjectModal() {
     el.projectParentDirInput.title = state.project.newProjectParentDir || '';
   }
   if (el.projectSystemNameInput) el.projectSystemNameInput.value = 'my_md_game';
-  if (el.projectTitleInput) el.projectTitleInput.value = state.projectConfig.title || 'MY GAME';
-  if (el.projectAuthorInput) el.projectAuthorInput.value = state.projectConfig.author || 'AUTHOR';
-  if (el.projectSerialInput) el.projectSerialInput.value = state.projectConfig.serial || 'GM 00000000-00';
+  if (el.projectTitleInput) el.projectTitleInput.value = NEW_PROJECT_DEFAULT_CONFIG.title;
+  if (el.projectAuthorInput) el.projectAuthorInput.value = NEW_PROJECT_DEFAULT_CONFIG.author;
+  if (el.projectSerialInput) el.projectSerialInput.value = NEW_PROJECT_DEFAULT_CONFIG.serial;
   populateProjectTemplateSelect();
   openModal(el.projectModal);
 }
@@ -7581,9 +7586,9 @@ async function submitProjectModal() {
     parentDir: el.projectParentDirInput?.value.trim() || state.project.projectsRootDir || '',
     templateId: String(el.projectTemplateSelect?.value || '').trim(),
     config: {
-      title: el.projectTitleInput?.value.trim() || 'MY GAME',
-      author: el.projectAuthorInput?.value.trim() || 'AUTHOR',
-      serial: (el.projectSerialInput?.value.trim() || 'GM 00000000-00').toUpperCase(),
+      title: el.projectTitleInput?.value.trim() || NEW_PROJECT_DEFAULT_CONFIG.title,
+      author: el.projectAuthorInput?.value.trim() || NEW_PROJECT_DEFAULT_CONFIG.author,
+      serial: (el.projectSerialInput?.value.trim() || NEW_PROJECT_DEFAULT_CONFIG.serial).toUpperCase(),
       region: 'JUE',
     },
   };

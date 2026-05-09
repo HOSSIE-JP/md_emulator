@@ -58,9 +58,9 @@ int main(bool hardReset)
     VDP_setScreenWidth320();
     PAL_setColors(0, (u16*)palette_black, 64, CPU);
 
-      XGM2_loadDriver(TRUE);
+    XGM2_loadDriver(TRUE);
 
-      /* BGM: XGM2 PCM ループ再生 */
+    /* BGM: XGM2 PCM ループ再生 */
     XGM2_playPCMEx(bgm, sizeof(bgm), SOUND_PCM_CH1, 15, FALSE, TRUE);
 
     /* 最初のスライドを描画してフェードイン */
