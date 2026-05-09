@@ -78,13 +78,17 @@
         position: relative;
         width: 100%;
         aspect-ratio: 320 / 224;
+        background: #000;
+        overflow: hidden;
         max-height: 72vh;
         margin: 0 auto;
+        transform-origin: center;
         transition: transform 0.3s ease;
       }
       .screen-stage:fullscreen {
         width: 100vw;
         height: 100vh;
+        max-height: none;
         background: #000;
         display: flex;
         align-items: center;
@@ -195,6 +199,32 @@
         padding: 8px;
         background: rgba(11, 22, 36, 0.8);
       }
+      .rom-panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(10, 20, 36, 0.68);
+        padding: 10px;
+        font-size: 12px;
+      }
+      .rom-panel summary {
+        cursor: pointer;
+        color: var(--accent);
+        font-weight: 700;
+        list-style-position: inside;
+      }
+      .info-grid {
+        display: grid;
+        grid-template-columns: 130px 1fr;
+        gap: 5px 10px;
+        margin-top: 10px;
+        align-items: baseline;
+      }
+      .info-grid dt { color: #9ec5ee; }
+      .info-grid dd {
+        margin: 0;
+        color: #d9e8fb;
+        word-break: break-all;
+      }
       .hide { display: none !important; }
       .footer-links {
         display: flex;
@@ -263,80 +293,110 @@
         line-height: 1;
       }
       .icon-btn[title]::after { content: none; }
-      /* Fullscreen overlay controls */
-      .fs-overlay {
-        display: none;
+      .virtual-gamepad {
         position: absolute;
-        top: 0; left: 0; right: 0; bottom: 0;
-        z-index: 9999;
-        pointer-events: none;
-      }
-      .fs-overlay.active { display: block; }
-      .fs-bar {
-        position: absolute;
-        top: 8px; right: 8px;
+        inset: auto 10px 10px;
         display: flex;
-        gap: 6px;
+        justify-content: space-between;
+        align-items: flex-end;
+        gap: 14px;
+        pointer-events: none;
+        opacity: 0.84;
+        transition: opacity 160ms ease;
+        touch-action: none;
+        z-index: 5;
+      }
+      .screen-stage:fullscreen .virtual-gamepad {
+        inset: auto max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+        opacity: 0.58;
+      }
+      .screen-stage:fullscreen .virtual-gamepad:active { opacity: 0.82; }
+      .dpad {
+        display: grid;
+        grid-template-columns: repeat(3, 46px);
+        grid-template-rows: repeat(3, 46px);
+        gap: 5px;
         pointer-events: auto;
-        opacity: 0.7;
-        transition: opacity 0.2s;
       }
-      .fs-bar:hover { opacity: 1; }
-      .fs-bar button {
-        background: rgba(16, 28, 50, 0.85);
-        border: 1px solid rgba(75, 200, 255, 0.4);
-        color: #fff;
-        font-size: 20px;
-        border-radius: 10px;
-        padding: 6px 10px;
-        cursor: pointer;
-        min-width: 38px;
-      }
-      /* Floating gamepad overlay in fullscreen */
-      .fs-pad {
-        position: absolute;
-        bottom: 24px;
-        pointer-events: auto;
-        opacity: 0.35;
-        transition: opacity 0.2s;
-      }
-      .fs-pad:hover, .fs-pad:active { opacity: 0.75; }
-      .fs-dpad {
-        left: 24px;
+      .face-buttons {
         display: grid;
         grid-template-columns: repeat(3, 52px);
-        gap: 4px;
+        grid-template-rows: 52px 28px;
+        gap: 8px;
+        align-items: center;
+        pointer-events: auto;
       }
-      .fs-actions {
-        right: 24px;
-        display: grid;
-        grid-template-columns: repeat(2, 52px);
-        gap: 4px;
-      }
-      .fs-pad button {
-        background: rgba(16, 28, 50, 0.8);
-        border: 1px solid rgba(75, 200, 255, 0.35);
-        color: #fff;
-        font-size: 18px;
-        border-radius: 12px;
-        min-height: 48px;
-        min-width: 48px;
+      .gamepad-btn {
+        min-width: 0;
+        width: 100%;
+        height: 100%;
         padding: 0;
+        border-radius: 999px;
+        border: 1px solid rgba(235, 243, 255, 0.35);
+        background: rgba(8, 17, 32, 0.62);
+        color: #fff;
+        font-weight: 700;
+        text-shadow: 0 1px 2px #000;
         cursor: pointer;
         -webkit-user-select: none;
         user-select: none;
-        touch-action: manipulation;
+        touch-action: none;
       }
-      .fs-pad button:active { background: rgba(75, 200, 255, 0.3); }
+      .gamepad-btn:active { background: rgba(75, 200, 255, 0.72); }
+      .gamepad-btn.up { grid-column: 2; grid-row: 1; }
+      .gamepad-btn.left { grid-column: 1; grid-row: 2; }
+      .gamepad-btn.right { grid-column: 3; grid-row: 2; }
+      .gamepad-btn.down { grid-column: 2; grid-row: 3; }
+      .gamepad-btn.a { grid-column: 1; grid-row: 1; }
+      .gamepad-btn.b { grid-column: 2; grid-row: 1; }
+      .gamepad-btn.c { grid-column: 3; grid-row: 1; }
+      .gamepad-btn.start {
+        grid-column: 1 / 4;
+        grid-row: 2;
+        height: 28px;
+        font-size: 11px;
+        letter-spacing: 0;
+      }
+      .fs-stage-btn {
+        position: absolute;
+        top: max(14px, env(safe-area-inset-top));
+        z-index: 6;
+        display: none;
+        opacity: 0.62;
+        min-width: 40px;
+        min-height: 40px;
+        padding: 0;
+      }
+      .fs-fullscreen-btn { left: max(14px, env(safe-area-inset-left)); }
+      .screen-stage:fullscreen .fs-stage-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      @media (pointer: fine) and (min-width: 720px) {
+        .virtual-gamepad { opacity: 0; }
+        .screen-stage:hover .virtual-gamepad,
+        .screen-stage:fullscreen .virtual-gamepad { opacity: 0.58; }
+      }
       @media (min-width: 900px) {
         .layout { max-width: 720px; margin: 0 auto; }
       }
       @media (max-width: 560px) {
         .title { font-size: 18px; }
+        .controller-bar { display: none; }
         .pad { grid-template-columns: repeat(3, 46px); gap: 3px; }
         .pad button, .actions button { min-height: 40px; min-width: 40px; font-size: 14px; }
         .actions button { min-width: 46px; }
         .controls-bar { padding: 6px 8px; gap: 6px; }
+        .dpad {
+          grid-template-columns: repeat(3, 40px);
+          grid-template-rows: repeat(3, 40px);
+        }
+        .face-buttons {
+          grid-template-columns: repeat(3, 46px);
+          grid-template-rows: 46px 26px;
+        }
+        .info-grid { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -360,7 +420,6 @@
           <button id="reset" class="icon-btn" disabled title="Reset">⟲</button>
           <button id="toggleAudio" class="icon-btn" disabled title="Mute / Unmute">🔇</button>
           <button id="fullscreen" class="icon-btn" title="Fullscreen">⛶</button>
-          <button id="rotateScreen" class="icon-btn" title="Rotate Screen">↻</button>
         </div>
 
         <!-- Game screen -->
@@ -368,29 +427,21 @@
           <div id="dropZone" class="drop-zone">
             <div class="screen-stage">
               <canvas id="screen" width="320" height="224"></canvas>
-              <div id="fsOverlay" class="fs-overlay">
-                <div class="fs-bar">
-                  <button id="fsRotate" title="Rotate">↻</button>
-                  <button id="fsExit" title="Exit Fullscreen">✕</button>
+              <div class="virtual-gamepad" aria-label="Virtual gamepad">
+                <div class="dpad" aria-label="Direction pad">
+                  <button class="gamepad-btn up" data-btn="up" type="button" aria-label="Up">▲</button>
+                  <button class="gamepad-btn left" data-btn="left" type="button" aria-label="Left">◀</button>
+                  <button class="gamepad-btn right" data-btn="right" type="button" aria-label="Right">▶</button>
+                  <button class="gamepad-btn down" data-btn="down" type="button" aria-label="Down">▼</button>
                 </div>
-                <div class="fs-pad fs-dpad" id="fsDpad">
-                  <span></span>
-                  <button data-btn="up">▲</button>
-                  <span></span>
-                  <button data-btn="left">◀</button>
-                  <span></span>
-                  <button data-btn="right">▶</button>
-                  <span></span>
-                  <button data-btn="down">▼</button>
-                  <span></span>
-                </div>
-                <div class="fs-pad fs-actions" id="fsActions">
-                  <button data-btn="a">A</button>
-                  <button data-btn="b">B</button>
-                  <button data-btn="c">C</button>
-                  <button data-btn="start">ST</button>
+                <div class="face-buttons" aria-label="Action buttons">
+                  <button class="gamepad-btn a" data-btn="a" type="button" aria-label="Button A">A</button>
+                  <button class="gamepad-btn b" data-btn="b" type="button" aria-label="Button B">B</button>
+                  <button class="gamepad-btn c" data-btn="c" type="button" aria-label="Button C">C</button>
+                  <button class="gamepad-btn start" data-btn="start" type="button" aria-label="Start">START</button>
                 </div>
               </div>
+              <button id="fsFullscreen" class="fs-stage-btn fs-fullscreen-btn" title="Exit Fullscreen" type="button">⛶</button>
             </div>
           </div>
           <div id="status" class="status">initializing wasm...</div>
@@ -423,6 +474,22 @@
           <p id="gamepadStatus" class="tiny">Gamepad: disconnected</p>
           <p class="tiny">ROMはドラッグ&ドロップでも読み込めます。Gamepad接続も対応。</p>
         </div>
+
+        <details class="rom-panel">
+          <summary>ROM Information</summary>
+          <dl class="info-grid">
+            <dt>File Name</dt><dd id="romFileName">-</dd>
+            <dt>File Size</dt><dd id="romFileSize">-</dd>
+            <dt>Console</dt><dd id="romConsoleName">-</dd>
+            <dt>Domestic Title</dt><dd id="romDomesticTitle">-</dd>
+            <dt>Overseas Title</dt><dd id="romOverseasTitle">-</dd>
+            <dt>Serial</dt><dd id="romSerial">-</dd>
+            <dt>Region</dt><dd id="romRegion">-</dd>
+            <dt>Checksum</dt><dd id="romChecksum">-</dd>
+            <dt>ROM Range</dt><dd id="romRange">-</dd>
+            <dt>I/O Support</dt><dd id="romIoSupport">-</dd>
+          </dl>
+        </details>
 
         <!-- Developer panel -->
         <section id="devPanel" class="card dev-panel">
@@ -498,7 +565,7 @@
       </section>
     </main>
 
-    <!-- Fullscreen overlay is inside .screen-stage for proper fullscreen rendering -->
+    <!-- Virtual controls live inside .screen-stage so rotation and fullscreen transform together. -->
 
     <script type="module">
       import(`./wasm-player.js?v=${Date.now()}`);

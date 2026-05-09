@@ -54,6 +54,7 @@ let wasmReady = false;
 let wasmModule = null;
 let emulator = null;
 let loadedRomBytes = null;
+let loadedRomInfo = null;
 let running = false;
 let rafId = null;
 let lastTs = 0;
@@ -168,6 +169,74 @@ function setStatus(text) {
 
 function setMeta(text) {
   if (ui.meta) ui.meta.textContent = text;
+}
+
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
+function fmtBytes(n) {
+  const num = Number(n || 0);
+  if (!num) return "N/A";
+  return `${(num / (1024 * 1024)).toFixed(2)} MB (${num} bytes)`;
+}
+
+function parseRomHeaderInfo(romBytes, label = "ROM") {
+  const readAscii = (offset, length) => {
+    if (!romBytes || romBytes.length <= offset) return "";
+    const end = Math.min(romBytes.length, offset + length);
+    let text = "";
+    for (let i = offset; i < end; i += 1) {
+      const b = romBytes[i] || 0;
+      text += b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : " ";
+    }
+    return text.replace(/\s+/g, " ").trim();
+  };
+  const readU16 = (offset) => (
+    romBytes && romBytes.length >= offset + 2
+      ? ((romBytes[offset] << 8) | romBytes[offset + 1]) >>> 0
+      : null
+  );
+  const readU32 = (offset) => (
+    romBytes && romBytes.length >= offset + 4
+      ? (((romBytes[offset] << 24) >>> 0) | (romBytes[offset + 1] << 16) | (romBytes[offset + 2] << 8) | romBytes[offset + 3]) >>> 0
+      : null
+  );
+
+  const checksum = readU16(0x18e);
+  const romStart = readU32(0x1a0);
+  const romEnd = readU32(0x1a4);
+  const fileName = String(label || "ROM").replace(/^bundled:/, "");
+
+  return {
+    fileName,
+    fileSize: romBytes?.length || 0,
+    consoleName: readAscii(0x100, 16),
+    domesticTitle: readAscii(0x120, 48),
+    overseasTitle: readAscii(0x150, 48),
+    serial: readAscii(0x180, 14),
+    ioSupport: readAscii(0x190, 16),
+    region: readAscii(0x1f0, 3),
+    checksum: checksum == null ? "N/A" : `0x${checksum.toString(16).padStart(4, "0").toUpperCase()}`,
+    romRange: (romStart == null || romEnd == null)
+      ? "N/A"
+      : `0x${romStart.toString(16).padStart(8, "0").toUpperCase()} - 0x${romEnd.toString(16).padStart(8, "0").toUpperCase()}`,
+  };
+}
+
+function updateRomInfoPanel(info = loadedRomInfo) {
+  const value = (v) => v || "N/A";
+  setText("romFileName", value(info?.fileName));
+  setText("romFileSize", fmtBytes(info?.fileSize));
+  setText("romConsoleName", value(info?.consoleName));
+  setText("romDomesticTitle", value(info?.domesticTitle));
+  setText("romOverseasTitle", value(info?.overseasTitle));
+  setText("romSerial", value(info?.serial));
+  setText("romRegion", value(info?.region));
+  setText("romChecksum", value(info?.checksum));
+  setText("romRange", value(info?.romRange));
+  setText("romIoSupport", value(info?.ioSupport));
 }
 
 function isEditableTarget(target) {
@@ -372,6 +441,7 @@ async function loadRomBytes(romBytes, label = "ROM") {
   }
   stopLoop();
   loadedRomBytes = romBytes;
+  loadedRomInfo = parseRomHeaderInfo(romBytes, label);
   emulator.load_rom(loadedRomBytes);
   emulator.reset();
   renderedFrames = 0;
@@ -389,6 +459,7 @@ async function loadRomBytes(romBytes, label = "ROM") {
   }
 
   drawFrame(emulator.get_framebuffer_argb());
+  updateRomInfoPanel();
   enableRuntimeButtons();
   if (emulator.has_sram && emulator.has_sram()) {
     setStatus(`${label} loaded (SRAM: ${emulator.get_sram().length} bytes)`);
@@ -493,9 +564,7 @@ async function setupBundledRomList() {
       opt.textContent = file;
       ui.bundledRom.appendChild(opt);
     }
-    if (files.length) {
-      ui.bundledRom.value = `./roms/${files[0]}`;
-    }
+    ui.bundledRom.value = "";
   } catch (error) {
     setStatus(`bundled ROM list load skipped: ${error}`);
   }
@@ -826,59 +895,86 @@ if (ui.toggleAudio) {
   });
 }
 
-// ── Screen rotation state ──
-let screenRotation = 0; // 0, 90, 180, 270
+// ── Fullscreen orientation state ──
+const SCREEN_ASPECT = 320 / 224;
+const ROTATED_SCREEN_ASPECT = 224 / 320;
+let screenRotation = 0; // 0 or 90 while fullscreen
 
-function applyRotation() {
+function applyStageRotation(rotation) {
   const stage = document.querySelector(".screen-stage");
-  if (stage) {
-    stage.style.transform = screenRotation ? `rotate(${screenRotation}deg)` : "";
+  if (!stage) return;
+
+  screenRotation = rotation;
+  if (document.fullscreenElement === stage && rotation === 90) {
+    stage.style.position = "fixed";
+    stage.style.left = "50%";
+    stage.style.top = "50%";
+    stage.style.margin = "0";
+    stage.style.width = "100vh";
+    stage.style.height = "100vw";
+    stage.style.transform = "translate(-50%, -50%) rotate(90deg)";
+  } else {
+    stage.style.position = "";
+    stage.style.left = "";
+    stage.style.top = "";
+    stage.style.margin = "";
+    stage.style.width = "";
+    stage.style.height = "";
+    stage.style.transform = "";
   }
 }
 
-function rotateScreen() {
-  screenRotation = (screenRotation + 90) % 360;
-  applyRotation();
-  setStatus(`rotation: ${screenRotation}°`);
+function chooseFullscreenRotation() {
+  const viewportAspect = window.innerWidth / Math.max(1, window.innerHeight);
+  const normalDelta = Math.abs(Math.log(viewportAspect / SCREEN_ASPECT));
+  const rotatedDelta = Math.abs(Math.log(viewportAspect / ROTATED_SCREEN_ASPECT));
+  return rotatedDelta < normalDelta ? 90 : 0;
 }
 
-// ── Fullscreen overlay management ──
-const fsOverlay = document.getElementById("fsOverlay");
-
-function syncFullscreenOverlay() {
-  const isFs = !!document.fullscreenElement;
-  if (fsOverlay) fsOverlay.classList.toggle("active", isFs);
+function syncFullscreenRotation() {
+  const stage = document.querySelector(".screen-stage");
+  if (document.fullscreenElement === stage) {
+    applyStageRotation(chooseFullscreenRotation());
+  } else {
+    applyStageRotation(0);
+  }
 }
 
-document.addEventListener("fullscreenchange", syncFullscreenOverlay);
+const fsFullscreenBtn = document.getElementById("fsFullscreen");
 
-const fsExitBtn = document.getElementById("fsExit");
-if (fsExitBtn) {
-  fsExitBtn.addEventListener("click", async () => {
-    try { await document.exitFullscreen(); } catch {}
-  });
-}
-
-const fsRotateBtn = document.getElementById("fsRotate");
-if (fsRotateBtn) fsRotateBtn.addEventListener("click", rotateScreen);
-
-const rotateBtn = document.getElementById("rotateScreen");
-if (rotateBtn) rotateBtn.addEventListener("click", rotateScreen);
-
-if (ui.fullscreen) {
-  ui.fullscreen.addEventListener("click", async () => {
-    try {
-      if (!document.fullscreenElement) {
-        const stage = document.querySelector(".screen-stage");
-        await (stage || canvas).requestFullscreen();
-      } else {
-        await document.exitFullscreen();
-      }
-    } catch (error) {
-      setStatus(`fullscreen failed: ${error}`);
+async function toggleFullscreen() {
+  try {
+    if (!document.fullscreenElement) {
+      const stage = document.querySelector(".screen-stage");
+      await (stage || canvas).requestFullscreen();
+    } else {
+      await document.exitFullscreen();
     }
-  });
+  } catch (error) {
+    setStatus(`fullscreen failed: ${error}`);
+  }
 }
+
+function syncFullscreenButtons() {
+  const isFullscreen = !!document.fullscreenElement;
+  if (ui.fullscreen) {
+    ui.fullscreen.textContent = isFullscreen ? "↙" : "⛶";
+    ui.fullscreen.title = isFullscreen ? "Exit Fullscreen" : "Fullscreen";
+  }
+  if (fsFullscreenBtn) {
+    fsFullscreenBtn.textContent = isFullscreen ? "↙" : "⛶";
+    fsFullscreenBtn.title = isFullscreen ? "Exit Fullscreen" : "Fullscreen";
+  }
+}
+
+if (ui.fullscreen) ui.fullscreen.addEventListener("click", toggleFullscreen);
+if (fsFullscreenBtn) fsFullscreenBtn.addEventListener("click", toggleFullscreen);
+document.addEventListener("fullscreenchange", syncFullscreenButtons);
+document.addEventListener("fullscreenchange", syncFullscreenRotation);
+window.addEventListener("resize", syncFullscreenRotation);
+window.addEventListener("orientationchange", syncFullscreenRotation);
+syncFullscreenButtons();
+syncFullscreenRotation();
 
 if (ui.toggleDev) ui.toggleDev.addEventListener("click", toggleDevMode);
 
@@ -1036,6 +1132,7 @@ document.querySelectorAll("[data-btn]").forEach((btn) => {
 
 setupDragAndDrop();
 setupPwa();
+updateRomInfoPanel();
 initializeWasm().finally(() => {
   setupBundledRomList();
 });

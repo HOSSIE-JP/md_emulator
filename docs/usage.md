@@ -334,27 +334,20 @@ cargo test -p md-apu
 cargo test -p md-core --lib
 ```
 
-## 9) ビルドとROM更新の運用ガイド
+## 9) ビルド運用ガイド
 
 ### WASM版は毎回ビルドが必要か？
 
 - `crates/md-wasm` / `crates/md-core` / `crates/md-apu` / `crates/md-vdp` / `crates/md-cpu-*` / `crates/md-bus` を変更した場合は、`frontend/pkg` を再生成するため **WASMビルドが必要** です。
 - フロントHTML/CSS/JSだけ変更した場合は、通常WASM再ビルドは不要です。
 
-### Bundled ROM を更新する手順
-
-1. ルートの `roms/` にROMファイル（`.bin/.md/.gen/.smd/.sms/.zip`）を追加・更新
-2. `frontend/roms/` へ同期
-3. `frontend/roms/index.json` を再生成
-
 ### VS Code Tasks（推奨）
 
 - `WASM: Build Package (dev)`
 - `WASM: Build Package (release)`
-- `Frontend: Refresh Bundled ROMs`
-- `WASM: Rebuild and Refresh ROMs`
+- `WASM: Rebuild Package`
 
-`WASM: Rebuild and Refresh ROMs` を実行すれば、開発で必要なWASM再ビルドとBundled ROM更新をまとめて実施できます。
+Bundled ROM の自動更新タスクは廃止しました。WASM プレイヤーでROMを確認する場合は、画面上のファイル選択またはドラッグ&ドロップで読み込んでください。
 
 ## 10) 他プロジェクトへの組み込み
 

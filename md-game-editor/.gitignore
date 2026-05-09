@@ -11,4 +11,5 @@ pkg/md_wasm_bg.wasm.d.ts
 md-emulator.js
 md-emulator.d.ts
 wasm-player.js
+projects/
 !**/template/*/data

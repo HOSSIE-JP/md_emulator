@@ -48,12 +48,6 @@ wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg
 
 > 注: `frontend/index.html` が md-wasm プレイヤー本体です。`frontend/wasm.html` は `index.html` へリダイレクトします。
 
-## Bundled ROM 更新
+## Bundled ROM
 
-`index.html` の Bundled ROM 選択肢は `frontend/roms/index.json` を参照します。
-
-1. ルート `roms/` にROMを配置
-2. `frontend/roms/` にコピー
-3. `frontend/roms/index.json` を更新
-
-VS Code Tasks を使う場合は `Frontend: Refresh Bundled ROMs` を実行してください。
+Bundled ROM の自動更新タスクは廃止しました。WASM プレイヤーでROMを確認する場合は、画面上のファイル選択またはドラッグ&ドロップでROMを読み込んでください。

@@ -2093,6 +2093,7 @@ function generateExportHtml({
       border-radius: 8px; overflow: hidden; border: 1px solid #1a2a42;
       position: relative; transform-origin: center; }
     .screen-stage:fullscreen { width: 100vw; height: 100vh; border-radius: 0;
+      max-height: none;
       display: flex; align-items: center; justify-content: center; }
     canvas#screen { width: 100%; height: 100%; object-fit: contain;
       image-rendering: pixelated; display: block; }
@@ -2168,15 +2169,22 @@ function generateExportHtml({
       font-size: 11px;
       letter-spacing: 0;
     }
-    .fs-rotate-btn {
+    .fs-stage-btn {
       position: absolute;
       top: max(14px, env(safe-area-inset-top));
-      right: max(14px, env(safe-area-inset-right));
       z-index: 6;
       display: none;
       opacity: 0.62;
+      min-width: 40px;
+      min-height: 40px;
+      padding: 0;
     }
-    .screen-stage:fullscreen .fs-rotate-btn { display: inline-flex; }
+    .fs-fullscreen-btn { left: max(14px, env(safe-area-inset-left)); }
+    .screen-stage:fullscreen .fs-stage-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
     .rom-panel {
       margin-top: 8px;
       border: 1px solid #1a2a42;
@@ -2285,7 +2293,7 @@ function generateExportHtml({
             <button class="gamepad-btn start" data-btn="start" type="button" aria-label="Start">START</button>
           </div>
         </div>
-        <button id="fsRotate" class="fs-rotate-btn" title="画面を回転" type="button">&#8635;</button>
+        <button id="fsFullscreen" class="fs-stage-btn fs-fullscreen-btn" title="フルスクリーン解除" type="button">&#x26F6;</button>
       </div>
     </div>
     <div id="status">読み込み中...</div>
@@ -2297,7 +2305,6 @@ function generateExportHtml({
       <span class="spacer"></span>
       <button id="downloadRom" title="ROM をダウンロード">Download ROM</button>
       <button id="helpBtn" title="ヘルプを表示">Help</button>
-      <button id="rotateScreen" title="画面を回転">&#8635;</button>
       <button id="fullscreen" title="フルスクリーン">&#x26F6;</button>
     </div>
     <input type="file" id="romFile" accept=".bin,.md,.gen,.smd">

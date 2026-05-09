@@ -39,8 +39,10 @@ test('exported HTML includes mobile controls and collapsed ROM information', () 
   assert.match(main, /data-btn="a"/);
   assert.match(main, /data-btn="start"/);
   assert.match(main, /\.screen-stage:fullscreen \.virtual-gamepad/);
-  assert.match(main, /<button id="fsRotate" class="fs-rotate-btn"/);
-  assert.match(main, /<button id="downloadRom" title="ROM をダウンロード">Download ROM<\/button>[\s\S]*<button id="helpBtn" title="ヘルプを表示">Help<\/button>[\s\S]*<button id="rotateScreen"/);
+  assert.match(main, /<button id="fsFullscreen" class="fs-stage-btn fs-fullscreen-btn"/);
+  assert.match(main, /<button id="downloadRom" title="ROM をダウンロード">Download ROM<\/button>[\s\S]*<button id="helpBtn" title="ヘルプを表示">Help<\/button>[\s\S]*<button id="fullscreen"/);
+  assert.doesNotMatch(main, /id="fsRotate"/);
+  assert.doesNotMatch(main, /id="rotateScreen"/);
   assert.match(main, /<details class="rom-panel">\s*<summary>ROM Information<\/summary>/);
   assert.doesNotMatch(main, /<section class="rom-panel">[\s\S]*<h2>ROM Information<\/h2>/);
 });
