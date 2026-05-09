@@ -9,6 +9,17 @@ function readPackageConfig() {
   return fs.readFileSync(path.join(__dirname, '..', 'electron-builder.yml'), 'utf-8');
 }
 
+function readPackageJson() {
+  return JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+}
+
+test('packaging declares main-process runtime dependencies', () => {
+  const pkg = readPackageJson();
+
+  assert.equal(pkg.dependencies?.['iconv-lite'], '0.6.3');
+  assert.equal(pkg.devDependencies?.['iconv-lite'], undefined);
+});
+
 test('packaging includes the bundled game editor template projects', () => {
   const config = readPackageConfig();
 
