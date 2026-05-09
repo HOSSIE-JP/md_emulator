@@ -1032,6 +1032,15 @@ function readEmbeddedWasmInfo() {
   };
 }
 
+function sanitizeExportFileName(value, fallback = 'rom') {
+  const base = String(value || fallback)
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/^\.+/, '')
+    .slice(0, 80);
+  return base || fallback;
+}
+
 function stopApiServer() {
   if (!apiServerProcess) {
     apiServerPort = null;
@@ -2081,7 +2090,8 @@ function generateExportHtml({
     main { width: 100%; max-width: 640px; padding: 8px; flex: 1;
       display: flex; flex-direction: column; gap: 8px; }
     .screen-stage { width: 100%; aspect-ratio: 320 / 224; background: #000;
-      border-radius: 8px; overflow: hidden; border: 1px solid #1a2a42; }
+      border-radius: 8px; overflow: hidden; border: 1px solid #1a2a42;
+      position: relative; transform-origin: center; }
     .screen-stage:fullscreen { width: 100vw; height: 100vh; border-radius: 0;
       display: flex; align-items: center; justify-content: center; }
     canvas#screen { width: 100%; height: 100%; object-fit: contain;
@@ -2096,6 +2106,77 @@ function generateExportHtml({
     #buildVersion, #gamepadStatus, #devPanel, #installPwa { display: none; }
     input[type="file"] { display: none; }
     #dropZone { display: contents; }
+    .virtual-gamepad {
+      position: absolute;
+      inset: auto 10px 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 14px;
+      pointer-events: none;
+      opacity: 0.84;
+      transition: opacity 160ms ease;
+      touch-action: none;
+      z-index: 5;
+    }
+    .screen-stage:fullscreen .virtual-gamepad {
+      inset: auto max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+      opacity: 0.58;
+    }
+    .screen-stage:fullscreen .virtual-gamepad:active { opacity: 0.82; }
+    .dpad {
+      display: grid;
+      grid-template-columns: repeat(3, 46px);
+      grid-template-rows: repeat(3, 46px);
+      gap: 5px;
+      pointer-events: auto;
+    }
+    .face-buttons {
+      display: grid;
+      grid-template-columns: repeat(3, 52px);
+      grid-template-rows: 52px 28px;
+      gap: 8px;
+      align-items: center;
+      pointer-events: auto;
+    }
+    .gamepad-btn {
+      min-width: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 999px;
+      border: 1px solid rgba(235, 243, 255, 0.35);
+      background: rgba(8, 17, 32, 0.62);
+      color: #fff;
+      font-weight: 700;
+      text-shadow: 0 1px 2px #000;
+      -webkit-user-select: none;
+      user-select: none;
+      touch-action: none;
+    }
+    .gamepad-btn:active { background: rgba(75, 200, 255, 0.72); }
+    .gamepad-btn.up { grid-column: 2; grid-row: 1; }
+    .gamepad-btn.left { grid-column: 1; grid-row: 2; }
+    .gamepad-btn.right { grid-column: 3; grid-row: 2; }
+    .gamepad-btn.down { grid-column: 2; grid-row: 3; }
+    .gamepad-btn.a { grid-column: 1; grid-row: 1; }
+    .gamepad-btn.b { grid-column: 2; grid-row: 1; }
+    .gamepad-btn.c { grid-column: 3; grid-row: 1; }
+    .gamepad-btn.start {
+      grid-column: 1 / 4;
+      grid-row: 2;
+      height: 28px;
+      font-size: 11px;
+      letter-spacing: 0;
+    }
+    .fs-rotate-btn {
+      position: absolute;
+      top: max(14px, env(safe-area-inset-top));
+      right: max(14px, env(safe-area-inset-right));
+      z-index: 6;
+      display: none;
+      opacity: 0.62;
+    }
+    .screen-stage:fullscreen .fs-rotate-btn { display: inline-flex; }
     .rom-panel {
       margin-top: 8px;
       border: 1px solid #1a2a42;
@@ -2106,21 +2187,21 @@ function generateExportHtml({
       gap: 6px;
       font-size: 12px;
     }
-    .rom-panel h2 { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+    .rom-panel summary {
+      cursor: pointer;
+      color: #8cb4de;
+      font-weight: 700;
+      list-style-position: inside;
+    }
     .info-grid {
       display: grid;
       grid-template-columns: 120px 1fr;
       gap: 4px 10px;
       align-items: baseline;
+      margin-top: 8px;
     }
     .info-grid dt { color: #8cb4de; }
     .info-grid dd { word-break: break-all; }
-    .footer-actions {
-      display: flex;
-      gap: 8px;
-      justify-content: flex-end;
-      margin-top: 4px;
-    }
     .modal {
       position: fixed;
       inset: 0;
@@ -2158,10 +2239,22 @@ function generateExportHtml({
       text-align: left;
     }
     .help-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+    @media (pointer: fine) and (min-width: 720px) {
+      .virtual-gamepad { opacity: 0; }
+      .screen-stage:hover .virtual-gamepad,
+      .screen-stage:fullscreen .virtual-gamepad { opacity: 0.58; }
+    }
     @media (max-width: 480px) {
       .info-grid { grid-template-columns: 1fr; }
-      .footer-actions { justify-content: stretch; }
-      .footer-actions button { flex: 1; }
+      .controls button { flex: 1 1 auto; }
+      .dpad {
+        grid-template-columns: repeat(3, 40px);
+        grid-template-rows: repeat(3, 40px);
+      }
+      .face-buttons {
+        grid-template-columns: repeat(3, 46px);
+        grid-template-rows: 46px 26px;
+      }
     }
   </style>
   <script>
@@ -2178,6 +2271,21 @@ function generateExportHtml({
     <div id="dropZone">
       <div class="screen-stage">
         <canvas id="screen" width="320" height="224"></canvas>
+        <div class="virtual-gamepad" aria-label="Virtual gamepad">
+          <div class="dpad" aria-label="Direction pad">
+            <button class="gamepad-btn up" data-btn="up" type="button" aria-label="Up">▲</button>
+            <button class="gamepad-btn left" data-btn="left" type="button" aria-label="Left">◀</button>
+            <button class="gamepad-btn right" data-btn="right" type="button" aria-label="Right">▶</button>
+            <button class="gamepad-btn down" data-btn="down" type="button" aria-label="Down">▼</button>
+          </div>
+          <div class="face-buttons" aria-label="Action buttons">
+            <button class="gamepad-btn a" data-btn="a" type="button" aria-label="Button A">A</button>
+            <button class="gamepad-btn b" data-btn="b" type="button" aria-label="Button B">B</button>
+            <button class="gamepad-btn c" data-btn="c" type="button" aria-label="Button C">C</button>
+            <button class="gamepad-btn start" data-btn="start" type="button" aria-label="Start">START</button>
+          </div>
+        </div>
+        <button id="fsRotate" class="fs-rotate-btn" title="画面を回転" type="button">&#8635;</button>
       </div>
     </div>
     <div id="status">読み込み中...</div>
@@ -2187,6 +2295,9 @@ function generateExportHtml({
       <button id="reset" title="リセット" disabled>&#8634;</button>
       <button id="toggleAudio" title="ミュート切替" disabled>&#128266;</button>
       <span class="spacer"></span>
+      <button id="downloadRom" title="ROM をダウンロード">Download ROM</button>
+      <button id="helpBtn" title="ヘルプを表示">Help</button>
+      <button id="rotateScreen" title="画面を回転">&#8635;</button>
       <button id="fullscreen" title="フルスクリーン">&#x26F6;</button>
     </div>
     <input type="file" id="romFile" accept=".bin,.md,.gen,.smd">
@@ -2194,8 +2305,8 @@ function generateExportHtml({
     <select id="bundledRom" style="display:none"></select>
     <button id="loadBundled" style="display:none">Load Bundled</button>
     <div id="meta" style="display:none"></div>
-    <section class="rom-panel">
-      <h2>ROM Information</h2>
+    <details class="rom-panel">
+      <summary>ROM Information</summary>
       <dl class="info-grid">
         <dt>File Name</dt><dd id="romFileName">-</dd>
         <dt>File Size</dt><dd id="romFileSize">-</dd>
@@ -2208,11 +2319,7 @@ function generateExportHtml({
         <dt>ROM Range</dt><dd id="romRange">-</dd>
         <dt>I/O Support</dt><dd id="romIoSupport">-</dd>
       </dl>
-      <div class="footer-actions">
-        <button id="downloadRom" title="ROM をダウンロード">Download ROM</button>
-        <button id="helpBtn" title="ヘルプを表示">Help</button>
-      </div>
-    </section>
+    </details>
     <div id="installPwa"></div>
     <div id="fsOverlay"></div>
     <div id="devPanel"></div>
@@ -2262,21 +2369,17 @@ ${combinedScript}
 // ── Export ハンドラ ─────────────────────────────────────────────────────────
 
 async function handleExportRom() {
-  const buildResult = await runBuildFull();
-  if (!buildResult.success) {
-    return { ok: false, error: buildResult.error || 'ビルドに失敗しました' };
-  }
-
   const romPath = buildSystem.getLastRomPath();
   if (!romPath || !fs.existsSync(romPath)) {
-    return { ok: false, error: 'ビルド成功しましたが ROM ファイルが見つかりません' };
+    return { ok: false, error: 'エクスポートできるビルド済み ROM がありません。先に Build を実行してください。' };
   }
 
   const owner = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : undefined;
   let suggested = path.basename(romPath);
   try {
     const cfg = buildSystem.loadProjectConfig();
-    if (cfg?.name) suggested = `${cfg.name.replace(/[^a-zA-Z0-9._-]/g, '_')}.bin`;
+    const projectName = cfg?.title || cfg?.romName || cfg?.name || buildSystem.getProjectInfo()?.projectName;
+    if (projectName) suggested = `${sanitizeExportFileName(projectName, 'rom')}.bin`;
   } catch (_) {}
 
   const result = await dialog.showSaveDialog(owner, {
@@ -2294,14 +2397,9 @@ async function handleExportRom() {
 }
 
 async function handleExportHtml() {
-  const buildResult = await runBuildFull();
-  if (!buildResult.success) {
-    return { ok: false, error: buildResult.error || 'ビルドに失敗しました' };
-  }
-
   const romPath = buildSystem.getLastRomPath();
   if (!romPath || !fs.existsSync(romPath)) {
-    return { ok: false, error: 'ビルド成功しましたが ROM ファイルが見つかりません' };
+    return { ok: false, error: 'エクスポートできるビルド済み ROM がありません。先に Build を実行してください。' };
   }
 
   // ソースファイルパスを確認
@@ -2328,10 +2426,11 @@ async function handleExportHtml() {
 
   // 保存先 HTML ファイルを選択（シングルファイル・サーバー不要）
   const owner = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : undefined;
-  let suggested = romLabel.replace(/\.(bin|md|gen|smd)$/i, '') + '.html';
+  let suggested = `${sanitizeExportFileName(romLabel.replace(/\.(bin|md|gen|smd)$/i, ''), 'rom')}.html`;
   try {
     const cfg = buildSystem.loadProjectConfig();
-    if (cfg?.name) suggested = `${cfg.name.replace(/[^a-zA-Z0-9._-]/g, '_')}.html`;
+    const projectName = cfg?.title || cfg?.romName || cfg?.name || buildSystem.getProjectInfo()?.projectName;
+    if (projectName) suggested = `${sanitizeExportFileName(projectName, 'rom')}.html`;
   } catch (_) {}
 
   const saveResult = await dialog.showSaveDialog(owner, {

@@ -616,6 +616,24 @@ function writeVgm(song) {
   return mdAudio.writeVgm(song);
 }
 
+function previewMusic(payload = {}) {
+  try {
+    const song = mdAudio.normalizeSong(payload.song || payload);
+    const symbol = normalizeSymbolName(payload.symbol || song.symbol || 'preview_bgm');
+    const vgm = writeVgm({ ...song, symbol });
+    return {
+      ok: true,
+      symbol,
+      format: 'VGM',
+      dataUrl: `data:audio/vgm;base64,${vgm.toString('base64')}`,
+      byteLength: vgm.length,
+      diagnostics: validateSong(song),
+    };
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error) };
+  }
+}
+
 function ensureProjectPath(projectDir, relPath) {
   const root = path.resolve(projectDir);
   const abs = path.resolve(root, relPath);
@@ -1066,6 +1084,7 @@ module.exports = {
   validateSong,
   buildVgmData,
   writeVgm,
+  previewMusic,
   findXgmTool,
   exportMusic,
   importMidi,

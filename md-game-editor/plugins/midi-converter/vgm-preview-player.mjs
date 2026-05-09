@@ -440,14 +440,55 @@ export function createVgmPreviewPlayer() {
   let playing = false;
   let highAccuracyEngine = null;
   let highAccuracyWarning = '高精度WASMプレビューエンジンが読み込まれていないため、簡易プレビューへフォールバックします。';
+  let engineStatus = {
+    id: 'web-audio-approx',
+    label: '簡易 Web Audio',
+    state: 'fallback',
+    highAccuracyAvailable: false,
+    message: highAccuracyWarning,
+    buildInfo: null,
+  };
+
+  function setEngineStatus(patch = {}) {
+    engineStatus = {
+      ...engineStatus,
+      ...patch,
+      buildInfo: patch.buildInfo === undefined ? engineStatus.buildInfo : patch.buildInfo,
+    };
+    return getEngineStatus();
+  }
+
+  function getEngineStatus() {
+    return {
+      ...engineStatus,
+      buildInfo: engineStatus.buildInfo && typeof engineStatus.buildInfo === 'object'
+        ? { ...engineStatus.buildInfo }
+        : engineStatus.buildInfo,
+    };
+  }
 
   async function loadHighAccuracyEngine() {
-    if (highAccuracyEngine) return { ok: true, engine: highAccuracyEngine };
+    if (highAccuracyEngine) return { ok: true, engine: highAccuracyEngine, status: getEngineStatus() };
+    setEngineStatus({
+      id: 'nuked-opn2',
+      label: 'Nuked-OPN2 WASM',
+      state: 'loading',
+      highAccuracyAvailable: false,
+      message: 'Nuked-OPN2 WASM を読み込み中...',
+    });
     const candidate = globalThis.__MD_NUKED_OPN2_PREVIEW__;
     if (candidate?.renderVgmEvents) {
       highAccuracyEngine = candidate;
       highAccuracyWarning = '';
-      return { ok: true, engine: highAccuracyEngine };
+      const status = setEngineStatus({
+        id: 'nuked-opn2',
+        label: 'Nuked-OPN2 WASM',
+        state: 'ready',
+        highAccuracyAvailable: true,
+        message: '高精度 YM2612 プレビューが有効です。',
+        buildInfo: candidate.metadata || null,
+      });
+      return { ok: true, engine: highAccuracyEngine, status };
     }
     const loader = globalThis.electronAPI?.loadOptionalAudioEngine;
     if (loader) {
@@ -459,14 +500,32 @@ export function createVgmPreviewPlayer() {
           if (typeof factory !== 'function') throw new Error('Nuked-OPN2 JS module does not export a module factory.');
           highAccuracyEngine = await createNukedOpn2Engine(factory, result.wasmDataUrl, result.buildInfo || {});
           highAccuracyWarning = '';
-          return { ok: true, engine: highAccuracyEngine };
+          const status = setEngineStatus({
+            id: 'nuked-opn2',
+            label: 'Nuked-OPN2 WASM',
+            state: 'ready',
+            highAccuracyAvailable: true,
+            message: '高精度 YM2612 プレビューが有効です。',
+            buildInfo: result.buildInfo || null,
+            source: result.source || result.buildInfo?.source || '',
+            license: result.license || result.buildInfo?.license || '',
+          });
+          return { ok: true, engine: highAccuracyEngine, status };
         }
         if (result?.error) highAccuracyWarning = `高精度WASMプレビュー不可: ${result.error}`;
       } catch (error) {
         highAccuracyWarning = `高精度WASMプレビュー不可: ${error?.message || error}`;
       }
     }
-    return { ok: false, warning: highAccuracyWarning };
+    const status = setEngineStatus({
+      id: 'web-audio-approx',
+      label: '簡易 Web Audio',
+      state: 'fallback',
+      highAccuracyAvailable: false,
+      message: highAccuracyWarning,
+      buildInfo: null,
+    });
+    return { ok: false, warning: highAccuracyWarning, status };
   }
 
   function stop() {
@@ -489,7 +548,12 @@ export function createVgmPreviewPlayer() {
       return result;
     }
     parsed = result;
-    return { ok: true, meta: result.meta, warnings: [highAccuracyWarning, ...result.warnings].filter(Boolean) };
+    return {
+      ok: true,
+      meta: { ...result.meta, previewEngine: getEngineStatus() },
+      warnings: [highAccuracyWarning, ...result.warnings].filter(Boolean),
+      previewEngine: getEngineStatus(),
+    };
   }
 
   function parseVgm({ dataUrl } = {}) {
@@ -539,9 +603,22 @@ export function createVgmPreviewPlayer() {
             onTime?.(0);
             onEnded?.();
           }, Math.ceil((duration + 0.15) * 1000));
-          return { ok: true, durationSec: duration, warnings: [...(rendered?.warnings || []), ...parsed.warnings].filter(Boolean) };
+          return {
+            ok: true,
+            durationSec: duration,
+            warnings: [...(rendered?.warnings || []), ...parsed.warnings].filter(Boolean),
+            previewEngine: getEngineStatus(),
+          };
         }
         highAccuracyWarning = rendered?.warning || rendered?.error || '高精度WASMプレビューに失敗したため、簡易プレビューへフォールバックします。';
+        setEngineStatus({
+          id: 'web-audio-approx',
+          label: '簡易 Web Audio',
+          state: 'fallback',
+          highAccuracyAvailable: false,
+          message: highAccuracyWarning,
+          buildInfo: null,
+        });
       }
       const fm = Array.from({ length: YM2612_CHANNELS }, () => ({
         fnumLsb: 0,
@@ -652,7 +729,12 @@ export function createVgmPreviewPlayer() {
         onTime?.(0);
         onEnded?.();
       }, Math.ceil((duration + 0.15) * 1000));
-      return { ok: true, durationSec: duration, warnings: [highAccuracyWarning, ...parsed.warnings].filter(Boolean) };
+      return {
+        ok: true,
+        durationSec: duration,
+        warnings: [highAccuracyWarning, ...parsed.warnings].filter(Boolean),
+        previewEngine: getEngineStatus(),
+      };
     } catch (error) {
       stop();
       onError?.(error);
@@ -666,6 +748,7 @@ export function createVgmPreviewPlayer() {
     parseVgm,
     parseXgm,
     loadHighAccuracyEngine,
+    getEngineStatus,
     play,
     stop,
     isPlaying: () => playing,

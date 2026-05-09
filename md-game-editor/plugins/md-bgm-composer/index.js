@@ -21,6 +21,12 @@ function validateSong(payload) {
   };
 }
 
+function previewMusic(payload, context = {}) {
+  const result = core.previewMusic(payload || {}, context);
+  context?.logger?.info?.(`[md-bgm-composer] preview VGM: ${result.ok ? result.symbol : result.error}`);
+  return result;
+}
+
 function analyzeVgm(payload, context = {}) {
   const result = core.analyzeVgm(payload || {}, context);
   context?.logger?.info?.(`[md-bgm-composer] analyze VGM: ${result.ok ? 'ok' : result.error}`);
@@ -31,6 +37,7 @@ module.exports = {
   importMidi,
   exportMusic,
   validateSong,
+  previewMusic,
   analyzeVgm,
   _core: core,
 };

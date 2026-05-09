@@ -1324,7 +1324,7 @@ function getNukedOpn2BuildPlan() {
     '-sENVIRONMENT=web',
     '-sALLOW_MEMORY_GROWTH=1',
     '-sEXPORTED_FUNCTIONS=_nuke_init,_nuke_reset,_nuke_write,_nuke_render,_malloc,_free',
-    '-sEXPORTED_RUNTIME_METHODS=cwrap',
+    '-sEXPORTED_RUNTIME_METHODS=cwrap,HEAP16',
     '-o', outputJs,
   ] : [];
   return {
@@ -1383,6 +1383,7 @@ async function buildNukedOpn2Wasm(onProgress) {
     builtAt: new Date().toISOString(),
     outputJs: plan.outputJs,
     outputWasm: plan.outputWasm,
+    exportedRuntimeMethods: 'cwrap,HEAP16',
   };
   fs.writeFileSync(path.join(plan.distDir, 'BUILD_INFO.json'), JSON.stringify(buildInfo, null, 2), 'utf-8');
   saveSettings({ nukedOpn2WasmPath: plan.outputWasm, nukedOpn2JsPath: plan.outputJs, emccVersion });
@@ -1397,7 +1398,7 @@ function isPathInside(parent, candidate) {
 
 function readJsonFile(filePath) {
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, ''));
   } catch {
     return null;
   }

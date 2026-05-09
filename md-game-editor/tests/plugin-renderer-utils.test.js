@@ -90,6 +90,11 @@ test('asset-manager declares v2.4 asset provider capabilities', () => {
   assert.match(appRendererSource, /isBgmMetaEntry/);
   assert.match(appRendererSource, /getMusicMetaSourcePath/);
   assert.match(appRendererSource, /renderBgmMetaRows/);
+  assert.match(appRendererSource, /formatPreviewEngineStatus/);
+  assert.match(appRendererSource, /プレビューエンジン/);
+  assert.match(appRendererSource, /loadHighAccuracyEngine/);
+  assert.match(appRendererSource, /getEngineStatus/);
+  assert.match(appRendererSource, /使用中エンジン/);
   assert.match(appRendererSource, /parseXgm/);
   assert.match(appRendererSource, /toggleVgmPreview/);
   assert.doesNotMatch(appRendererSource, /midi-converter/);

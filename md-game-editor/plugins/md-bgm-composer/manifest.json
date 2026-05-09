@@ -6,9 +6,9 @@
   "icon": "music",
   "types": ["editor", "converter", "asset"],
   "permissions": ["project.read", "project.write", "dialog.openFile", "res.read", "res.write", "main.invokeHook"],
-  "hooks": ["importMidi", "exportMusic", "validateSong", "analyzeVgm"],
+  "hooks": ["importMidi", "exportMusic", "validateSong", "previewMusic", "analyzeVgm"],
   "mainApi": {
-    "hooks": ["importMidi", "exportMusic", "validateSong", "analyzeVgm"],
+    "hooks": ["importMidi", "exportMusic", "validateSong", "previewMusic", "analyzeVgm"],
     "capabilities": ["music-import", "music-export"]
   },
   "tab": {

@@ -67,10 +67,13 @@ test('VGM preview player exposes high-accuracy engine fallback warning', async (
   const loaded = player.load({ dataUrl });
 
   assert.equal(loaded.ok, true, loaded.error);
+  assert.equal(loaded.previewEngine.highAccuracyAvailable, false);
+  assert.equal(loaded.meta.previewEngine.label, '簡易 Web Audio');
   assert.ok(loaded.warnings.some((warning) => warning.includes('高精度WASM')));
   const highAccuracy = await player.loadHighAccuracyEngine();
   assert.equal(highAccuracy.ok, false);
   assert.match(highAccuracy.warning, /高精度WASM/);
+  assert.equal(player.getEngineStatus().state, 'fallback');
 });
 
 test('VGM preview player loads optional Nuked-OPN2 WASM engine payload', async () => {
@@ -92,6 +95,8 @@ test('VGM preview player loads optional Nuked-OPN2 WASM engine payload', async (
     const player = preview.createVgmPreviewPlayer();
     const highAccuracy = await player.loadHighAccuracyEngine();
     assert.equal(highAccuracy.ok, true, highAccuracy.warning);
+    assert.equal(highAccuracy.status.highAccuracyAvailable, true);
+    assert.equal(player.getEngineStatus().label, 'Nuked-OPN2 WASM');
     assert.equal(typeof highAccuracy.engine.renderVgmEvents, 'function');
   } finally {
     globalThis.electronAPI = previousElectronAPI;

@@ -51,6 +51,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     diagnostics: [],
     allocations: [],
     status: '',
+    previewEngineStatus: '',
     selectedOrderIndex: 0,
     leftColumnWidth: 300,
     rightColumnWidth: 320,
@@ -332,7 +333,7 @@ function bindEvents({ plugin, api, logger, state, els }) {
     if (action === 'edit-external') await editExternalAsset({ plugin, api, state, els });
     if (action === 'save') await saveCurrentSong({ plugin, api, state, els });
     if (action === 'delete-current') await deleteCurrentAsset({ api, state, els });
-    if (action === 'play') playPreview(state, els);
+    if (action === 'play') void playPreview({ plugin, api, state, els });
     if (action === 'stop') {
       stopPreview(state);
       renderEditorMode(state, els);
@@ -1739,6 +1740,87 @@ function isChannelMuted(state, channelId) {
 
 function playImmediateCell(state, channelId, midiNote, cell, options = {}) {
   if (!options.ignoreMute && isChannelMuted(state, channelId)) return;
+  void playImmediateCellViaVgm(state, channelId, midiNote, cell, options);
+}
+
+async function playImmediateCellViaVgm(state, channelId, midiNote, cell, options = {}) {
+  const player = getVgmPreviewPlayer(state);
+  if (!player?.load || !player?.play || !state.api?.plugins?.invokeHook) {
+    const context = audioContext || new AudioContext();
+    audioContext = context;
+    playCell(context, channelId, midiNote, cell, getInstrumentById(state, cell?.instrument));
+    return;
+  }
+  const instrumentId = cell?.instrument || getInstrumentForChannel(state, channelId);
+  const previewSong = createSingleCellPreviewSong(state, channelId, midiNote, { ...cell, instrument: instrumentId });
+  const result = await songToPreviewVgm(state, previewSong, 'input_preview');
+  if (!result?.ok || !result.dataUrl) {
+    const context = audioContext || new AudioContext();
+    audioContext = context;
+    playCell(context, channelId, midiNote, cell, getInstrumentById(state, instrumentId));
+    return;
+  }
+  stopPreview(state);
+  const loaded = player.load({ dataUrl: result.dataUrl });
+  if (!loaded?.ok) return;
+  const played = await player.play({});
+  state.previewEngineStatus = formatPreviewEngineStatus(played?.previewEngine || player.getEngineStatus?.());
+}
+
+function createSingleCellPreviewSong(state, channelId, midiNote, cell) {
+  const song = createDefaultSong({
+    symbol: 'input_preview',
+    title: 'Input Preview',
+    tempo: 150,
+    speed: 12,
+  });
+  song.instruments = structuredClone(state.song.instruments || []);
+  song.patterns[0].rows = emptyRows();
+  song.patterns[0].rows[0].cells[channelId] = {
+    note: channelId === 'NOISE' ? 'N' : midiNoteToName(midiNote),
+    midiNote: channelId === 'NOISE' ? null : midiNote,
+    instrument: cell?.instrument,
+    volume: cell?.volume ?? 12,
+    effect: cell?.effect || '',
+  };
+  return song;
+}
+
+function getVgmPreviewPlayer(state) {
+  return state.api?.capabilities?.get?.('vgm-preview-player') || null;
+}
+
+function formatPreviewEngineStatus(engine = {}) {
+  if (!engine) return '';
+  const label = engine.label || (engine.highAccuracyAvailable ? 'Nuked-OPN2 WASM' : '簡易 Web Audio');
+  const stateText = engine.highAccuracyAvailable ? '有効' : engine.state === 'loading' ? '確認中' : 'fallback';
+  return `${label} (${stateText})`;
+}
+
+async function songToPreviewVgm(state, song, symbol = 'preview_bgm') {
+  const result = await state.api.plugins.invokeHook(state.plugin.id, 'previewMusic', {
+    song,
+    symbol,
+  });
+  return result?.result || result;
+}
+
+function cloneSongForPreview(state) {
+  const song = structuredClone(state.song);
+  song.patterns = (song.patterns || []).map((pattern) => ({
+    ...pattern,
+    rows: (pattern.rows || []).map((row) => {
+      const cells = {};
+      Object.entries(row.cells || {}).forEach(([channelId, cell]) => {
+        if (!isChannelMuted(state, channelId)) cells[channelId] = cell;
+      });
+      return { ...row, cells };
+    }),
+  }));
+  return song;
+}
+
+function fallbackImmediatePreview(state, channelId, midiNote, cell) {
   const context = audioContext || new AudioContext();
   audioContext = context;
   playCell(context, channelId, midiNote, cell, getInstrumentById(state, cell?.instrument));
@@ -1983,14 +2065,68 @@ async function validateViaMain(plugin, api, state, els) {
   return result;
 }
 
-function playPreview(state, els) {
+async function playPreview({ plugin, api, state, els }) {
   stopPreview(state);
-  const context = audioContext || new AudioContext();
-  audioContext = context;
   const song = state.song;
   const sequence = buildPlaybackSequence(song);
   if (!sequence.length) return;
   const rowMs = rowDurationMs(song);
+  const player = getVgmPreviewPlayer(state);
+  if (!player?.load || !player?.play || !api?.plugins?.invokeHook) {
+    playPreviewFallback(state, els, sequence, rowMs);
+    return;
+  }
+  const previewSong = cloneSongForPreview(state);
+  const result = await api.plugins.invokeHook(plugin.id, 'previewMusic', {
+    song: previewSong,
+    symbol: `${previewSong.symbol || 'bgm'}_preview`,
+  });
+  const body = result?.result || result;
+  if (!body?.ok || !body.dataUrl) {
+    setStatus(state, els, body?.error || 'VGM preview generation failed');
+    playPreviewFallback(state, els, sequence, rowMs);
+    return;
+  }
+  const loaded = player.load({ dataUrl: body.dataUrl });
+  if (!loaded?.ok) {
+    setStatus(state, els, loaded?.error || 'VGM preview load failed');
+    playPreviewFallback(state, els, sequence, rowMs);
+    return;
+  }
+  let playbackStep = 0;
+  applyPlaybackStep(state, els, sequence, playbackStep);
+  renderEditorMode(state, els);
+  const played = await player.play({
+    onTime: (currentSec) => {
+      const nextStep = Math.min(sequence.length - 1, Math.max(0, Math.floor((currentSec * 1000) / rowMs)));
+      if (nextStep !== playbackStep) {
+        playbackStep = nextStep;
+        applyPlaybackStep(state, els, sequence, playbackStep);
+      }
+      renderPlaybackIndicator(state, els);
+    },
+    onEnded: () => {
+      stopPreview(state);
+      renderEditorMode(state, els);
+    },
+    onError: (error) => {
+      setStatus(state, els, `Preview error: ${error?.message || error}`);
+      stopPreview(state);
+      renderEditorMode(state, els);
+    },
+  });
+  state.previewEngineStatus = formatPreviewEngineStatus(played?.previewEngine || player.getEngineStatus?.());
+  if (played?.ok) setStatus(state, els, `Preview: ${state.previewEngineStatus}`);
+  else {
+    setStatus(state, els, played?.error || 'VGM preview failed');
+    stopPreview(state);
+    renderEditorMode(state, els);
+  }
+}
+
+function playPreviewFallback(state, els, sequence, rowMs) {
+  const context = audioContext || new AudioContext();
+  audioContext = context;
   let playbackStep = 0;
   applyPlaybackStep(state, els, sequence, playbackStep);
   renderEditorMode(state, els);
@@ -2014,6 +2150,8 @@ function playPreview(state, els) {
       previewTimers.push(timer);
     });
   });
+  state.previewEngineStatus = '簡易 Web Audio (fallback)';
+  setStatus(state, els, `Preview: ${state.previewEngineStatus}`);
 }
 
 function buildPlaybackSequence(song) {
@@ -2092,6 +2230,7 @@ function stopPreview(state) {
   previewTimers = [];
   if (previewRowTimer) window.clearInterval(previewRowTimer);
   previewRowTimer = 0;
+  getVgmPreviewPlayer(state)?.stop?.();
   if (state) state.playbackRow = -1;
 }
 

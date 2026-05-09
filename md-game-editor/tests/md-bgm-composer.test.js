@@ -104,7 +104,7 @@ test('md-bgm-composer declares renderer and main hook capabilities', () => {
   assert.deepEqual(manifest.types, ['editor', 'converter', 'asset']);
   assert.deepEqual(manifest.dependencies, ['midi-converter']);
   assert.equal(manifest.tab.page, 'md-bgm-composer');
-  assert.deepEqual(manifest.mainApi.hooks, ['importMidi', 'exportMusic', 'validateSong', 'analyzeVgm']);
+  assert.deepEqual(manifest.mainApi.hooks, ['importMidi', 'exportMusic', 'validateSong', 'previewMusic', 'analyzeVgm']);
   assert.ok(manifest.renderer.capabilities.includes('page'));
   assert.ok(manifest.renderer.capabilities.includes('md-bgm-composer'));
   assert.ok(manifest.renderer.capabilities.includes('music-import-handler'));
@@ -178,6 +178,12 @@ test('md-bgm-composer declares renderer and main hook capabilities', () => {
   assert.match(rendererSource, /buildPlaybackSequence/);
   assert.match(rendererSource, /\(song\.order \|\| \[\]\)\.flatMap/);
   assert.match(rendererSource, /applyPlaybackStep/);
+  assert.match(rendererSource, /previewMusic/);
+  assert.match(rendererSource, /songToPreviewVgm/);
+  assert.match(rendererSource, /cloneSongForPreview/);
+  assert.match(rendererSource, /vgm-preview-player/);
+  assert.match(rendererSource, /loadHighAccuracyEngine|getEngineStatus|previewEngineStatus/);
+  assert.match(rendererSource, /playPreviewFallback/);
   assert.match(rendererSource, /changedPattern/);
   assert.match(rendererSource, /renderPatterns\(state, els\);\s*renderEditorMode\(state, els\);/);
   assert.doesNotMatch(rendererSource, /scrollIntoView/);
@@ -465,6 +471,20 @@ test('export hook saves song and VGM, and reports missing xgmtool clearly', () =
   assert.ok(result.warnings.some((warning) => warning.includes('xgmtool')));
   assert.ok(fs.existsSync(path.join(projectDir, 'res', 'music', 'export_theme.mdbgm.json')));
   assert.ok(fs.existsSync(path.join(projectDir, 'res', 'music', 'export_theme.vgm')));
+});
+
+test('preview hook returns in-memory VGM for high-accuracy renderer playback', () => {
+  const song = core.createDefaultSong({ symbol: 'preview_theme' });
+  song.patterns[0].rows[0].cells.FM1 = { note: 'C4', midiNote: 60, instrument: 'fm_bell', volume: 12 };
+
+  const result = composer.previewMusic({ song, symbol: 'preview_theme' });
+
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.symbol, 'preview_theme');
+  assert.match(result.dataUrl, /^data:audio\/vgm;base64,/);
+  const data = Buffer.from(result.dataUrl.split(',')[1], 'base64');
+  assert.equal(data.toString('ascii', 0, 4), 'Vgm ');
+  assert.ok(result.byteLength > 0);
 });
 
 test('export hook honors selected asset source path for res-based editing', () => {

@@ -70,6 +70,7 @@ test('block-stage-editor exposes a v2 renderer module', () => {
     'listStages',
     'saveStage',
     'deleteStage',
+    'moveStage',
     'exportStageData',
     'listBlockSettings',
     'saveBlockSettings',
@@ -89,6 +90,15 @@ test('block-stage-editor refreshes referenced asset definitions on page activati
   assert.match(rendererSource, /refreshVisibleAssetDefinitions[\s\S]*?renderAssetSettings\(\);/);
   assert.match(rendererSource, /refreshVisibleAssetDefinitions[\s\S]*?updateStageThumbs\(\);/);
   assert.match(rendererSource, /observePageActivation\(\);\s*void refresh\(\);/);
+});
+
+test('block-stage-editor exposes stage reorder controls', () => {
+  const rendererSource = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'block-stage-editor', 'renderer.js'), 'utf8');
+
+  assert.match(rendererSource, /data-action="move-up"/);
+  assert.match(rendererSource, /data-action="move-down"/);
+  assert.match(rendererSource, /api\.plugins\.invokeHook\(plugin\.id, 'moveStage'/);
+  assert.match(rendererSource, /updateMoveStageButtons/);
 });
 
 test('block-game-builder declares builder role and stage-editor dependency', () => {
@@ -457,4 +467,35 @@ test('block-stage-editor delete hook removes a stage and compacts order', () => 
   assert.equal(listed.stages.length, 1);
   assert.equal(listed.stages[0].id, second.stage.id);
   assert.equal(listed.stages[0].order, 1);
+});
+
+test('block-stage-editor move hook reorders stages and regenerates headers', () => {
+  const projectDir = path.join(makeTempDir('md-editor-block-stage-move-'), 'demo');
+  const plugin = require('../plugins/block-stage-editor');
+  const context = {
+    projectDir,
+    assets: [],
+    logger: { info() {}, warn() {}, error() {}, debug() {} },
+  };
+
+  const first = plugin.saveStage({ create: true, stage: { name: 'First' } }, context);
+  const second = plugin.saveStage({ create: true, stage: { name: 'Second' } }, context);
+  const third = plugin.saveStage({ create: true, stage: { name: 'Third' } }, context);
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(third.ok, true);
+
+  const moved = plugin.moveStage({ id: third.stage.id, direction: 'up' }, context);
+  assert.equal(moved.ok, true);
+  assert.equal(moved.moved, true);
+  assert.equal(moved.stage.order, 2);
+
+  const listed = plugin.listStages({}, context);
+  assert.deepEqual(listed.stages.map((stage) => stage.name), ['First', 'Third', 'Second']);
+  assert.deepEqual(listed.stages.map((stage) => stage.order), [1, 2, 3]);
+
+  const stagesHeader = fs.readFileSync(path.join(projectDir, 'inc', 'stages.h'), 'utf-8');
+  assert.match(stagesHeader, /Stage 2: Third/);
+  assert.match(stagesHeader, /Stage 3: Second/);
 });

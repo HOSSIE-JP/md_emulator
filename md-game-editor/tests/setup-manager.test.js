@@ -144,6 +144,7 @@ test('Nuked-OPN2 build plan wires emcc, wrapper source, ym3438.c, and wasm outpu
   assert.ok(plan.args.includes(path.join(sourceDir, 'build', 'md_nuked_opn2_wrapper.c')));
   assert.ok(plan.args.includes(path.join(sourceDir, 'build', 'dist', 'nuked-opn2.js')));
   assert.ok(plan.args.includes('-sEXPORTED_FUNCTIONS=_nuke_init,_nuke_reset,_nuke_write,_nuke_render,_malloc,_free'));
+  assert.ok(plan.args.includes('-sEXPORTED_RUNTIME_METHODS=cwrap,HEAP16'));
 });
 
 test('optional Nuked-OPN2 WASM engine payload is loaded only from user tools', () => {

@@ -289,8 +289,10 @@ const audioConvertState = {
 const $ = (id) => document.getElementById(id);
 
 const el = {
+  btnSetup: $('btnSetup'),
   btnBuild: $('btnBuild'),
   btnTestPlay: $('btnTestPlay'),
+  btnExport: $('btnExport'),
   btnNewProject: $('btnNewProject'),
   btnOpenProject: $('btnOpenProject'),
   projectName: $('projectName'),
@@ -423,6 +425,11 @@ const el = {
   btnProjectPickerNew: $('btnProjectPickerNew'),
   projectPickerRoot: $('projectPickerRoot'),
   projectPickerList: $('projectPickerList'),
+  exportModal: $('exportModal'),
+  btnExportModalClose: $('btnExportModalClose'),
+  btnExportModalCancel: $('btnExportModalCancel'),
+  btnExportRom: $('btnExportRom'),
+  btnExportHtml: $('btnExportHtml'),
   resFileSelect: $('resFileSelect'),
   assetSearchInput: $('assetSearchInput'),
   assetTableBody: $('assetTableBody'),
@@ -618,6 +625,10 @@ function clearBuildLog() {
 
 function updateRomOutputActions() {
   const hasRom = !!state.lastRomPath;
+  if (el.btnExport) {
+    el.btnExport.disabled = !hasRom;
+    el.btnExport.title = hasRom ? '最後にビルドされた ROM をエクスポート' : '先に Build を実行してください';
+  }
   if (el.btnDownloadRom) {
     el.btnDownloadRom.disabled = !hasRom;
     el.btnDownloadRom.style.display = hasRom ? 'inline-flex' : 'none';
@@ -3323,6 +3334,40 @@ async function openTestPlay() {
   }
 }
 
+async function openExportModal() {
+  const romPath = await window.electronAPI.getRomPath();
+  state.lastRomPath = romPath || null;
+  updateRomOutputActions();
+  if (!state.lastRomPath) {
+    appendLog('app', 'Export できる ROM がありません。先に Build を実行してください。', 'warn');
+    return;
+  }
+  openModal(el.exportModal);
+}
+
+async function exportLastBuild(format) {
+  const romPath = await window.electronAPI.getRomPath();
+  state.lastRomPath = romPath || null;
+  updateRomOutputActions();
+  if (!state.lastRomPath) {
+    appendLog('app', 'Export できる ROM がありません。先に Build を実行してください。', 'warn');
+    return;
+  }
+  const isHtml = format === 'html';
+  const label = isHtml ? 'HTML' : 'ROM';
+  closeModal(el.exportModal);
+  setLogOpen(true);
+  appendLog('build', `${label} をエクスポートします: ${state.lastRomPath}`);
+  const result = isHtml
+    ? await window.electronAPI.exportHtml()
+    : await window.electronAPI.exportRom();
+  if (result?.ok) {
+    appendLog('build', `${label} をエクスポートしました: ${result.path}`);
+  } else if (!result?.canceled) {
+    appendLog('build', `${label} Export 失敗: ${result?.error || 'unknown'}`, 'error');
+  }
+}
+
 // ========================================================= ASSET UTILS ===
 
 function toTypeBadge(type) {
@@ -3819,6 +3864,17 @@ function formatHex(value) {
   return `0x${Math.max(0, n >>> 0).toString(16).toUpperCase()}`;
 }
 
+function formatPreviewEngineStatus(engine = {}) {
+  const label = engine.label || (engine.highAccuracyAvailable ? 'Nuked-OPN2 WASM' : '簡易 Web Audio');
+  const stateText = engine.highAccuracyAvailable
+    ? '有効'
+    : engine.state === 'loading'
+      ? '確認中'
+      : 'fallback';
+  const detail = engine.message ? ` / ${engine.message}` : '';
+  return `${label} (${stateText})${detail}`;
+}
+
 function renderBgmMetaRows(entry, meta = {}, warnings = [], { preview = false } = {}) {
   const format = String(meta.format || pathExt(getMusicMetaSourcePath(entry)).replace('.', '').toUpperCase() || 'BGM');
   const rows = [
@@ -3846,6 +3902,13 @@ function renderBgmMetaRows(entry, meta = {}, warnings = [], { preview = false } 
       ['Writes', `YM2612 ${meta.ym2612Writes || 0} / PSG ${meta.psgWrites || 0} / PCM ${meta.pcmCommands || 0}`],
       ['Flags', `GD3 ${meta.hasGd3 ? 'yes' : 'no'} / Multi ${meta.multiTrack ? 'yes' : 'no'}`],
     );
+  }
+  if (preview) {
+    rows.push(['プレビューエンジン', formatPreviewEngineStatus(meta.previewEngine || {})]);
+    const build = meta.previewEngine?.buildInfo;
+    const source = meta.previewEngine?.source || build?.source || build?.nukedOpn2Source || '';
+    const builtAt = build?.builtAt || build?.buildTime || build?.timestamp || '';
+    if (source || builtAt) rows.push(['Engine build', [source, builtAt].filter(Boolean).join(' / ')]);
   }
   if (meta.headerHex) rows.push(['Header', meta.headerHex]);
   const allWarnings = [...(Array.isArray(warnings) ? warnings : []), ...(Array.isArray(meta.warnings) ? meta.warnings : [])];
@@ -4096,6 +4159,34 @@ async function syncInlinePreview(entry) {
       if (el.audioPreviewMeta) {
         el.audioPreviewMeta.innerHTML = renderBgmMetaRows(entry, loaded.meta, loaded.warnings, { preview: true });
       }
+      player.loadHighAccuracyEngine?.().then((engineResult) => {
+        if (state.rescomp.selectedEntryLine !== entry.lineNumber) return;
+        const previewEngine = engineResult?.status || player.getEngineStatus?.() || loaded.previewEngine || loaded.meta?.previewEngine;
+        const warnings = [
+          ...(engineResult?.warning ? [engineResult.warning] : []),
+          ...(loaded.warnings || []),
+        ].filter((warning) => !(engineResult?.ok && String(warning).includes('高精度WASM')));
+        if (el.audioPreviewMeta) {
+          el.audioPreviewMeta.innerHTML = renderBgmMetaRows(entry, {
+            ...loaded.meta,
+            previewEngine,
+          }, warnings, { preview: true });
+        }
+      }).catch((err) => {
+        if (state.rescomp.selectedEntryLine !== entry.lineNumber) return;
+        const previewEngine = {
+          label: '簡易 Web Audio',
+          state: 'fallback',
+          highAccuracyAvailable: false,
+          message: String(err?.message || err),
+        };
+        if (el.audioPreviewMeta) {
+          el.audioPreviewMeta.innerHTML = renderBgmMetaRows(entry, {
+            ...loaded.meta,
+            previewEngine,
+          }, [String(err?.message || err), ...(loaded.warnings || [])], { preview: true });
+        }
+      });
     }).catch((err) => {
       if (el.audioPreviewMeta) el.audioPreviewMeta.innerHTML = `<div class="audio-meta-row"><span>${escHtml(String(err?.message || err))}</span></div>`;
     });
@@ -4405,6 +4496,15 @@ async function toggleVgmPreview(entry) {
   if (result?.ok) {
     state.preview.vgmDurationSec = Number(result.durationSec || state.preview.vgmDurationSec || 0);
     syncAudioPlayer(true);
+    if (el.audioPreviewMeta && result.previewEngine) {
+      const current = getCurrentSelectedEntry();
+      if (current && current.id === entry.id) {
+        const engineRow = `<div class="audio-meta-row audio-meta-engine"><span class="audio-meta-label">使用中エンジン</span><span>${escHtml(formatPreviewEngineStatus(result.previewEngine))}</span></div>`;
+        if (!el.audioPreviewMeta.innerHTML.includes('使用中エンジン')) {
+          el.audioPreviewMeta.innerHTML += engineRow;
+        }
+      }
+    }
   } else {
     stopVgmPreview();
     if (el.audioPreviewMeta) {
@@ -7593,8 +7693,16 @@ function bindEvents() {
     renderPluginList();
   });
 
+  el.btnSetup?.addEventListener('click', () => {
+    window.electronAPI.openSetupWindow();
+  });
   el.btnBuild?.addEventListener('click', runBuild);
   el.btnTestPlay?.addEventListener('click', openTestPlay);
+  el.btnExport?.addEventListener('click', openExportModal);
+  el.btnExportModalClose?.addEventListener('click', () => closeModal(el.exportModal));
+  el.btnExportModalCancel?.addEventListener('click', () => closeModal(el.exportModal));
+  el.btnExportRom?.addEventListener('click', () => exportLastBuild('rom'));
+  el.btnExportHtml?.addEventListener('click', () => exportLastBuild('html'));
   el.btnNewProject?.addEventListener('click', openProjectPicker);
   el.btnOpenProject?.addEventListener('click', openProjectPicker);
   el.projectName?.addEventListener('click', openProjectPicker);

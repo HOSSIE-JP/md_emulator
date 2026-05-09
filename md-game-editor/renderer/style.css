@@ -116,6 +116,8 @@ button.project-path-chip {
 .action-btn.testplay-btn { border-color: #1f4028; background: #0b1e12; color: var(--green); }
 .action-btn.testplay-btn:hover { border-color: var(--green); }
 .action-btn.setup-btn { color: var(--muted); }
+.action-btn.export-btn { border-color: #5a4a24; background: #21180b; color: #f0c36a; }
+.action-btn.export-btn:hover { border-color: var(--yellow); background: #2c210f; }
 .action-btn.building { opacity: 0.6; cursor: not-allowed; }
 .action-btn:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
 .action-btn:disabled:hover { border-color: var(--border); background: var(--panel); }
@@ -628,6 +630,14 @@ button.project-path-chip {
   min-width: 100px;
 }
 
+.audio-meta-engine {
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #101722;
+}
+
 .audio-meta-loading {
   color: var(--muted);
   font-size: 12px;
@@ -945,6 +955,40 @@ button.project-path-chip {
 .danger-icon-btn:hover {
   background: rgba(224, 80, 96, 0.12);
   color: #ff6070;
+}
+
+.export-choice-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.export-choice-btn {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #111824;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.export-choice-btn:hover {
+  border-color: var(--accent);
+  background: var(--panel-hover);
+}
+
+.export-choice-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.export-choice-desc {
+  font-size: 11px;
+  color: var(--muted);
 }
 
 /* ====================================================== RESIZE MODAL */

@@ -34,6 +34,29 @@ test('header project chips are actionable buttons wired to project actions', () 
   assert.match(renderer, /window\.electronAPI\.openPathInExplorer\(state\.project\.dir\)/);
 });
 
+test('header build controls include setup and export flow', () => {
+  const html = readRendererFile('index.html');
+  const renderer = readRendererFile('renderer.js');
+  const css = readRendererFile('style.css');
+
+  assert.match(html, /id="btnSetup"[\s\S]*SetUp[\s\S]*id="btnBuild"[\s\S]*Build[\s\S]*id="btnTestPlay"[\s\S]*Test Play[\s\S]*id="btnExport"[\s\S]*Export/);
+  assert.match(html, /id="exportModal"/);
+  assert.match(html, /id="btnExportRom"/);
+  assert.match(html, /id="btnExportHtml"/);
+  assert.match(renderer, /btnSetup:\s*\$\('btnSetup'\)/);
+  assert.match(renderer, /btnExport:\s*\$\('btnExport'\)/);
+  assert.match(renderer, /el\.btnSetup\?\.addEventListener\('click'[\s\S]*openSetupWindow\(\)/);
+  assert.match(renderer, /el\.btnExport\?\.addEventListener\('click',\s*openExportModal\)/);
+  assert.match(renderer, /function updateRomOutputActions\(\)[\s\S]*el\.btnExport\.disabled = !hasRom/);
+  assert.match(renderer, /async function openExportModal\(\)[\s\S]*window\.electronAPI\.getRomPath\(\)/);
+  assert.match(renderer, /async function exportLastBuild\(format\)/);
+  assert.match(renderer, /window\.electronAPI\.exportRom\(\)/);
+  assert.match(renderer, /window\.electronAPI\.exportHtml\(\)/);
+  assert.match(renderer, /const result = isHtml\s*\? await window\.electronAPI\.exportHtml\(\)\s*: await window\.electronAPI\.exportRom\(\)/);
+  assert.match(css, /\.action-btn\.export-btn/);
+  assert.match(css, /\.export-choice-grid/);
+});
+
 test('setup page exposes optional Nuked-OPN2 user download flow', () => {
   const html = readRendererFile('setup.html');
 

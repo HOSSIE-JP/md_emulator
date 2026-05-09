@@ -14,12 +14,13 @@
     "listStages",
     "saveStage",
     "deleteStage",
+    "moveStage",
     "exportStageData",
     "listBlockSettings",
     "saveBlockSettings"
   ],
   "mainApi": {
-    "hooks": ["listStages", "saveStage", "deleteStage", "exportStageData", "listBlockSettings", "saveBlockSettings"]
+    "hooks": ["listStages", "saveStage", "deleteStage", "moveStage", "exportStageData", "listBlockSettings", "saveBlockSettings"]
   },
   "tab": {
     "label": "ブロック崩し",

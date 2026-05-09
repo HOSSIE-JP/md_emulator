@@ -49,6 +49,14 @@ function deleteStage(payload, context = {}) {
   }
 }
 
+function moveStage(payload, context = {}) {
+  try {
+    return stageService.moveStage(getProjectDir(context), payload || {}, context.assets || []);
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
 function exportStageData(_payload, context = {}) {
   try {
     return stageService.exportStageData(getProjectDir(context), context.assets || []);
@@ -81,6 +89,7 @@ module.exports = {
   listStages,
   saveStage,
   deleteStage,
+  moveStage,
   exportStageData,
   listBlockSettings,
   saveBlockSettings,

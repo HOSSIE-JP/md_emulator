@@ -98,6 +98,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
             <select class="bse-stage-select" title="ステージ選択"></select>
             <button class="bse-icon" data-action="new" title="新規">+</button>
             <button class="bse-icon danger" data-action="delete" title="削除">-</button>
+            <button class="bse-icon" data-action="move-up" title="前へ移動">↑</button>
+            <button class="bse-icon" data-action="move-down" title="次へ移動">↓</button>
           </div>
           <label class="bse-field">ステージ名<input class="bse-stage-name" type="text"></label>
           <label class="bse-field">BGM<div class="bse-row"><select class="bse-bgm-select"></select><button class="bse-icon" data-action="preview-bgm" title="プレビュー">▶</button></div></label>
@@ -162,6 +164,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     assetTabs: Array.from(root.querySelectorAll('[data-asset-tab]')),
     assetWrap: root.querySelector('.bse-asset-table-wrap'),
     stageSelect: root.querySelector('.bse-stage-select'),
+    moveUp: root.querySelector('[data-action="move-up"]'),
+    moveDown: root.querySelector('[data-action="move-down"]'),
     stageName: root.querySelector('.bse-stage-name'),
     bgSelect: root.querySelector('.bse-bg-select'),
     bgmSelect: root.querySelector('.bse-bgm-select'),
@@ -357,6 +361,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     state.current = JSON.parse(JSON.stringify(stage || blankStage(state.stages.length + 1)));
     syncFormFromStage();
     setDirty(false);
+    updateMoveStageButtons();
     void loadImageForSymbol(state.current.background_image_symbol);
     draw();
   }
@@ -370,6 +375,14 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       ui.stageSelect.appendChild(opt);
     });
     if (state.current?.id) ui.stageSelect.value = state.current.id;
+    updateMoveStageButtons();
+  }
+
+  function updateMoveStageButtons() {
+    const index = state.stages.findIndex((stage) => stage.id === state.current?.id);
+    const hasSelection = index >= 0;
+    ui.moveUp.disabled = !hasSelection || index === 0;
+    ui.moveDown.disabled = !hasSelection || index === state.stages.length - 1;
   }
 
   function renderPalettes() {
@@ -437,13 +450,14 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const result = await api.plugins.invokeHook(plugin.id, 'saveStage', { stage: state.current });
     if (!result?.ok) {
       logger.error(result?.error || 'ステージ保存に失敗しました');
-      return;
+      return false;
     }
     state.current = result.stage;
     setDirty(false);
     await refresh();
     ui.stageSelect.value = state.current.id;
     setStatus(`保存しました: ${state.current.name}`);
+    return true;
   }
 
   async function createStage() {
@@ -467,6 +481,22 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     state.current = null;
     await refresh();
     setCurrentStage(state.stages[0] || blankStage(1));
+  }
+
+  async function moveStage(direction) {
+    if (!state.current?.id) return;
+    if (state.dirty && !(await saveCurrent())) return;
+    const id = state.current?.id;
+    if (!id) return;
+    const result = await api.plugins.invokeHook(plugin.id, 'moveStage', { id, direction });
+    if (!result?.ok) {
+      logger.error(result?.error || 'ステージの並び替えに失敗しました');
+      return;
+    }
+    await refresh();
+    setCurrentStage(result.stage || state.stages.find((stage) => stage.id === id) || state.stages[0] || blankStage(1));
+    renderStageOptions();
+    setStatus(result.moved ? `並び替えました: ${state.current.name}` : 'これ以上移動できません');
   }
 
   function syncSettingsForm() {
@@ -1761,6 +1791,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const action = event.target?.dataset?.action;
     if (action === 'new') void createStage();
     if (action === 'delete') void deleteStage();
+    if (action === 'move-up') void moveStage('up');
+    if (action === 'move-down') void moveStage('down');
     if (action === 'save-all') void saveAll();
     if (action === 'preview-bgm') void previewAsset('bgms', ui.bgmSelect.value);
     if (action === 'preview-row-audio') void toggleAudioPreview(event.target, event.target.dataset.symbol);
@@ -1796,6 +1828,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   ui.stageSelect.addEventListener('change', () => {
     const stage = state.stages.find((item) => item.id === ui.stageSelect.value);
     if (stage) setCurrentStage(stage);
+    updateMoveStageButtons();
   });
   [ui.stageName, ui.bgSelect, ui.bgmSelect, ui.clearSelect].forEach((control) => {
     control.addEventListener('input', () => {

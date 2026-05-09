@@ -704,6 +704,33 @@ function deleteStage(projectDir, payload = {}, assets = []) {
   return { ok: true, deletedId: id, export: exported };
 }
 
+function moveStage(projectDir, payload = {}, assets = []) {
+  const id = String(payload.id || payload.stageId || '').trim();
+  const direction = String(payload.direction || '').toLowerCase();
+  if (!id) return { ok: false, error: 'stage id is required' };
+  if (direction !== 'up' && direction !== 'down') return { ok: false, error: 'direction must be up or down' };
+
+  const entries = loadStages(projectDir);
+  const fromIndex = entries.findIndex((entry) => entry.stage.id === id);
+  if (fromIndex < 0) return { ok: false, error: `stage not found: ${id}` };
+  const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
+  if (toIndex < 0 || toIndex >= entries.length) {
+    return { ok: true, moved: false, stage: entries[fromIndex].stage, export: exportStageData(projectDir, assets) };
+  }
+
+  const nextEntries = entries.slice();
+  const [movedEntry] = nextEntries.splice(fromIndex, 1);
+  nextEntries.splice(toIndex, 0, movedEntry);
+  let movedStage = movedEntry.stage;
+  nextEntries.forEach((entry, index) => {
+    const nextStage = { ...entry.stage, order: index + 1 };
+    if (entry.stage.id === id) movedStage = nextStage;
+    writeJson(entry.filePath, nextStage);
+  });
+  const exported = exportStageData(projectDir, assets);
+  return { ok: true, moved: true, stage: movedStage, export: exported };
+}
+
 function listBlockSettings(projectDir, assets = []) {
   ensureDir(path.dirname(getSettingsPath(projectDir)));
   ensureResourcesFile(projectDir);
@@ -739,6 +766,7 @@ module.exports = {
   listStages,
   saveStage,
   deleteStage,
+  moveStage,
   exportStageData,
   listBlockSettings,
   saveBlockSettings,
