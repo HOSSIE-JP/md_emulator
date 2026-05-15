@@ -22,6 +22,36 @@ function loadMainForWindowState(userData) {
   }).__test;
 }
 
+function loadMainWithLifecycleHooks(userData) {
+  const events = new Map();
+  let lockRequests = 0;
+  let quitRequests = 0;
+  const api = loadWithMockedElectron(path.join(__dirname, '..', 'main.js'), {
+    userData,
+    app: {
+      requestSingleInstanceLock() {
+        lockRequests += 1;
+        return true;
+      },
+      whenReady() {
+        return { then() {} };
+      },
+      on(eventName, handler) {
+        events.set(eventName, handler);
+      },
+      quit() {
+        quitRequests += 1;
+      },
+    },
+  }).__test;
+  return {
+    api,
+    events,
+    getLockRequests: () => lockRequests,
+    getQuitRequests: () => quitRequests,
+  };
+}
+
 function loadMainWithBuildSystem(userData) {
   delete require.cache[require.resolve('../build-system')];
   delete require.cache[require.resolve('../plugin-manager')];
@@ -65,6 +95,31 @@ test('main window bounds persist to userData and restore on next read', () => {
 
   const statePath = path.join(userData, 'window-state.json');
   assert.ok(fs.existsSync(statePath));
+});
+
+test('main process uses a single instance lock and app shutdown hooks', () => {
+  const lifecycle = loadMainWithLifecycleHooks(makeTempUserData());
+
+  assert.equal(lifecycle.getLockRequests(), 1);
+  assert.equal(typeof lifecycle.events.get('second-instance'), 'function');
+  assert.equal(typeof lifecycle.events.get('before-quit'), 'function');
+  assert.equal(typeof lifecycle.events.get('will-quit'), 'function');
+  assert.equal(typeof lifecycle.events.get('window-all-closed'), 'function');
+  assert.equal(typeof lifecycle.api.prepareForAppQuit, 'function');
+
+  lifecycle.events.get('window-all-closed')();
+  assert.equal(lifecycle.getQuitRequests(), 1);
+});
+
+test('main lifecycle cleanup covers auxiliary windows and api child process', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
+
+  assert.match(source, /function closeAuxiliaryWindows\(\)[\s\S]*debugWindow/);
+  assert.match(source, /function closeAuxiliaryWindows\(\)[\s\S]*setupWindow/);
+  assert.match(source, /function closeAuxiliaryWindows\(\)[\s\S]*testPlayWindow/);
+  assert.match(source, /function closeAuxiliaryWindows\(\)[\s\S]*testPlaySettingsWindow/);
+  assert.match(source, /function closeAuxiliaryWindows\(\)[\s\S]*logWindow/);
+  assert.match(source, /function stopApiServerSync\(\)[\s\S]*taskkill/);
 });
 
 test('log snapshots are normalized and capped for popout forwarding', () => {

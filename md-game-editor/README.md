@@ -71,7 +71,7 @@ wasm-pack -V
 cd d:\path\to\md_emulator
 
 # 1. WASM コアのビルド
-wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg
+npm run wasm:build
 
 # 2. Electron 依存関係のインストール
 cd md-game-editor
@@ -81,7 +81,7 @@ npm install
 npm run copy-pkg
 ```
 
-> **注意**: `md-game-editor/plugins/standard-emulator/pkg/` は `.gitignore` 対象です。`copy-pkg` または `prepare:dist` で都度生成してください。
+> **注意**: `frontend/pkg/` と `md-game-editor/plugins/standard-emulator/pkg/` は `.gitignore` 対象です。`npm run wasm:build` で前者を生成し、`copy-pkg` または `prepare:dist` で後者へコピーしてください。
 
 ---
 
@@ -195,9 +195,10 @@ npm run build:mac
 
 内部で実行されること (`prepare:dist`):
 
-1. `wasm-pack build` で WASM コアを再ビルド
-2. `cargo build --release -p md-api` で API バイナリを生成
-3. バイナリを `md-game-editor/plugins/standard-api-emulator/bin/` にコピー
+1. `npm run wasm:build:release` 相当で WASM コア、`frontend/sw.js`、`frontend/roms/index.json` を再生成
+2. `frontend/pkg/` などを標準 WASM エミュレータープラグインへコピー
+3. `cargo build --release -p md-api` で API バイナリを生成
+4. バイナリを `md-game-editor/plugins/standard-api-emulator/bin/` にコピー
 
 VSCode タスクからも実行できます:
 

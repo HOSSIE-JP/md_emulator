@@ -1,6 +1,9 @@
 {
   "private": true,
   "scripts": {
+    "wasm:build": "node tools/build-wasm-package.js --dev",
+    "wasm:build:release": "node tools/build-wasm-package.js --release",
+    "wasm:rebuild": "npm run wasm:build",
     "test": "npm --prefix md-game-editor test",
     "check:duplication": "jscpd --config .jscpd.json",
     "check:duplication:core": "jscpd --config .jscpd-core.json crates src frontend",

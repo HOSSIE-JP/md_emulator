@@ -40,14 +40,14 @@ cargo test --workspace
 `md-wasm` は `cdylib` を出力する設定です。`wasm-pack` を使う場合の例:
 
 ```powershell
-cargo install wasm-pack
-wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg
+cargo install wasm-pack --locked
+npm run wasm:build
 ```
 
-ビルド後は `frontend/pkg` にブラウザ向けバンドルが生成され、`frontend/index.html` から API を介さず直接実行できます。
+ビルド後は `frontend/pkg` にブラウザ向けバンドルが生成され、同時に `frontend/sw.js` と `frontend/roms/index.json` も更新されます。`frontend/index.html` から API を介さず直接実行できます。
 
 > 注: `frontend/index.html` が md-wasm プレイヤー本体です。`frontend/wasm.html` は `index.html` へリダイレクトします。
 
 ## Bundled ROM
 
-Bundled ROM の自動更新タスクは廃止しました。WASM プレイヤーでROMを確認する場合は、画面上のファイル選択またはドラッグ&ドロップでROMを読み込んでください。
+`npm run wasm:build` / `npm run wasm:build:release` は、`frontend/roms/` 配下のファイル一覧から `frontend/roms/index.json` を再生成します。WASM プレイヤーでは、画面上のファイル選択またはドラッグ&ドロップでもROMを読み込めます。

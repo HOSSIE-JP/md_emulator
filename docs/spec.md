@@ -119,11 +119,10 @@ AI が実行した tool 呼び出しは操作ログとして保存し、REST / M
 
 - 公開対象: `frontend/index.html`（WASM直実行プレーヤー）
 - 配信先: GitHub Pages（Project Pages: `/md_emulator/`）
-- デプロイトリガー: `v*` タグ push（`deploy-pages.yml`）
+- デプロイトリガー: `v*` タグ push、`main` / `master` への push、手動実行（`deploy-pages.yml`）
 - ビルド内容:
 	- `wasm-pack build crates/md-wasm --target web --release --out-dir ../../frontend/pkg`
-	- `wasm-opt -Oz` による WASM 最適化
-	- `roms/` から `frontend/roms/` への ROM 同梱
+	- `frontend/sw.template.js` から `frontend/sw.js` を生成
 	- `frontend/roms/index.json` の自動生成
 
 ## PWA対応範囲

@@ -4,7 +4,7 @@ const os = require('os');
 const net = require('net');
 const { shell } = require('electron');
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const electronPackageJson = require('./package.json');
 const iconv = require('iconv-lite');
 
@@ -45,6 +45,12 @@ const appBuildMeta = readAppBuildMeta();
   }
 })();
 
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+  process.exit(0);
+}
+
 const setupManager = require('./setup-manager');
 const buildSystem = require('./build-system');
 const rescompManager = require('./rescomp-manager');
@@ -65,6 +71,7 @@ let apiServerPort = null;
 let editorControlService = null;
 let editorControlServer = null;
 let latestLogSnapshot = { entries: [] };
+let isQuitting = false;
 
 const MAIN_WINDOW_DEFAULT_BOUNDS = { width: 1280, height: 860 };
 const MAIN_WINDOW_MIN_BOUNDS = { width: 960, height: 640 };
@@ -120,6 +127,75 @@ function saveMainWindowBounds(win) {
   }
 }
 
+function closeWindowIfOpen(win) {
+  if (!win || win.isDestroyed?.()) return false;
+  try {
+    win.close();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function closeAuxiliaryWindows() {
+  [
+    debugWindow,
+    setupWindow,
+    testPlayWindow,
+    testPlaySettingsWindow,
+    logWindow,
+  ].forEach(closeWindowIfOpen);
+}
+
+function stopEditorControlServer() {
+  if (!editorControlServer) return false;
+  const server = editorControlServer;
+  editorControlServer = null;
+  try {
+    void server.stop();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function stopApiServerSync() {
+  if (!apiServerProcess) {
+    apiServerPort = null;
+    return false;
+  }
+
+  const proc = apiServerProcess;
+  apiServerProcess = null;
+  apiServerPort = null;
+
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(proc.pid), '/t', '/f'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    return true;
+  }
+
+  try {
+    process.kill(-proc.pid, 'SIGTERM');
+  } catch (_) {
+    try {
+      proc.kill('SIGTERM');
+    } catch (__) {
+    }
+  }
+  return true;
+}
+
+function prepareForAppQuit() {
+  isQuitting = true;
+  saveMainWindowBounds(mainWindow);
+  closeAuxiliaryWindows();
+  stopEditorControlServer();
+  stopApiServerSync();
+}
+
 function createWindow() {
   const bounds = readMainWindowBounds();
   mainWindow = new BrowserWindow({
@@ -141,6 +217,9 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    if (!isQuitting && process.platform !== 'darwin') {
+      app.quit();
+    }
   });
 }
 
@@ -2687,29 +2766,44 @@ ipcMain.handle('app:quit', async () => {
   return { ok: true };
 });
 
+app.on('second-instance', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized?.()) {
+      mainWindow.restore();
+    }
+    mainWindow.show?.();
+    mainWindow.focus();
+    return;
+  }
+
+  if (app.isReady?.()) {
+    createWindow();
+  }
+});
+
 app.whenReady().then(() => {
   createMenu();
   createWindow();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (!isQuitting && BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
 });
 
+app.on('before-quit', () => {
+  prepareForAppQuit();
+});
+
+app.on('will-quit', () => {
+  stopEditorControlServer();
+  stopApiServerSync();
+});
+
 app.on('window-all-closed', () => {
-  stopApiServer();
-  if (editorControlServer) {
-    void editorControlServer.stop();
-  }
-  if (debugWindow && !debugWindow.isDestroyed()) {
-    debugWindow.close();
-    debugWindow = null;
-  }
-  if (logWindow && !logWindow.isDestroyed()) {
-    logWindow.close();
-    logWindow = null;
+  if (process.platform === 'darwin') {
+    return;
   }
   app.quit();
 });
@@ -2724,5 +2818,9 @@ module.exports.__test = {
   normalizeLogSnapshot,
   syncProjectPluginRoleState,
   getEditorControlService,
+  closeAuxiliaryWindows,
+  stopApiServerSync,
+  stopEditorControlServer,
+  prepareForAppQuit,
   resolveUnderCodeRoot,
 };

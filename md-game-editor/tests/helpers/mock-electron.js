@@ -25,6 +25,12 @@ function loadWithMockedElectron(modulePath, appOverrides = {}) {
     whenReady() {
       return Promise.resolve();
     },
+    requestSingleInstanceLock() {
+      return true;
+    },
+    isReady() {
+      return true;
+    },
     on() {},
     quit() {},
     ...appOverrides.app,

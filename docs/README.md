@@ -21,4 +21,4 @@
 6. ROM情報を確認:  
    `Invoke-RestMethod -Method Get http://127.0.0.1:8080/api/v1/rom/info`
 7. `frontend/api-client.html` を開き、REST API操作を確認する
-8. 必要なら `wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg` を実行し、`frontend/index.html`（`wasm.html` は同ページへリダイレクト）で WASM プレイヤーを確認する
+8. 必要なら `npm run wasm:build` を実行し、`frontend/index.html`（`wasm.html` は同ページへリダイレクト）で WASM プレイヤーを確認する

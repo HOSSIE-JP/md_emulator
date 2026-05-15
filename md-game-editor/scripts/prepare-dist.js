@@ -26,6 +26,11 @@ function copyFile(src, dest) {
 }
 
 function prepareFrontendAssets() {
+  console.log('Building frontend WASM package (release)...');
+  runOrThrow(process.execPath, [path.join(repoRoot, 'tools', 'build-wasm-package.js'), '--release'], {
+    cwd: repoRoot,
+  });
+
   console.log('Preparing frontend WASM assets...');
   runOrThrow(process.execPath, [path.join(appRoot, 'scripts', 'copy-pkg.js')], {
     cwd: appRoot,

@@ -171,8 +171,8 @@ ROMロード状態と実行進行をまとめて確認できます。
 API を介さずブラウザ内で直接実行したい場合は、先に WASM バンドルを生成します。
 
 ```powershell
-cargo install wasm-pack
-wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg
+cargo install wasm-pack --locked
+npm run wasm:build
 python -m http.server 5500 --directory frontend
 ```
 
@@ -193,7 +193,7 @@ python -m http.server 5500 --directory frontend
 
 ## 5) GitHub Pages で公開する（リリースタグ時）
 
-このリポジトリは `v*` 形式のタグ push 時に Pages デプロイを行う想定です。
+このリポジトリは `v*` 形式のタグ push、`main` / `master` への push、または手動実行 (`workflow_dispatch`) で Pages デプロイを行います。
 
 例:
 
@@ -205,10 +205,9 @@ git push origin v0.1.0
 デプロイワークフローでは以下を実施します。
 
 1. `wasm-pack` で `frontend/pkg` を再生成
-2. `wasm-opt -Oz` で `md_wasm_bg.wasm` を最適化
-3. リポジトリ `roms/` 配下の ROM を `frontend/roms/` へ取り込み
-4. `frontend/roms/index.json` を自動生成
-5. `frontend/` を GitHub Pages へデプロイ
+2. `sw.template.js` から `frontend/sw.js` を生成
+3. `frontend/roms/index.json` を自動生成
+4. `frontend/` を GitHub Pages へデプロイ
 
 公開URL（Project Pages）:
 
@@ -261,7 +260,7 @@ cargo test -p md-cpu-z80
 ### 前提
 
 - Node.js 18+
-- `frontend/pkg/` が生成済みであること（未生成なら先に `wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg` を実行）
+- `frontend/pkg/` が生成済みであること（未生成なら先にリポジトリルートで `npm run wasm:build` を実行）
 
 ### 初回セットアップ
 
@@ -347,7 +346,9 @@ cargo test -p md-core --lib
 - `WASM: Build Package (release)`
 - `WASM: Rebuild Package`
 
-Bundled ROM の自動更新タスクは廃止しました。WASM プレイヤーでROMを確認する場合は、画面上のファイル選択またはドラッグ&ドロップで読み込んでください。
+これらのタスクはルートの npm scripts (`npm run wasm:build` / `npm run wasm:build:release`) を呼びます。直接ターミナルで実行しても同じ結果になります。
+
+WASM ビルド時に `frontend/roms/index.json` も更新されます。WASM プレイヤーで一時的なROMを確認する場合は、画面上のファイル選択またはドラッグ&ドロップでも読み込めます。
 
 ## 10) 他プロジェクトへの組み込み
 
@@ -358,7 +359,7 @@ WASM 版エミュレーターを外部の Web アプリや Electron アプリに
 
 ```bash
 # 1. WASM をビルド
-wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg
+npm run wasm:build
 
 # 2. 必要ファイルを自分のプロジェクトにコピー
 cp -r frontend/pkg/   your-project/public/pkg/
