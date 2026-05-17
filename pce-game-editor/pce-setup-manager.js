@@ -219,7 +219,15 @@ function executableName(name) {
 }
 
 function executableNamesForTool(tool) {
-  return tool.executableBaseNames.map(executableName);
+  const names = new Set();
+  tool.executableBaseNames.forEach((name) => {
+    names.add(executableName(name));
+    names.add(name);
+    names.add(`${name}.exe`);
+    names.add(`${name}.cmd`);
+    names.add(`${name}.bat`);
+  });
+  return Array.from(names);
 }
 
 function isUsableExecutableCandidate(absPath) {
@@ -834,35 +842,83 @@ function downloadToFile(url, destPath, onProgress, options = {}, redirectCount =
 function runExtractor(command, args) {
   const result = spawnSync(command, args, { encoding: 'utf-8' });
   if (result.status === 0) return true;
-  return result.stderr || result.stdout || `${command} failed`;
+  return result.stderr || result.stdout || result.error?.message || `${command} failed`;
 }
 
-function extractArchive(archivePath, destDir) {
+function powershellExpandArchiveArgs(archivePath, destDir) {
+  return [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    '& { param($ArchivePath, $DestinationPath) Expand-Archive -LiteralPath $ArchivePath -DestinationPath $DestinationPath -Force }',
+    archivePath,
+    destDir,
+  ];
+}
+
+function runExtractors(extractors, run = runExtractor) {
+  const failures = [];
+  for (const [command, args] of extractors) {
+    const result = run(command, args);
+    if (result === true) return true;
+    failures.push(result);
+  }
+  throw new Error(failures.filter(Boolean).join(' | ') || 'archive extraction failed');
+}
+
+function extractArchive(archivePath, destDir, options = {}) {
   ensureDirSync(destDir);
+  const platform = normalizePlatform(options.platform);
+  const run = options.runExtractor || runExtractor;
   const lower = archivePath.toLowerCase();
   if (lower.endsWith('.zip')) {
-    const result = runExtractor('unzip', ['-o', archivePath, '-d', destDir]);
-    if (result !== true) throw new Error(result);
+    const extractors = platform === 'win32'
+      ? [
+        ['powershell.exe', powershellExpandArchiveArgs(archivePath, destDir)],
+        ['pwsh', powershellExpandArchiveArgs(archivePath, destDir)],
+        ['tar', ['-xf', archivePath, '-C', destDir]],
+        ['unzip', ['-o', archivePath, '-d', destDir]],
+      ]
+      : [
+        ['unzip', ['-o', archivePath, '-d', destDir]],
+        ['tar', ['-xf', archivePath, '-C', destDir]],
+      ];
+    runExtractors(extractors, run);
     return { ok: true, destDir };
   }
   if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
-    const result = runExtractor('tar', ['-xzf', archivePath, '-C', destDir]);
-    if (result !== true) throw new Error(result);
+    const extractors = platform === 'win32'
+      ? [['tar', ['-xf', archivePath, '-C', destDir]]]
+      : [
+        ['tar', ['-xzf', archivePath, '-C', destDir]],
+        ['tar', ['-xf', archivePath, '-C', destDir]],
+      ];
+    runExtractors(extractors, run);
     return { ok: true, destDir };
   }
   if (lower.endsWith('.tar.xz') || lower.endsWith('.txz')) {
-    const result = runExtractor('tar', ['-xJf', archivePath, '-C', destDir]);
-    if (result !== true) throw new Error(result);
+    const extractors = platform === 'win32'
+      ? [['tar', ['-xf', archivePath, '-C', destDir]]]
+      : [
+        ['tar', ['-xJf', archivePath, '-C', destDir]],
+        ['tar', ['-xf', archivePath, '-C', destDir]],
+      ];
+    runExtractors(extractors, run);
     return { ok: true, destDir };
   }
   if (lower.endsWith('.tar.bz2') || lower.endsWith('.tbz2')) {
-    const result = runExtractor('tar', ['-xjf', archivePath, '-C', destDir]);
-    if (result !== true) throw new Error(result);
+    const extractors = platform === 'win32'
+      ? [['tar', ['-xf', archivePath, '-C', destDir]]]
+      : [
+        ['tar', ['-xjf', archivePath, '-C', destDir]],
+        ['tar', ['-xf', archivePath, '-C', destDir]],
+      ];
+    runExtractors(extractors, run);
     return { ok: true, destDir };
   }
   if (lower.endsWith('.tar')) {
-    const result = runExtractor('tar', ['-xf', archivePath, '-C', destDir]);
-    if (result !== true) throw new Error(result);
+    runExtractors([['tar', ['-xf', archivePath, '-C', destDir]]], run);
     return { ok: true, destDir };
   }
   if (lower.endsWith('.7z')) {
@@ -874,7 +930,7 @@ function extractArchive(archivePath, destDir) {
     ];
     const failures = [];
     for (const [command, args] of extractors) {
-      const result = runExtractor(command, args);
+      const result = run(command, args);
       if (result === true) return { ok: true, destDir };
       failures.push(result);
     }

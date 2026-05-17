@@ -146,6 +146,62 @@ test('setup manager detects executable symlinks in large SDK archives', () => {
   assert.equal(setup.findExecutable(path.join(userData, 'tools', 'llvm-mos-sdk'), ['mos-pce-clang']), path.join(binDir, 'mos-pce-clang'));
 });
 
+test('setup manager detects Windows executable names after archive extraction', () => {
+  const userData = tempUserData();
+  const setup = loadWithMockedElectron(path.join(__dirname, '..', 'pce-setup-manager.js'), { userData });
+  const binDir = path.join(userData, 'tools', 'llvm-mos-sdk', 'llvm-mos', 'bin');
+  const exePath = path.join(binDir, 'mos-pce-clang.exe');
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.writeFileSync(exePath, '');
+
+  assert.equal(
+    setup.findExecutable(path.join(userData, 'tools', 'llvm-mos-sdk'), ['mos-pce-clang.exe', 'mos-pce-clang']),
+    exePath,
+  );
+});
+
+test('setup manager extracts zip on Windows without requiring unzip', () => {
+  const userData = tempUserData();
+  const setup = loadWithMockedElectron(path.join(__dirname, '..', 'pce-setup-manager.js'), { userData });
+  const archivePath = path.join(userData, 'Downloads', 'cc65-snapshot-win32.zip');
+  const destDir = path.join(userData, 'PCE Tools', 'cc65');
+  const calls = [];
+
+  setup.extractArchive(archivePath, destDir, {
+    platform: 'win32',
+    runExtractor(command, args) {
+      calls.push({ command, args });
+      return command === 'powershell.exe' ? true : `${command} should not be used`;
+    },
+  });
+
+  assert.equal(calls[0].command, 'powershell.exe');
+  assert.ok(calls[0].args.some((arg) => String(arg).includes('Expand-Archive')));
+  assert.ok(calls[0].args.includes(archivePath));
+  assert.ok(calls[0].args.includes(destDir));
+});
+
+test('setup manager extracts Windows tar.xz with tar auto detection', () => {
+  const userData = tempUserData();
+  const setup = loadWithMockedElectron(path.join(__dirname, '..', 'pce-setup-manager.js'), { userData });
+  const archivePath = path.join(userData, 'Downloads', 'llvm-mos-windows.tar.xz');
+  const destDir = path.join(userData, 'PCE Tools', 'llvm-mos-sdk');
+  const calls = [];
+
+  setup.extractArchive(archivePath, destDir, {
+    platform: 'win32',
+    runExtractor(command, args) {
+      calls.push({ command, args });
+      return true;
+    },
+  });
+
+  assert.deepEqual(calls, [{
+    command: 'tar',
+    args: ['-xf', archivePath, '-C', destDir],
+  }]);
+});
+
 test('emulator placeholder records GPL download policy without adding runtime', () => {
   const userData = tempUserData();
   const setup = loadWithMockedElectron(path.join(__dirname, '..', 'pce-setup-manager.js'), { userData });
