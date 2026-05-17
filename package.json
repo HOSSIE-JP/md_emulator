@@ -5,6 +5,8 @@
     "wasm:build:release": "node tools/build-wasm-package.js --release",
     "wasm:rebuild": "npm run wasm:build",
     "test": "npm --prefix md-game-editor test",
+    "pce-editor:start": "npm --prefix pce-game-editor start",
+    "pce-editor:test": "npm --prefix pce-game-editor test",
     "check:duplication": "jscpd --config .jscpd.json",
     "check:duplication:core": "jscpd --config .jscpd-core.json crates src frontend",
     "check:duplication:strict": "jscpd --config .jscpd.json --threshold 0",

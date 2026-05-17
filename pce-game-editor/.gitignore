@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/
+out/
+*.log
+build-meta.json
+
+# GPL / downloaded emulator assets must stay local.
+plugins/pce-standard-emulator/data/
+tools/
+projects/

@@ -79,6 +79,46 @@ test('Marsdev path resolution accepts either the root or m68k-elf directory', ()
   assert.equal(typeof status.version, 'string');
 });
 
+test('toolchain selection prefers XGM2-capable SGDK over older Marsdev on Unix', () => {
+  const userData = makeTempUserData();
+  const sgdkPath = path.join(userData, 'tools', 'sgdk', 'SGDK-2.11');
+  const marsdevRoot = path.join(userData, 'tools', 'marsdev', 'mars');
+  const marsdevPath = path.join(marsdevRoot, 'm68k-elf');
+  fs.mkdirSync(path.join(sgdkPath, 'inc', 'snd'), { recursive: true });
+  fs.mkdirSync(path.join(sgdkPath, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(marsdevPath, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(sgdkPath, 'makelib.gen'), '', 'utf-8');
+  fs.writeFileSync(path.join(sgdkPath, 'inc', 'snd', 'xgm2.h'), '', 'utf-8');
+  fs.writeFileSync(path.join(sgdkPath, 'inc', 'z80_ctrl.h'), '#define Z80_DRIVER_XGM2 5\n', 'utf-8');
+  fs.writeFileSync(path.join(sgdkPath, 'bin', 'rescomp.txt'), 'WAV driver XGM2\n', 'utf-8');
+  fs.writeFileSync(path.join(sgdkPath, 'bin', 'xgm2tool.jar'), '', 'utf-8');
+  fs.writeFileSync(path.join(marsdevPath, 'makelib.gen'), '', 'utf-8');
+  fs.writeFileSync(path.join(marsdevPath, 'bin', 'm68k-elf-gcc'), '', 'utf-8');
+
+  const setupManager = loadSetupManager(userData);
+
+  assert.equal(setupManager.toolchainSupportsXgm2(sgdkPath), true);
+  assert.equal(setupManager.selectToolchainDir({ platform: 'darwin', sgdkPath, marsdevPath }), sgdkPath);
+  assert.equal(setupManager.selectToolchainDir({ platform: 'linux', sgdkPath, marsdevPath }), sgdkPath);
+  assert.equal(setupManager.selectToolchainDir({ platform: 'win32', sgdkPath, marsdevPath }), sgdkPath);
+});
+
+test('toolchain selection keeps Marsdev when SGDK is not XGM2-capable', () => {
+  const userData = makeTempUserData();
+  const sgdkPath = path.join(userData, 'tools', 'sgdk', 'SGDK-1.80');
+  const marsdevPath = path.join(userData, 'tools', 'marsdev', 'mars', 'm68k-elf');
+  fs.mkdirSync(sgdkPath, { recursive: true });
+  fs.mkdirSync(marsdevPath, { recursive: true });
+  fs.writeFileSync(path.join(sgdkPath, 'makelib.gen'), '', 'utf-8');
+  fs.writeFileSync(path.join(marsdevPath, 'makelib.gen'), '', 'utf-8');
+
+  const setupManager = loadSetupManager(userData);
+
+  assert.equal(setupManager.toolchainSupportsXgm2(sgdkPath), false);
+  assert.equal(setupManager.selectToolchainDir({ platform: 'darwin', sgdkPath, marsdevPath }), marsdevPath);
+  assert.equal(setupManager.selectToolchainDir({ platform: 'win32', sgdkPath, marsdevPath }), sgdkPath);
+});
+
 test('optional Nuked-OPN2 source is detected outside the bundled app payload', () => {
   const userData = makeTempUserData();
   const sourceDir = path.join(userData, 'tools', 'audio-engines', 'nuked-opn2', 'Nuked-OPN2-master');

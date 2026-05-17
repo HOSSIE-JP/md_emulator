@@ -45,6 +45,11 @@
   外へのパストラバーサルを拒否してください。
 - 生成済みファイルやサンプルプロジェクトを編集する場合は、関係のない
   ユーザー変更を保持してください。
+- OS ごとに処理が分岐するビルド、ツールチェーン、パス、環境変数の変更では、
+  対象 OS の修正だけでなく Windows / macOS / Linux の既存分岐が壊れないことも
+  確認してください。特に SGDK / Marsdev の選択、`PATH`、`GDK` / `GDK_WIN`、
+  LTO などのビルドルールを変更するときは、可能な範囲で OS 別の回帰テストや
+  明示的な platform 指定テストを追加してください。
 - `md-game-editor/renderer/renderer.js` は単一スクリプトとして読み込まれるため、
   既存のグローバル関数名（例: `clamp`）を再定義しないこと。重複宣言は
   起動時 `Uncaught SyntaxError: Identifier '...' has already been declared` を

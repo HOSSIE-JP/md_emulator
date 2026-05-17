@@ -12,6 +12,7 @@ function makeTempDir(prefix) {
 }
 
 function loadBuildSystem(userData, home = makeTempDir('md-editor-home-test-')) {
+  delete require.cache[require.resolve('../setup-manager.js')];
   return loadWithMockedElectron(path.join(__dirname, '..', 'build-system.js'), {
     userData,
     paths: { userData, home },
@@ -20,6 +21,7 @@ function loadBuildSystem(userData, home = makeTempDir('md-editor-home-test-')) {
 
 function loadPackagedBuildSystem(userData, resourcesPath, home = makeTempDir('md-editor-home-test-')) {
   process.resourcesPath = resourcesPath;
+  delete require.cache[require.resolve('../setup-manager.js')];
   return loadWithMockedElectron(path.join(__dirname, '..', 'build-system.js'), {
     userData,
     paths: { userData, home },
@@ -372,6 +374,74 @@ test('build log sanitization strips GCC ANSI color escapes', () => {
 
   const clean = buildSystem.sanitizeBuildLogLine('\u001b[01m\u001b[Ksrc/main.c:7:\u001b[m\u001b[K error');
   assert.equal(clean, 'src/main.c:7: error');
+});
+
+test('stderr diagnostics classify compiler warnings without marking them as build errors', () => {
+  const buildSystem = loadBuildSystem(makeTempDir('md-editor-build-stderr-classify-test-'));
+
+  let classified = buildSystem.classifyBuildStderrLine('src/main.c:7: warning: unused variable', 'error');
+  assert.deepEqual(classified, { level: 'warn', diagnosticLevel: 'warn' });
+
+  classified = buildSystem.classifyBuildStderrLine('    7 | static int unused;', classified.diagnosticLevel);
+  assert.deepEqual(classified, { level: 'warn', diagnosticLevel: 'warn' });
+
+  classified = buildSystem.classifyBuildStderrLine('make[1]: [out/foo.o] Error 127 (ignored)', classified.diagnosticLevel);
+  assert.deepEqual(classified, { level: 'info', diagnosticLevel: 'warn' });
+
+  classified = buildSystem.classifyBuildStderrLine('src/main.c:8: error: expected ; before }', classified.diagnosticLevel);
+  assert.deepEqual(classified, { level: 'error', diagnosticLevel: 'error' });
+});
+
+test('SGDK builds on Unix receive Marsdev native tools on PATH', () => {
+  const userData = makeTempDir('md-editor-build-sgdk-marsdev-path-test-');
+  const sgdkPath = path.join(userData, 'tools', 'sgdk', 'SGDK-2.11');
+  const marsdevPath = path.join(userData, 'tools', 'marsdev', 'mars', 'm68k-elf');
+  fs.mkdirSync(path.join(sgdkPath, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(marsdevPath, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(sgdkPath, 'makelib.gen'), '', 'utf-8');
+  fs.writeFileSync(path.join(marsdevPath, 'makelib.gen'), '', 'utf-8');
+  fs.writeFileSync(path.join(marsdevPath, 'bin', 'm68k-elf-gcc'), '', 'utf-8');
+
+  const buildSystem = loadBuildSystem(userData);
+  const supplemental = buildSystem.getSupplementalToolPaths(sgdkPath, 'darwin');
+
+  assert.deepEqual(supplemental, [path.join(marsdevPath, 'bin')]);
+  assert.equal(buildSystem.getMarsdevRuntimePathForBuild(sgdkPath, 'darwin'), marsdevPath);
+  assert.equal(buildSystem.getMarsdevRuntimePathForBuild(marsdevPath, 'darwin'), marsdevPath);
+  assert.deepEqual(buildSystem.getSupplementalToolPaths(marsdevPath, 'darwin'), []);
+  assert.deepEqual(buildSystem.getSupplementalToolPaths(sgdkPath, 'win32'), []);
+  assert.equal(buildSystem.getMarsdevRuntimePathForBuild(sgdkPath, 'win32'), null);
+});
+
+test('SGDK plus Marsdev build rules disable incompatible LTO', () => {
+  const userData = makeTempDir('md-editor-build-nolto-makefile-test-');
+  const sgdkPath = path.join(userData, 'tools', 'sgdk', 'SGDK-2.11');
+  const marsdevPath = path.join(userData, 'tools', 'marsdev', 'mars', 'm68k-elf');
+  const makefilePath = path.join(sgdkPath, 'makefile.gen');
+  fs.mkdirSync(sgdkPath, { recursive: true });
+  fs.mkdirSync(path.join(marsdevPath, 'bin'), { recursive: true });
+  fs.writeFileSync(makefilePath, [
+    'include $(GDK)/common.mk',
+    'release: FLAGS= $(DEFAULT_FLAGS) -O3 -fuse-linker-plugin -flto -flto=auto -ffat-lto-objects',
+    '$(OUT)/rom.out: $(OUT)/sega.o $(OUT)/cmd_ $(LIBMD)',
+    '\t$(CC) -m68000 -B$(BIN) -n -T $(GDK)/md.ld -nostdlib $(OUT)/sega.o @$(OUT)/cmd_ $(LIBMD) $(LIBGCC) -o $(OUT)/rom.out -Wl,--gc-sections -flto -flto=auto -ffat-lto-objects',
+    '',
+  ].join('\n'), 'utf-8');
+  fs.writeFileSync(path.join(marsdevPath, 'makelib.gen'), '', 'utf-8');
+  fs.writeFileSync(path.join(marsdevPath, 'bin', 'm68k-elf-gcc'), '', 'utf-8');
+
+  const buildSystem = loadBuildSystem(userData);
+  const outputPath = buildSystem.createSgdkMarsdevNoLtoMakefile(makefilePath);
+  const output = fs.readFileSync(outputPath, 'utf-8');
+
+  assert.equal(buildSystem.shouldUseSgdkMarsdevNoLtoMakefile(sgdkPath, 'darwin'), true);
+  assert.equal(buildSystem.shouldUseSgdkMarsdevNoLtoMakefile(sgdkPath, 'win32'), false);
+  assert.equal(buildSystem.shouldUseSgdkMarsdevNoLtoMakefile(marsdevPath, 'darwin'), false);
+  assert.doesNotMatch(output, /-flto/);
+  assert.doesNotMatch(output, /-ffat-lto-objects/);
+  assert.doesNotMatch(output, /-fuse-linker-plugin/);
+  assert.match(output, /JAVA := java -Djava\.awt\.headless=true/);
+  assert.match(output, /\$\(CC\) -m68000 -B\$\(BIN\) -fno-lto -n -T \$\(GDK\)\/md\.ld/);
 });
 
 test('make variables are normalized for command-line overrides', () => {

@@ -4,8 +4,8 @@
 
 #include "game.h"
 
-#define SRAM_CONTROL       ((volatile u8 *)0xA130F1)
-#define SRAM_BASE          ((volatile u8 *)0x200001)
+#define BLOCK_SRAM_CONTROL_PTR ((volatile u8 *)0xA130F1)
+#define BLOCK_SRAM_BASE_PTR    ((volatile u8 *)0x200001)
 #define SRAM_MAGIC         0x47424853UL  /* GBHS */
 #define SRAM_VERSION       4
 #define SRAM_OFFSET_MAGIC  0
@@ -21,22 +21,22 @@ static char high_score_names[HIGH_SCORE_COUNT][4];
 
 static void sramEnable(void)
 {
-    *SRAM_CONTROL = 1;
+    *BLOCK_SRAM_CONTROL_PTR = 1;
 }
 
 static void sramDisable(void)
 {
-    *SRAM_CONTROL = 0;
+    *BLOCK_SRAM_CONTROL_PTR = 0;
 }
 
 static u8 sramRead8(u16 offset)
 {
-    return SRAM_BASE[(u32)offset * 2];
+    return BLOCK_SRAM_BASE_PTR[(u32)offset * 2];
 }
 
 static void sramWrite8(u16 offset, u8 value)
 {
-    SRAM_BASE[(u32)offset * 2] = value;
+    BLOCK_SRAM_BASE_PTR[(u32)offset * 2] = value;
 }
 
 static u32 sramRead32(u16 offset)

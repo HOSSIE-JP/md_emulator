@@ -7,18 +7,24 @@
 #include "game.h"
 #include "game_resources.h"
 
+#if defined(__GNUC__)
+#define BLOCK_UNUSED __attribute__((unused))
+#else
+#define BLOCK_UNUSED
+#endif
+
 /* ===================================================================
  * フォールバック用パレット（リソース未バインド時）
  * =================================================================== */
 
 /* システムパレット（PAL0）: フォント用にindex 15 = 白（0x0EEE）を含む
  * SGDK デフォルトの palette_grey と同一 */
-static const u16 fallback_system_palette[16] = {
+static const u16 BLOCK_UNUSED fallback_system_palette[16] = {
     0x0000, 0x0222, 0x0444, 0x0666, 0x0888, 0x0AAA, 0x0CCC, 0x0EEE,
     0x0EEE, 0x0EEE, 0x0EEE, 0x0EEE, 0x0EEE, 0x0EEE, 0x0EEE, 0x0EEE
 };
 
-static const u16 fallback_block_palette[16] = {
+static const u16 BLOCK_UNUSED fallback_block_palette[16] = {
     0x0000,
     RGB24_TO_VDPCOLOR(0xE0E0E0), RGB24_TO_VDPCOLOR(0x808080),
     RGB24_TO_VDPCOLOR(0xE0D000), RGB24_TO_VDPCOLOR(0x808000),
@@ -29,7 +35,7 @@ static const u16 fallback_block_palette[16] = {
     0x0000, 0x0000, 0x0000
 };
 
-static const u16 fallback_sprite_palette[16] = {
+static const u16 BLOCK_UNUSED fallback_sprite_palette[16] = {
     0x0000,
     RGB24_TO_VDPCOLOR(0xFFFFFF), RGB24_TO_VDPCOLOR(0x00C0E0),
     RGB24_TO_VDPCOLOR(0x60E0FF), RGB24_TO_VDPCOLOR(0xFF60B0),
@@ -102,7 +108,7 @@ static u32 solidRow(u8 color)
     return makeRow(color, color, color, color, color, color, color, color);
 }
 
-static void generateBlockTileData(u8 block_type, u32 *out)
+static void BLOCK_UNUSED generateBlockTileData(u8 block_type, u32 *out)
 {
     u8 f = fb_fill[block_type];
     u8 b = fb_border[block_type];
@@ -139,43 +145,43 @@ static void generateBlockTileData(u8 block_type, u32 *out)
     }
 }
 
-static const u32 fb_ball_tile[8] = {
+static const u32 BLOCK_UNUSED fb_ball_tile[8] = {
     0x00000000, 0x00111000, 0x01111100, 0x01111100,
     0x01111100, 0x00111000, 0x00000000, 0x00000000
 };
 
-static const u32 fb_paddle_0[8] = {
+static const u32 BLOCK_UNUSED fb_paddle_0[8] = {
     0x00022222, 0x00222222, 0x02222222, 0x32222222,
     0x22222222, 0x02222222, 0x00222222, 0x00022222
 };
-static const u32 fb_paddle_mid[8] = {
+static const u32 BLOCK_UNUSED fb_paddle_mid[8] = {
     0x22222222, 0x22222222, 0x22222222, 0x32222222,
     0x22222222, 0x22222222, 0x22222222, 0x22222222
 };
-static const u32 fb_paddle_3[8] = {
+static const u32 BLOCK_UNUSED fb_paddle_3[8] = {
     0x22222000, 0x22222200, 0x22222220, 0x22222220,
     0x22222220, 0x22222220, 0x22222200, 0x22222000
 };
 
-static const u32 fb_pu_multi[16] = {
+static const u32 BLOCK_UNUSED fb_pu_multi[16] = {
     0x00000000, 0x00084000, 0x00848400, 0x08444480,
     0x08444480, 0x00848400, 0x00084000, 0x00000000,
     0x00000000, 0x00048000, 0x00484800, 0x04848840,
     0x04848840, 0x00484800, 0x00048000, 0x00000000,
 };
-static const u32 fb_pu_strong[16] = {
+static const u32 BLOCK_UNUSED fb_pu_strong[16] = {
     0x00000000, 0x00555000, 0x05555500, 0x05585500,
     0x05555500, 0x05555500, 0x00555000, 0x00000000,
     0x00000000, 0x00555000, 0x05555500, 0x05555500,
     0x05585500, 0x05555500, 0x00555000, 0x00000000,
 };
-static const u32 fb_pu_speedup[16] = {
+static const u32 BLOCK_UNUSED fb_pu_speedup[16] = {
     0x00000000, 0x00060000, 0x00660000, 0x06666000,
     0x06666000, 0x00660000, 0x00060000, 0x00000000,
     0x00000000, 0x00006000, 0x00066000, 0x00666600,
     0x00666600, 0x00066000, 0x00006000, 0x00000000,
 };
-static const u32 fb_pu_barrier[16] = {
+static const u32 BLOCK_UNUSED fb_pu_barrier[16] = {
     0x00000000, 0x00770000, 0x07777000, 0x77777700,
     0x77777700, 0x07777000, 0x00770000, 0x00000000,
     0x00000000, 0x00077000, 0x00777700, 0x07777770,

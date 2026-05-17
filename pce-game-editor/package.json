@@ -1,0 +1,18 @@
+{
+  "name": "pce-game-editor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Portable Electron editor for PC Engine homebrew projects",
+  "main": "main.js",
+  "scripts": {
+    "start": "node scripts/run-electron.js",
+    "dev": "npm run start",
+    "test": "node tests/run-tests.js",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win zip"
+  },
+  "devDependencies": {
+    "electron": "41.3.0",
+    "electron-builder": "26.8.1"
+  }
+}

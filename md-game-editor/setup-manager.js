@@ -521,6 +521,28 @@ function getMarsdevBundledTools(marsdevPath) {
   return getBundledTools(marsdevPath, true);
 }
 
+function fileContains(filePath, pattern) {
+  try {
+    return pattern.test(fs.readFileSync(filePath, 'utf-8'));
+  } catch {
+    return false;
+  }
+}
+
+function toolchainSupportsXgm2(toolchainPath) {
+  if (!toolchainPath || !fs.existsSync(toolchainPath)) return false;
+  const xgm2Header = path.join(toolchainPath, 'inc', 'snd', 'xgm2.h');
+  const z80Header = path.join(toolchainPath, 'inc', 'z80_ctrl.h');
+  const rescompDoc = path.join(toolchainPath, 'bin', 'rescomp.txt');
+  const xgm2Tool = path.join(toolchainPath, 'bin', 'xgm2tool.jar');
+  const rescompDocOk = !fs.existsSync(rescompDoc) || fileContains(rescompDoc, /\bXGM2\b/);
+
+  return fs.existsSync(xgm2Header)
+    && fs.existsSync(xgm2Tool)
+    && fileContains(z80Header, /\bZ80_DRIVER_XGM2\b/)
+    && rescompDocOk;
+}
+
 // -------------------------------------------------------------- Java path --
 
 function findExtractedJreDir() {
@@ -1446,14 +1468,23 @@ function getStatus() {
   return { sgdk, marsdev, java, gcc, emsdk, emcc: { installed: emsdk.emccInstalled, path: emsdk.emccPath, version: emsdk.emccVersion }, audioEngines, platform: process.platform };
 }
 
-function getToolchainDir() {
-  // On macOS/Linux prefer Marsdev, on Windows use SGDK
-  if (process.platform === 'win32') {
-    return getSgdkPath();
+function selectToolchainDir(options = {}) {
+  const platform = options.platform || process.platform;
+  const sgdkPath = Object.prototype.hasOwnProperty.call(options, 'sgdkPath') ? options.sgdkPath : getSgdkPath();
+  const marsdevPath = Object.prototype.hasOwnProperty.call(options, 'marsdevPath') ? options.marsdevPath : getMarsdevPath();
+
+  // Windows uses SGDK directly. On macOS/Linux, prefer a modern SGDK runtime
+  // when it supports XGM2; Marsdev can still provide the native m68k tools.
+  if (platform === 'win32') {
+    return sgdkPath;
   }
-  const marsdevPath = getMarsdevPath();
+  if (toolchainSupportsXgm2(sgdkPath)) return sgdkPath;
   if (marsdevPath) return marsdevPath;
-  return getSgdkPath();
+  return sgdkPath;
+}
+
+function getToolchainDir() {
+  return selectToolchainDir();
 }
 
 module.exports = {
@@ -1475,6 +1506,8 @@ module.exports = {
   getNukedOpn2BuildPlan,
   loadOptionalAudioEngine,
   getToolchainDir,
+  selectToolchainDir,
+  toolchainSupportsXgm2,
   getSgdkBundledTools,
   getMarsdevBundledTools,
   fixMarsdevMacosGettext,

@@ -6,6 +6,12 @@
 #include "game.h"
 #include "game_resources.h"
 
+#if defined(__GNUC__)
+#define BLOCK_UNUSED __attribute__((unused))
+#else
+#define BLOCK_UNUSED
+#endif
+
 /* 繧ｰ繝ｭ繝ｼ繝舌Ν螟画焚螳夂ｾｩ */
 Ball balls[MAX_BALLS];
 
@@ -235,7 +241,7 @@ void ballFollowPaddle(u8 paddle_idx)
 }
 
 /** 繝槭Ν繝√・繝ｼ繝ｫ: 譌｢蟄倥・繝ｼ繝ｫ縺九ｉ2縺､蛻・｣・*/
-static void spawnMultiBall(void)
+static void BLOCK_UNUSED spawnMultiBall(void)
 {
     /* 譛蛻昴・繧｢繧ｯ繝・ぅ繝悶・繝ｼ繝ｫ繧定ｵｷ轤ｹ縺ｫ縺吶ｋ */
     Ball *src = NULL;

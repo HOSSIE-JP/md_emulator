@@ -613,12 +613,138 @@ function resolveMakeCommand(toolchainPath, isWin) {
   return 'make';
 }
 
+function sameRealPath(a, b) {
+  if (!a || !b) return false;
+  try {
+    return fs.realpathSync(a) === fs.realpathSync(b);
+  } catch {
+    return path.resolve(a) === path.resolve(b);
+  }
+}
+
+function getSupplementalToolPaths(toolchainPath, platform = process.platform) {
+  if (platform === 'win32' || !toolchainPath) return [];
+  const sgdkPath = setupManager.getSgdkPath();
+  if (!sameRealPath(toolchainPath, sgdkPath)) return [];
+
+  const marsdevPath = setupManager.getMarsdevPath();
+  if (!marsdevPath) return [];
+
+  const candidates = [
+    path.join(marsdevPath, 'bin'),
+    path.join(path.dirname(marsdevPath), 'bin'),
+  ];
+
+  return candidates.filter((candidate, index) => {
+    if (!candidate || !fs.existsSync(candidate)) return false;
+    return candidates.findIndex((item) => sameRealPath(item, candidate)) === index;
+  });
+}
+
+function getMarsdevRuntimePathForBuild(toolchainPath, platform = process.platform) {
+  if (platform === 'win32' || !toolchainPath) return null;
+  const marsdevPath = setupManager.getMarsdevPath();
+  if (!marsdevPath) return null;
+  if (sameRealPath(toolchainPath, marsdevPath)) return marsdevPath;
+
+  const marsdevBin = path.join(marsdevPath, 'bin');
+  if (getSupplementalToolPaths(toolchainPath, platform).some((item) => sameRealPath(item, marsdevBin))) {
+    return marsdevPath;
+  }
+  return null;
+}
+
+function shouldUseSgdkMarsdevNoLtoMakefile(toolchainPath, platform = process.platform) {
+  if (platform === 'win32' || !toolchainPath) return false;
+  const sgdkPath = setupManager.getSgdkPath();
+  return sameRealPath(toolchainPath, sgdkPath)
+    && !!getMarsdevRuntimePathForBuild(toolchainPath, platform);
+}
+
+function createSgdkMarsdevNoLtoMakefile(baseMakefilePath) {
+  const source = fs.readFileSync(baseMakefilePath, 'utf-8')
+    .replace(
+      'include $(GDK)/common.mk',
+      [
+        'include $(GDK)/common.mk',
+        '',
+        'JAVA := java -Djava.awt.headless=true',
+        'SIZEBND := $(JAVA) -jar $(BIN)/sizebnd.jar',
+        'RESCOMP := $(JAVA) -jar $(BIN)/rescomp.jar',
+      ].join('\n')
+    )
+    .replace(/ -fuse-linker-plugin/g, '')
+    .replace(/ -flto=auto/g, '')
+    .replace(/ -flto/g, '')
+    .replace(/ -ffat-lto-objects/g, '')
+    .replace(
+      '$(CC) -m68000 -B$(BIN) -n -T $(GDK)/md.ld',
+      '$(CC) -m68000 -B$(BIN) -fno-lto -n -T $(GDK)/md.ld'
+    );
+  const runtimeDir = getBuildRuntimeDir();
+  ensureDirSync(runtimeDir);
+  const outputPath = path.join(runtimeDir, 'sgdk-marsdev-nolto.makefile.gen');
+  fs.writeFileSync(outputPath, source, 'utf-8');
+  return outputPath;
+}
+
+function appendUniquePathParts(parts) {
+  const result = [];
+  parts.filter(Boolean).forEach((part) => {
+    const duplicate = result.some((existing) => sameRealPath(existing, part));
+    if (!duplicate) result.push(part);
+  });
+  return result;
+}
+
 function stripAnsi(value) {
   return String(value || '').replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
 }
 
 function sanitizeBuildLogLine(value) {
   return stripAnsi(value).replace(/\r/g, '');
+}
+
+function isBuildStderrErrorLine(line) {
+  return /\berror:/i.test(line)
+    || /\bfatal error\b/i.test(line)
+    || /\binternal compiler error\b/i.test(line)
+    || /\berror on line\b/i.test(line)
+    || /^make(?:\[\d+\])?: \*\*\*/i.test(line)
+    || /^collect2: error/i.test(line)
+    || /^lto-wrapper: fatal error/i.test(line);
+}
+
+function isBuildStderrWarningLine(line) {
+  return /\bwarning:/i.test(line)
+    || /\bwarning\b/i.test(line)
+    || /\bnote:/i.test(line);
+}
+
+function isBuildStderrDiagnosticContextLine(line) {
+  return /^In file included from /.test(line)
+    || /^\s+from\s/.test(line)
+    || /^\s*\d+\s+\|/.test(line)
+    || /^\s*\|/.test(line)
+    || /^\s*(?:\^|~)+/.test(line);
+}
+
+function classifyBuildStderrLine(value, previousDiagnosticLevel = 'error') {
+  const line = sanitizeBuildLogLine(value);
+  if (/Error\s+\d+\s+\(ignored\)/i.test(line)) {
+    return { level: 'info', diagnosticLevel: previousDiagnosticLevel };
+  }
+  if (isBuildStderrErrorLine(line)) {
+    return { level: 'error', diagnosticLevel: 'error' };
+  }
+  if (isBuildStderrWarningLine(line)) {
+    return { level: 'warn', diagnosticLevel: 'warn' };
+  }
+  if (isBuildStderrDiagnosticContextLine(line)) {
+    const level = previousDiagnosticLevel === 'warn' ? 'warn' : 'info';
+    return { level, diagnosticLevel: previousDiagnosticLevel };
+  }
+  return { level: 'error', diagnosticLevel: 'error' };
 }
 
 function normalizeMakeVariables(makeVariables = {}) {
@@ -698,7 +824,7 @@ function generateProjectStructureOnly(config = {}) {
  * SGDK ビルドを実行する
  * @param {string} sgdkPath     - SGDK のルートディレクトリ
  * @param {string} javaPath     - java 実行ファイルのパス（または 'java'）
- * @param {function} onLog      - (line: string, level: 'info'|'error') => void
+ * @param {function} onLog      - (line: string, level: 'info'|'warn'|'error') => void
  * @param {{ makeVariables?: Record<string,string>, env?: Record<string,string>, makeTargets?: string[], skipClean?: boolean }} options
  * @returns {Promise<{success, romPath, romSize, error}>}
  */
@@ -729,20 +855,9 @@ function buildProject(sgdkPath, javaPath, onLog, options = {}) {
 
     // macOS + Marsdev: dyld エラーを避けるため、実行前に gettext 参照の整合性を確認・補正する。
     if (process.platform === 'darwin') {
-      let isMarsdevBuild = false;
-      try {
-        const marsdevPath = setupManager.getMarsdevPath();
-        if (marsdevPath) {
-          const realBuildPath = fs.realpathSync(buildPaths.sgdkPath);
-          const realMarsdevPath = fs.realpathSync(marsdevPath);
-          isMarsdevBuild = realBuildPath === realMarsdevPath;
-        }
-      } catch (_err) {
-        // realpath 失敗時は Marsdev 判定不可としてスキップ
-      }
-
-      if (isMarsdevBuild) {
-        const fix = setupManager.fixMarsdevMacosGettext(buildPaths.sgdkPath);
+      const marsdevRuntimePath = getMarsdevRuntimePathForBuild(buildPaths.sgdkPath, process.platform);
+      if (marsdevRuntimePath) {
+        const fix = setupManager.fixMarsdevMacosGettext(marsdevRuntimePath);
         if (!fix.ok) {
           const msg = `Marsdev 実行前チェックに失敗: ${fix.error}`;
           log(msg, 'error');
@@ -755,12 +870,16 @@ function buildProject(sgdkPath, javaPath, onLog, options = {}) {
       }
     }
 
-    const makefileGen = path.join(buildPaths.sgdkPath, 'makefile.gen');
+    let makefileGen = path.join(buildPaths.sgdkPath, 'makefile.gen');
     if (!fs.existsSync(makefileGen)) {
       const msg = `makefile.gen が見つかりません: ${makefileGen}`;
       log(msg, 'error');
       resolve({ success: false, error: msg });
       return;
+    }
+    if (shouldUseSgdkMarsdevNoLtoMakefile(buildPaths.sgdkPath, process.platform)) {
+      makefileGen = createSgdkMarsdevNoLtoMakefile(makefileGen);
+      log('SGDK 2.11 と Marsdev GCC の LTO 互換性回避のため、LTO 無効のビルドルールを使用します');
     }
 
     const outDir = path.join(projectDir, 'out');
@@ -771,10 +890,11 @@ function buildProject(sgdkPath, javaPath, onLog, options = {}) {
 
     // ツールチェーン内のバイナリをPATHに追加
     spawnEnv = { ...process.env };
-    const pathParts = [
+    const pathParts = appendUniquePathParts([
       path.join(buildPaths.sgdkPath, 'bin'),
+      ...getSupplementalToolPaths(buildPaths.sgdkPath, process.platform),
       spawnEnv.PATH || '',
-    ];
+    ]);
     if (isWin) {
       pathParts.splice(1, 0, path.join(buildPaths.sgdkPath, 'bin', 'gcc', 'bin'));
     }
@@ -811,6 +931,7 @@ function buildProject(sgdkPath, javaPath, onLog, options = {}) {
     function runMakeTarget(target, onExit) {
       const targetArgs = [...args, ...makeVariableArgs, target];
       log(`${target.toUpperCase()} を開始: ${command} ${targetArgs.join(' ')}`);
+      let stderrDiagnosticLevel = 'error';
 
       const proc = spawn(command, targetArgs, {
         cwd: buildPaths.projectDir,
@@ -829,13 +950,9 @@ function buildProject(sgdkPath, javaPath, onLog, options = {}) {
         data.toString().split('\n').forEach((line) => {
           const cleanLine = sanitizeBuildLogLine(line);
           if (!cleanLine.trim()) return;
-          // SGDK / make が内部的に無視する行はエラー表示しない
-          // 例: make[1]: [<tmp>.o] Error 127 (ignored)
-          if (/Error\s+\d+\s+\(ignored\)/i.test(cleanLine)) {
-            log(cleanLine, 'info');
-            return;
-          }
-          log(cleanLine, 'error');
+          const classified = classifyBuildStderrLine(cleanLine, stderrDiagnosticLevel);
+          stderrDiagnosticLevel = classified.diagnosticLevel;
+          log(cleanLine, classified.level);
         });
       });
 
@@ -1009,6 +1126,11 @@ module.exports = {
   getSampleSourceCode,
   stripAnsi,
   sanitizeBuildLogLine,
+  classifyBuildStderrLine,
+  getSupplementalToolPaths,
+  getMarsdevRuntimePathForBuild,
+  shouldUseSgdkMarsdevNoLtoMakefile,
+  createSgdkMarsdevNoLtoMakefile,
   normalizeMakeVariables,
   normalizeBuildEnv,
   normalizeMakeTargets,

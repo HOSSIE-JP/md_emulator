@@ -1,0 +1,21 @@
+{
+  "id": "pce-asset-manager",
+  "name": "PCE アセット管理",
+  "description": "PCE 用の画像・PSG シーケンス定義を assets/pce-assets.json で管理します。",
+  "version": "0.1.0",
+  "icon": "assets",
+  "types": ["editor", "asset"],
+  "permissions": ["project.read", "project.write", "dialog.openFile"],
+  "tab": {
+    "label": "Assets",
+    "icon": "assets",
+    "page": "assets",
+    "order": 10
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "assets",
+    "capabilities": ["page", "asset-manager", "asset-type-provider"]
+  }
+}
