@@ -44,7 +44,7 @@ test('audio-converter declares renderer-invokable main hook capability', () => {
   assert.doesNotMatch(rendererSource, /pluginId:\s*['"]audio-converter['"]/);
 });
 
-test('asset-manager declares v2.4 asset provider capabilities', () => {
+test('asset-manager declares v2.5 asset provider capabilities', () => {
   const manifest = JSON.parse(fs.readFileSync(
     path.join(__dirname, '..', 'plugins', 'asset-manager', 'manifest.json'),
     'utf-8',
@@ -233,7 +233,7 @@ test('sprite-editor utility functions parse size, frame grid, and frame times', 
   assert.equal(utils.resizeSpriteTimeRow('[[1,1,7][1,1,1,1]]', 2, 4, 1, 2, 7), '[[1,1,7][1,1]]');
 });
 
-test('sprite-editor declares plugin-local page and uses v2.4 capabilities', () => {
+test('sprite-editor declares plugin-local page and uses v2.5 capabilities', () => {
   const manifest = JSON.parse(fs.readFileSync(
     path.join(__dirname, '..', 'plugins', 'sprite-editor', 'manifest.json'),
     'utf-8',

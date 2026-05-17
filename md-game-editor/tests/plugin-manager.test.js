@@ -56,7 +56,48 @@ test('listPlugins reads user plugins and normalizes manifest fields', () => {
   assert.equal(alpha.isUserPlugin, true);
 });
 
-test('listPlugins uses only declared v2.4 roles', () => {
+test('listPlugins exposes core compatibility metadata and defaults legacy plugins to Mega Drive', () => {
+  const userData = makeTempUserData();
+  writePlugin(userData, 'legacy-md', { types: ['editor'] });
+  writePlugin(userData, 'shared', { types: ['editor'], supportedCores: ['*'] });
+  writePlugin(userData, 'pce-only', { types: ['asset'], supportedCores: ['pc-engine'] });
+  writePlugin(userData, 'pc-engine-core', {
+    types: ['core'],
+    core: { id: 'pc-engine', label: 'PC Engine', platform: 'pce' },
+  });
+
+  const pluginManager = loadWithMockedElectron(path.join(__dirname, '..', 'plugin-manager.js'), { userData });
+  const allForPce = pluginManager.listPlugins({ coreId: 'pc-engine', includeIncompatible: true });
+  const filteredForPce = pluginManager.listPlugins({ coreId: 'pc-engine', includeIncompatible: false });
+
+  assert.deepEqual(allForPce.find((plugin) => plugin.id === 'legacy-md').supportedCores, ['mega-drive']);
+  assert.equal(allForPce.find((plugin) => plugin.id === 'legacy-md').compatibleWithActiveCore, false);
+  assert.deepEqual(allForPce.find((plugin) => plugin.id === 'shared').supportedCores, ['*']);
+  assert.equal(allForPce.find((plugin) => plugin.id === 'pc-engine-core').core.id, 'pc-engine');
+  assert.equal(filteredForPce.some((plugin) => plugin.id === 'legacy-md'), false);
+  assert.equal(filteredForPce.some((plugin) => plugin.id === 'pce-only'), true);
+});
+
+test('role selection rejects plugins incompatible with the active core', () => {
+  const userData = makeTempUserData();
+  writePlugin(userData, 'md-builder', {
+    roles: [{ id: 'builder', label: 'Build', exclusive: true, order: 10 }],
+  });
+  writePlugin(userData, 'pce-builder', {
+    supportedCores: ['pc-engine'],
+    roles: [{ id: 'builder', label: 'Build', exclusive: true, order: 10 }],
+  });
+
+  const pluginManager = loadWithMockedElectron(path.join(__dirname, '..', 'plugin-manager.js'), { userData });
+  const rejected = pluginManager.setExclusiveRoleSelection('builder', 'md-builder', { coreId: 'pc-engine' });
+  const accepted = pluginManager.setExclusiveRoleSelection('builder', 'pce-builder', { coreId: 'pc-engine' });
+
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.error, /not compatible/);
+  assert.equal(accepted.ok, true);
+});
+
+test('listPlugins uses only declared v2.5 roles', () => {
   const userData = makeTempUserData();
   writePlugin(userData, 'builder', { types: ['build'] });
   writePlugin(userData, 'emulator', {
@@ -71,6 +112,31 @@ test('listPlugins uses only declared v2.4 roles', () => {
 
   assert.deepEqual(builder.roles, []);
   assert.equal(emulator.roles[0].id, 'testplay');
+});
+
+test('listPlugins marks hasGenerator only when generateSource is exported or declared', () => {
+  const userData = makeTempUserData();
+  writePlugin(userData, 'hook-only-builder', {
+    roles: [{ id: 'builder', label: 'Build', exclusive: true, order: 10 }],
+    hooks: ['onBuildStart'],
+  });
+  writePlugin(userData, 'source-builder', {
+    roles: [{ id: 'builder', label: 'Build', exclusive: true, order: 10 }],
+  }, {
+    'index.js': "'use strict';\nfunction generateSource() { return { ok: true, sourceCode: '' }; }\nmodule.exports = { generateSource };\n",
+  });
+  writePlugin(userData, 'manifest-builder', {
+    generator: true,
+    roles: [{ id: 'builder', label: 'Build', exclusive: true, order: 10 }],
+  });
+
+  const pluginManager = loadWithMockedElectron(path.join(__dirname, '..', 'plugin-manager.js'), { userData });
+  const plugins = new Map(pluginManager.listPlugins().map((plugin) => [plugin.id, plugin]));
+
+  assert.equal(plugins.get('hook-only-builder').hasGenerator, false);
+  assert.equal(plugins.get('source-builder').hasGenerator, true);
+  assert.equal(plugins.get('manifest-builder').hasGenerator, true);
+  assert.equal(plugins.get('pce-sample-builder').hasGenerator, false);
 });
 
 test('setEnabledWithDependencies enables dependencies and reports missing ones', () => {

@@ -38,6 +38,7 @@ const state = {
   building: false,
   lastRomPath: null,
   projectConfig: {
+    coreId: 'mega-drive',
     title: 'MY GAME',
     author: 'AUTHOR',
     serial: 'GM 00000000-00',
@@ -50,6 +51,7 @@ const state = {
     availableProjects: [],
     recentProjects: [],
     templates: [],
+    cores: [],
     newProjectParentDir: '',
   },
   preview: {
@@ -112,6 +114,7 @@ const state = {
   pluginFilters: {
     searchText: '',
     type: 'all',
+    showAllCores: false,
   },
   pluginUi: {
     roleAccordionOpen: false,
@@ -375,6 +378,7 @@ const el = {
   pluginEmulatorSelect: $('pluginEmulatorSelect'),
   pluginSearchInput: $('pluginSearchInput'),
   pluginTypeFilter: $('pluginTypeFilter'),
+  pluginCoreFilterToggle: $('pluginCoreFilterToggle'),
   pluginRoleStatus: $('pluginRoleStatus'),
   btnPluginRoleAccordion: $('btnPluginRoleAccordion'),
   pluginRoleBody: $('pluginRoleBody'),
@@ -416,6 +420,7 @@ const el = {
   btnProjectModalCancel: $('btnProjectModalCancel'),
   btnProjectModalCreate: $('btnProjectModalCreate'),
   projectSystemNameInput: $('projectSystemNameInput'),
+  projectCoreSelect: $('projectCoreSelect'),
   projectTitleInput: $('projectTitleInput'),
   projectAuthorInput: $('projectAuthorInput'),
   projectSerialInput: $('projectSerialInput'),
@@ -724,7 +729,7 @@ const pluginState = {
   activeBuilderPlugin: null,
   /** 現在 Test Play 用に使用中のエミュレータープラグイン ID */
   activeEmulatorPlugin: null,
-  /** Plugin Runtime v2.4 role selections. */
+  /** Plugin Runtime v2.5 role selections. */
   activeRoles: {},
   /** サイドバー内プラグインアイコン順 (plugin.id の配列) */
   sidebarOrder: [],
@@ -784,6 +789,16 @@ function pluginSupportsRole(plugin, roleId) {
   return roles.some((entry) => entry?.id === role);
 }
 
+function getActiveCoreId() {
+  return String(state.projectConfig?.coreId || 'mega-drive');
+}
+
+function pluginSupportsActiveCore(plugin) {
+  const coreId = getActiveCoreId();
+  const cores = Array.isArray(plugin?.supportedCores) ? plugin.supportedCores : ['mega-drive'];
+  return cores.includes('*') || cores.includes(coreId);
+}
+
 function getRoleDefinitions() {
   const byId = new Map();
   pluginState.plugins.forEach((plugin) => {
@@ -805,11 +820,11 @@ function getRoleDefinitions() {
 }
 
 function getEnabledPluginsByRole(roleId) {
-  return pluginState.plugins.filter((p) => p.enabled && pluginSupportsRole(p, roleId));
+  return pluginState.plugins.filter((p) => p.enabled && pluginSupportsActiveCore(p) && pluginSupportsRole(p, roleId));
 }
 
 function getPluginsByRole(roleId) {
-  return pluginState.plugins.filter((p) => pluginSupportsRole(p, roleId));
+  return pluginState.plugins.filter((p) => pluginSupportsActiveCore(p) && pluginSupportsRole(p, roleId));
 }
 
 function isProjectPluginStateManaged(plugin) {
@@ -821,11 +836,11 @@ function getActiveRolePlugin(roleId) {
 }
 
 function getPluginsByType(type) {
-  return pluginState.plugins.filter((p) => pluginSupportsType(p, type));
+  return pluginState.plugins.filter((p) => pluginSupportsActiveCore(p) && pluginSupportsType(p, type));
 }
 
 function getEnabledPluginsByType(type) {
-  return pluginState.plugins.filter((p) => p.enabled && pluginSupportsType(p, type));
+  return pluginState.plugins.filter((p) => p.enabled && pluginSupportsActiveCore(p) && pluginSupportsType(p, type));
 }
 
 function getPluginById(id) {
@@ -1074,6 +1089,7 @@ async function activatePluginRenderers() {
   clearPluginRuntime();
 
   for (const plugin of pluginState.plugins) {
+    if (!pluginSupportsActiveCore(plugin)) continue;
     if (!plugin.enabled || !plugin.hasRenderer || !plugin.rendererAssets?.scriptUrl) continue;
 
     const pageRoot = ensurePluginPageRoot(plugin);
@@ -1217,7 +1233,7 @@ function saveSidebarPluginOrder() {
 }
 
 function getSidebarEnabledTabPlugins() {
-  return pluginState.plugins.filter((plugin) => plugin.enabled && plugin.tab && resolvePluginPageId(plugin));
+  return pluginState.plugins.filter((plugin) => pluginSupportsActiveCore(plugin) && plugin.enabled && plugin.tab && resolvePluginPageId(plugin));
 }
 
 function isSidebarTogglePlugin(plugin) {
@@ -1247,7 +1263,7 @@ function isSidebarContextMenuPlugin(plugin) {
 
 function getSidebarTogglePlugins() {
   return pluginState.plugins
-    .filter((plugin) => isSidebarTogglePlugin(plugin))
+    .filter((plugin) => pluginSupportsActiveCore(plugin) && isSidebarTogglePlugin(plugin))
     .sort((a, b) => {
       const orderA = Number(a?.tab?.order ?? 1000);
       const orderB = Number(b?.tab?.order ?? 1000);
@@ -1440,7 +1456,7 @@ function renderPluginSidebarTabs() {
   const sidebarOrderIndex = new Map(pluginState.sidebarOrder.map((id, index) => [id, index]));
 
   const tabs = pluginState.plugins
-    .filter((plugin) => plugin.enabled && plugin.tab)
+    .filter((plugin) => pluginSupportsActiveCore(plugin) && plugin.enabled && plugin.tab)
     .sort((a, b) => {
       const sidebarOrderA = sidebarOrderIndex.has(a.id) ? sidebarOrderIndex.get(a.id) : Number.POSITIVE_INFINITY;
       const sidebarOrderB = sidebarOrderIndex.has(b.id) ? sidebarOrderIndex.get(b.id) : Number.POSITIVE_INFINITY;
@@ -1480,6 +1496,7 @@ function applyPluginPageAvailability() {
   const pageBindings = new Map();
   const pluginById = new Map(pluginState.plugins.map((plugin) => [plugin.id, plugin]));
   pluginState.plugins.forEach((plugin) => {
+    if (!pluginSupportsActiveCore(plugin)) return;
     const pageId = getPluginPageDomId(plugin);
     if (!pageId) return;
     const entries = pageBindings.get(pageId) || [];
@@ -1494,6 +1511,7 @@ function applyPluginPageAvailability() {
     section.hidden = !(
       owner
       && getPluginPageDomId(owner) === pageId
+      && pluginSupportsActiveCore(owner)
       && owner.enabled
       && (owner.hasRenderer || owner.tab)
     );
@@ -1503,7 +1521,7 @@ function applyPluginPageAvailability() {
     const section = document.getElementById(`page-${pageId}`);
     if (!section) return;
     if (section.dataset.pluginPageOwner) return;
-    section.hidden = !plugins.some((plugin) => plugin.enabled && (plugin.hasRenderer || plugin.tab));
+    section.hidden = !plugins.some((plugin) => pluginSupportsActiveCore(plugin) && plugin.enabled && (plugin.hasRenderer || plugin.tab));
   });
 
   if (el.pageCode?.hidden) {
@@ -1523,6 +1541,7 @@ function applyBuildAvailability() {
     : null;
   const enabled = Boolean(
     builderPlugin
+    && pluginSupportsActiveCore(builderPlugin)
     && builderPlugin.enabled
     && pluginSupportsRole(builderPlugin, 'builder'),
   );
@@ -1542,6 +1561,7 @@ function applyTestPlayAvailability() {
     : null;
   const enabled = Boolean(
     emulatorPlugin
+    && pluginSupportsActiveCore(emulatorPlugin)
     && emulatorPlugin.enabled
     && pluginSupportsRole(emulatorPlugin, 'testplay'),
   );
@@ -1632,20 +1652,28 @@ async function restoreProjectPluginRoleState() {
 
   if (changed) {
     try {
-      pluginState.plugins = await window.electronAPI.listPlugins();
+      pluginState.plugins = await window.electronAPI.listPlugins({ includeIncompatible: true });
     } catch (_) {
       pluginState.plugins = [];
     }
   }
 }
 
-async function restoreProjectPluginEnabledState() {
+async function restoreProjectPluginEnabledState(options = {}) {
   const enabledSettings = getProjectPluginEnabledSettings();
-  const entries = Object.entries(enabledSettings);
-  if (entries.length === 0) return;
+  const resetUnspecified = Boolean(options.resetUnspecified);
+  const hasSetting = (pluginId) => Object.prototype.hasOwnProperty.call(enabledSettings, pluginId);
+  const targets = pluginState.plugins
+    .filter((plugin) => isProjectPluginStateManaged(plugin))
+    .map((plugin) => {
+      if (hasSetting(plugin.id)) return [plugin.id, Boolean(enabledSettings[plugin.id])];
+      return resetUnspecified ? [plugin.id, true] : null;
+    })
+    .filter(Boolean);
+  if (targets.length === 0) return;
 
   let changed = false;
-  for (const [pluginId, enabled] of entries) {
+  for (const [pluginId, enabled] of targets) {
     const plugin = getPluginById(pluginId);
     if (!plugin || !isProjectPluginStateManaged(plugin)) continue;
     if (Boolean(plugin.enabled) === Boolean(enabled)) continue;
@@ -1661,7 +1689,7 @@ async function restoreProjectPluginEnabledState() {
 
   if (changed) {
     try {
-      pluginState.plugins = await window.electronAPI.listPlugins();
+      pluginState.plugins = await window.electronAPI.listPlugins({ includeIncompatible: true });
     } catch (_) {
       pluginState.plugins = [];
     }
@@ -1670,16 +1698,19 @@ async function restoreProjectPluginEnabledState() {
 
 async function loadPlugins(options = {}) {
   if (!el.pluginList) return;
+  if (options.resetSidebarSelection) {
+    state.startup.selectedDefaultSidebarPage = false;
+  }
   el.pluginList.innerHTML = '<p class="hint-text">読み込み中...</p>';
   setPluginRoleStatus('');
   try {
-    pluginState.plugins = await window.electronAPI.listPlugins();
+    pluginState.plugins = await window.electronAPI.listPlugins({ includeIncompatible: true });
   } catch (_) {
     pluginState.plugins = [];
   }
 
   if (!options.skipProjectPluginStateRestore) {
-    await restoreProjectPluginEnabledState();
+    await restoreProjectPluginEnabledState({ resetUnspecified: options.resetProjectPluginState });
   }
 
   loadSidebarPluginOrder();
@@ -1699,7 +1730,7 @@ async function loadPlugins(options = {}) {
   // 未設定 & スライドショープラグインが有効なら自動でデフォルトに設定
   if (!pluginState.activeBuilderPlugin) {
     const defaultBuild = pluginState.plugins.find(
-      (p) => p.enabled && pluginSupportsType(p, 'build'),
+      (p) => pluginSupportsActiveCore(p) && p.enabled && pluginSupportsType(p, 'build'),
     );
     if (defaultBuild) {
       pluginState.activeBuilderPlugin = defaultBuild.id;
@@ -1711,7 +1742,7 @@ async function loadPlugins(options = {}) {
   // emulator 未設定時は標準エミュレーター（WASM）を既定にする
   if (!pluginState.activeEmulatorPlugin) {
     const defaultEmulator = pluginState.plugins.find(
-      (p) => p.enabled && pluginSupportsType(p, 'emulator'),
+      (p) => pluginSupportsActiveCore(p) && p.enabled && pluginSupportsType(p, 'emulator'),
     );
     if (defaultEmulator) {
       pluginState.activeEmulatorPlugin = defaultEmulator.id;
@@ -1845,7 +1876,7 @@ async function setPluginEnabledFromUi(plugin, desired, control = null) {
   });
 
   try {
-    pluginState.plugins = await window.electronAPI.listPlugins();
+    pluginState.plugins = await window.electronAPI.listPlugins({ includeIncompatible: true });
     await persistProjectPluginSettings({ enabled: getCurrentProjectPluginEnabledState() });
   } catch (err) {
     appendLog('app', `プロジェクト別プラグイン状態の保存に失敗: ${String(err?.message || err)}`, 'warn');
@@ -1868,10 +1899,11 @@ function renderPluginList() {
 
   el.pluginList.innerHTML = '';
   visiblePlugins.forEach((plugin) => {
+    const compatible = pluginSupportsActiveCore(plugin);
     const isActiveBuilder = (getActiveRolePlugin('builder') || pluginState.activeBuilderPlugin) === plugin.id;
     const isActiveEmulator = (getActiveRolePlugin('testplay') || pluginState.activeEmulatorPlugin) === plugin.id;
     const card = document.createElement('div');
-    card.className = `plugin-card${plugin.enabled ? '' : ' plugin-card-disabled'}${isActiveBuilder ? ' plugin-card-active-builder' : ''}`;
+    card.className = `plugin-card${plugin.enabled && compatible ? '' : ' plugin-card-disabled'}${isActiveBuilder ? ' plugin-card-active-builder' : ''}`;
     card.dataset.id = plugin.id;
 
     const dependencies = Array.isArray(plugin.dependencies) ? plugin.dependencies : [];
@@ -1885,6 +1917,7 @@ function renderPluginList() {
     const roleText = (Array.isArray(plugin.roles) && plugin.roles.length > 0)
       ? `Role: ${plugin.roles.map((role) => role.label || role.id).join(', ')}`
       : '';
+    const coreText = `Core: ${(plugin.supportedCores || ['mega-drive']).join(', ')}${compatible ? '' : ` / 現在の ${getActiveCoreId()} では非対応`}`;
 
     card.innerHTML = `
       <div class="plugin-card-header">
@@ -1892,17 +1925,19 @@ function renderPluginList() {
           <span class="plugin-card-name">${escHtml(plugin.name)}</span>
           <span class="plugin-card-version">v${escHtml(plugin.version)}</span>
           <span class="plugin-card-types">${escHtml((plugin.pluginTypes || []).join(', ') || 'unknown')}</span>
+          <span class="plugin-card-types">${escHtml((plugin.supportedCores || ['mega-drive']).join(', '))}</span>
           ${isActiveBuilder ? '<span class="plugin-builder-badge">🔨 ビルダー</span>' : ''}
           ${isActiveEmulator ? '<span class="plugin-builder-badge">🕹 Emulator</span>' : ''}
         </div>
         <label class="plugin-toggle" title="${plugin.enabled ? '無効にする' : '有効にする'}">
           <input type="checkbox" class="plugin-toggle-input" data-plugin-id="${escHtml(plugin.id)}"
-            ${plugin.enabled ? 'checked' : ''} />
+            ${plugin.enabled ? 'checked' : ''} ${compatible ? '' : 'disabled'} />
           <span class="plugin-toggle-slider"></span>
         </label>
       </div>
       <p class="plugin-card-desc">${escHtml(plugin.description)}</p>
       <p class="plugin-card-deps">${escHtml(depText)}</p>
+      <p class="plugin-card-deps">${escHtml(coreText)}</p>
       <p class="plugin-card-deps">${escHtml(permText)}</p>
       ${roleText ? `<p class="plugin-card-deps">${escHtml(roleText)}</p>` : ''}
       <div class="plugin-card-actions">
@@ -2777,6 +2812,7 @@ function getFilteredPlugins() {
   const search = (state.pluginFilters.searchText || '').trim().toLowerCase();
   const type = state.pluginFilters.type || 'all';
   return pluginState.plugins.filter((plugin) => {
+    if (!state.pluginFilters.showAllCores && !pluginSupportsActiveCore(plugin)) return false;
     if (type !== 'all' && !pluginSupportsType(plugin, type)) return false;
     if (!search) return true;
     const hay = `${plugin.id} ${plugin.name} ${plugin.description} ${(plugin.pluginTypes || []).join(' ')}`.toLowerCase();
@@ -2828,7 +2864,8 @@ function loadSampleCode() {
 
 function updateProjectNameDisplay() {
   if (el.projectName) {
-    el.projectName.textContent = state.projectConfig.title || 'MY GAME';
+    const core = getActiveCoreId() === 'pc-engine' ? 'PCE' : 'MD';
+    el.projectName.textContent = `${state.projectConfig.title || 'MY GAME'} · ${core}`;
   }
 }
 
@@ -2862,6 +2899,25 @@ function validateSerial(value) {
 }
 
 function collectAndValidateSettings({ showError = true } = {}) {
+  if (getActiveCoreId() === 'pc-engine') {
+    const title = el.settingTitle?.value.trim() || state.projectConfig.title || state.projectConfig.romName || 'pce_sample';
+    if (showError) {
+      setFieldError(el.settingTitle, el.settingTitleError, '');
+      setFieldError(el.settingAuthor, el.settingAuthorError, '');
+      setFieldError(el.settingSerial, el.settingSerialError, '');
+    }
+    return {
+      valid: true,
+      errors: {},
+      config: {
+        coreId: 'pc-engine',
+        platform: 'pce',
+        title,
+        romName: state.projectConfig.romName || title,
+        toolchain: state.projectConfig.toolchain || 'cc65',
+      },
+    };
+  }
   const title = el.settingTitle.value.trim();
   const author = el.settingAuthor.value.trim();
   const serial = el.settingSerial.value.trim().toUpperCase();
@@ -2927,6 +2983,9 @@ function setCurrentProjectInfo(info) {
   state.project.dir = info?.projectDir || '';
   state.project.name = info?.projectName || '';
   state.project.projectsRootDir = info?.projectsRootDir || state.project.projectsRootDir || '';
+  if (info?.coreId) {
+    state.projectConfig.coreId = info.coreId;
+  }
   if (el.projectDirLabel) {
     el.projectDirLabel.textContent = state.project.dir || 'no project';
     el.projectDirLabel.title = state.project.dir || '';
@@ -2945,6 +3004,7 @@ async function refreshProjectList() {
   state.project.availableProjects = Array.isArray(result.projects) ? result.projects : [];
   state.project.recentProjects = Array.isArray(result.recentProjects) ? result.recentProjects : [];
   state.project.templates = Array.isArray(result.templates) ? result.templates : [];
+  state.project.cores = Array.isArray(result.cores) ? result.cores : state.project.cores;
   if (!state.project.newProjectParentDir) {
     state.project.newProjectParentDir = state.project.projectsRootDir || '';
   }
@@ -2953,10 +3013,48 @@ async function refreshProjectList() {
 
 async function loadPluginCatalogForProjectCreation() {
   try {
-    pluginState.plugins = await window.electronAPI.listPlugins();
+    pluginState.plugins = await window.electronAPI.listPlugins({ includeIncompatible: true });
   } catch (_) {
     pluginState.plugins = [];
   }
+}
+
+function resetProjectScopedPluginUiState() {
+  state.startup.selectedDefaultSidebarPage = false;
+  state.currentPage = 'plugins';
+  pluginState.plugins = [];
+  pluginState.generating = {};
+  pluginState.activeRoles = {};
+  pluginState.activeBuilderPlugin = null;
+  pluginState.activeEmulatorPlugin = null;
+  pluginState.sidebarOrder = [];
+  pluginState.draggingSidebarPluginId = null;
+
+  state.code.tree = [];
+  state.code.selectedPath = 'src/main.c';
+  state.code.selectedIsDirectory = false;
+  state.code.selectedIsMedia = false;
+  state.code.initialCollapseApplied = false;
+  state.code.collapsedDirs = [];
+  setCodeDirty(false);
+  closeCodeCompletion();
+  closeSidebarPluginContextMenu();
+  clearPluginRuntime();
+
+  if (el.sidebarPluginTabs) el.sidebarPluginTabs.innerHTML = '';
+  if (el.pluginList) el.pluginList.innerHTML = '<p class="hint-text">プロジェクトのプラグイン状態を読み込み中...</p>';
+  if (el.pluginRoleBody) el.pluginRoleBody.innerHTML = '';
+  if (el.btnBuild) el.btnBuild.disabled = true;
+  if (el.btnTestPlay) el.btnTestPlay.disabled = true;
+  switchPage('plugins');
+}
+
+async function reloadProjectAfterSwitch() {
+  resetProjectScopedPluginUiState();
+  await loadProjectConfig();
+  await loadResDefinitions({ keepSelection: false });
+  await loadPlugins({ resetProjectPluginState: true, resetSidebarSelection: true });
+  await refreshProjectList();
 }
 
 function renderProjectPicker() {
@@ -2984,10 +3082,7 @@ function renderProjectPicker() {
     state.startup.projectSelectionRequired = false;
     appendLog('app', `プロジェクトを開きました: ${result.projectDir || project.projectDir || project.projectName}`);
     closeModal(el.projectPickerModal);
-    await loadProjectConfig();
-    await loadResDefinitions({ keepSelection: false });
-    await loadPlugins();
-    await refreshProjectList();
+    await reloadProjectAfterSwitch();
     if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `✓ プロジェクトを切り替えました: ${result.projectDir}`;
   };
 
@@ -3082,10 +3177,7 @@ async function openProjectFolderFromDialog() {
   state.startup.projectSelectionRequired = false;
   appendLog('app', `プロジェクトを開きました: ${result.projectDir || projectDir}`);
   closeModal(el.projectPickerModal);
-  await loadProjectConfig();
-  await loadResDefinitions({ keepSelection: false });
-  await loadPlugins();
-  await refreshProjectList();
+  await reloadProjectAfterSwitch();
   if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `✓ プロジェクトを切り替えました: ${result.projectDir}`;
 }
 
@@ -3128,7 +3220,9 @@ async function loadProjectConfig() {
 
     const cfg = await window.electronAPI.getProjectConfig();
     if (cfg) {
+      const coreId = cfg.coreId || (cfg.platform === 'pce' ? 'pc-engine' : 'mega-drive');
       const normalized = {
+        coreId,
         title: cfg.title || cfg.romName || state.projectConfig.title,
         author: cfg.author || state.projectConfig.author,
         serial: cfg.serial || state.projectConfig.serial,
@@ -3206,7 +3300,8 @@ async function runBuild(opts = {}) {
 
   // ---- アクティブビルダープラグインが設定されており、かつ呼び出し元がプラグイン生成後でない場合 ----
   const builderPluginId = getActiveRolePlugin('builder') || pluginState.activeBuilderPlugin;
-  if (builderPluginId && !opts._generatedByPlugin) {
+  const builderPlugin = builderPluginId ? getPluginById(builderPluginId) : null;
+  if (builderPluginId && builderPlugin?.hasGenerator && !opts._generatedByPlugin) {
     // プラグインで main.c を生成してから再度 runBuild を呼ぶ
     appendBuildLog(`[Plugin] ${builderPluginId}: コード生成中...`);
     const genResult = await window.electronAPI.runPluginGenerator(builderPluginId);
@@ -3246,7 +3341,7 @@ async function runBuild(opts = {}) {
   setLogOpen(true);
   setBuildStatus('building', 'ビルド中...');
   if (el.buildRomSize) el.buildRomSize.textContent = '';
-  appendBuildLog('=== MD Game Editor Build ===');
+  appendBuildLog(`=== ${getActiveCoreId() === 'pc-engine' ? 'PC Engine' : 'Mega Drive'} Build ===`);
   appendBuildLog(`プロジェクト: ${state.projectConfig.title}`);
   appendBuildLog('');
 
@@ -4932,6 +5027,15 @@ async function reorderEntry(fromLine, toLine) {
 }
 
 async function loadResDefinitions({ keepSelection = false } = {}) {
+  if (getActiveCoreId() === 'pc-engine') {
+    state.rescomp.resRoot = '';
+    state.rescomp.files = [];
+    state.rescomp.selectedFile = '';
+    state.rescomp.selectedEntryLine = null;
+    renderResFileList();
+    renderAssetTable();
+    return;
+  }
   const prevFile = state.rescomp.selectedFile;
   const prevLine = state.rescomp.selectedEntryLine;
 
@@ -7517,12 +7621,24 @@ function openProjectModal() {
     el.projectParentDirInput.value = state.project.newProjectParentDir || '';
     el.projectParentDirInput.title = state.project.newProjectParentDir || '';
   }
-  if (el.projectSystemNameInput) el.projectSystemNameInput.value = 'my_md_game';
+  populateProjectCoreSelect();
+  if (el.projectSystemNameInput) el.projectSystemNameInput.value = getActiveCoreId() === 'pc-engine' ? 'my_pce_game' : 'my_md_game';
   if (el.projectTitleInput) el.projectTitleInput.value = NEW_PROJECT_DEFAULT_CONFIG.title;
   if (el.projectAuthorInput) el.projectAuthorInput.value = NEW_PROJECT_DEFAULT_CONFIG.author;
   if (el.projectSerialInput) el.projectSerialInput.value = NEW_PROJECT_DEFAULT_CONFIG.serial;
   populateProjectTemplateSelect();
   openModal(el.projectModal);
+}
+
+function populateProjectCoreSelect() {
+  if (!el.projectCoreSelect) return;
+  const cores = Array.isArray(state.project.cores) && state.project.cores.length > 0
+    ? state.project.cores
+    : [{ id: 'mega-drive', name: 'Mega Drive' }, { id: 'pc-engine', name: 'PC Engine' }];
+  el.projectCoreSelect.innerHTML = cores.map((core) => (
+    `<option value="${escHtml(core.id)}">${escHtml(core.name || core.id)}</option>`
+  )).join('');
+  el.projectCoreSelect.value = getActiveCoreId();
 }
 
 function getBuilderPluginDisplayName(builderId) {
@@ -7534,9 +7650,10 @@ function getBuilderPluginDisplayName(builderId) {
 
 function populateProjectTemplateSelect() {
   if (!el.projectTemplateSelect) return;
+  const selectedCore = String(el.projectCoreSelect?.value || getActiveCoreId());
   const templates = Array.isArray(state.project.templates) ? state.project.templates : [];
   const options = ['<option value="">空のプロジェクト</option>'];
-  templates.forEach((template) => {
+  templates.filter((template) => !template.coreId || template.coreId === selectedCore).forEach((template) => {
     const builder = template.builderPlugin ? ` / ${getBuilderPluginDisplayName(template.builderPlugin)}` : '';
     options.push(`<option value="${escHtml(template.templateId)}">${escHtml(`${template.title || template.projectName}${builder}`)}</option>`);
   });
@@ -7581,15 +7698,22 @@ async function submitProjectModal() {
     if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = 'プロジェクトフォルダ名を入力してください。';
     return;
   }
+  const coreId = String(el.projectCoreSelect?.value || 'mega-drive');
   const payload = {
     projectName,
     parentDir: el.projectParentDirInput?.value.trim() || state.project.projectsRootDir || '',
     templateId: String(el.projectTemplateSelect?.value || '').trim(),
     config: {
+      coreId,
+      platform: coreId === 'pc-engine' ? 'pce' : 'md',
       title: el.projectTitleInput?.value.trim() || NEW_PROJECT_DEFAULT_CONFIG.title,
       author: el.projectAuthorInput?.value.trim() || NEW_PROJECT_DEFAULT_CONFIG.author,
       serial: (el.projectSerialInput?.value.trim() || NEW_PROJECT_DEFAULT_CONFIG.serial).toUpperCase(),
       region: 'JUE',
+      ...(coreId === 'pc-engine' ? {
+        romName: el.projectTitleInput?.value.trim() || projectName,
+        toolchain: 'cc65',
+      } : {}),
     },
   };
   const result = await window.electronAPI.createNewProject(payload);
@@ -7602,10 +7726,7 @@ async function submitProjectModal() {
   state.startup.projectSelected = true;
   state.startup.projectSelectionRequired = false;
   closeModal(el.projectModal);
-  await loadProjectConfig();
-  await loadResDefinitions({ keepSelection: false });
-  await refreshProjectList();
-  await loadPlugins();
+  await reloadProjectAfterSwitch();
   if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `✓ プロジェクトを作成しました: ${result.projectDir}`;
 }
 
@@ -7695,6 +7816,11 @@ function bindEvents() {
   });
   el.pluginTypeFilter?.addEventListener('change', () => {
     state.pluginFilters.type = el.pluginTypeFilter.value || 'all';
+    renderPluginList();
+  });
+  el.pluginCoreFilterToggle?.addEventListener('change', () => {
+    state.pluginFilters.showAllCores = Boolean(el.pluginCoreFilterToggle.checked);
+    renderPluginRoleSettings();
     renderPluginList();
   });
 
@@ -8079,6 +8205,13 @@ function bindEvents() {
   });
   el.btnProjectParentDirBrowse?.addEventListener('click', chooseProjectParentDirectory);
   el.projectTemplateSelect?.addEventListener('change', updateProjectTemplateHint);
+  el.projectCoreSelect?.addEventListener('change', () => {
+    const coreId = String(el.projectCoreSelect.value || 'mega-drive');
+    if (el.projectSystemNameInput) {
+      el.projectSystemNameInput.value = coreId === 'pc-engine' ? 'my_pce_game' : 'my_md_game';
+    }
+    populateProjectTemplateSelect();
+  });
   el.btnProjectModalCreate?.addEventListener('click', submitProjectModal);
   el.btnProjectPickerOpenFolder?.addEventListener('click', openProjectFolderFromDialog);
   el.btnProjectPickerNew?.addEventListener('click', () => {

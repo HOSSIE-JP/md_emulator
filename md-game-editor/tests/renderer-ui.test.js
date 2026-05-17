@@ -198,6 +198,11 @@ test('startup selects the first sidebar plugin and project creation exposes temp
   assert.match(renderer, /function getFirstSidebarPluginPageId\(\)/);
   assert.match(renderer, /selectedDefaultSidebarPage:\s*false/);
   assert.match(renderer, /switchPage\(getFirstSidebarPluginPageId\(\)\s*\|\|\s*getFirstVisiblePageId\(\)\)/);
+  assert.match(renderer, /function resetProjectScopedPluginUiState\(\)/);
+  assert.match(renderer, /async function reloadProjectAfterSwitch\(\)/);
+  assert.match(renderer, /resetProjectScopedPluginUiState\(\)/);
+  assert.match(renderer, /loadPlugins\(\{\s*resetProjectPluginState:\s*true,\s*resetSidebarSelection:\s*true\s*\}\)/);
+  assert.match(renderer, /state\.startup\.selectedDefaultSidebarPage = false/);
   assert.match(renderer, /function populateProjectTemplateSelect\(\)/);
   assert.match(renderer, /function openProjectFolderFromDialog\(\)/);
   assert.match(renderer, /空のプロジェクト/);
@@ -205,6 +210,7 @@ test('startup selects the first sidebar plugin and project creation exposes temp
   assert.match(renderer, /templateId:\s*String\(el\.projectTemplateSelect\?\.value \|\| ''\)\.trim\(\)/);
   assert.doesNotMatch(renderer, /payload\.config\.pluginRoles\s*=\s*\{\s*builder:/);
   assert.match(renderer, /openExistingProject\(\{\s*projectDir/s);
+  assert.equal((renderer.match(/await reloadProjectAfterSwitch\(\)/g) || []).length, 3);
 });
 
 test('sidebar plugin icons prefer manifest icon over tab icon', () => {
@@ -244,7 +250,7 @@ test('sidebar context menu toggles installed tab plugins', () => {
   assert.match(renderer, /function isSidebarTogglePlugin\(plugin\)/);
   assert.match(renderer, /plugin\?\.tab && plugin\?\.hasRenderer && getPluginRendererPageId\(plugin\)/);
   assert.match(renderer, /function getSidebarTogglePlugins\(\)/);
-  assert.match(renderer, /\.filter\(\(plugin\) => isSidebarTogglePlugin\(plugin\)\)/);
+  assert.match(renderer, /\.filter\(\(plugin\) => pluginSupportsActiveCore\(plugin\) && isSidebarTogglePlugin\(plugin\)\)/);
   assert.match(renderer, /function isDedicatedBuilderEditorPlugin\(plugin\)/);
   assert.match(renderer, /pluginSupportsRole\(candidate,\s*'builder'\)/);
   assert.match(renderer, /pluginHasDependency\(plugin,\s*candidate\.id\)/);
@@ -274,7 +280,7 @@ test('plugin page availability keeps multiple editor plugin pages independent', 
   assert.ok(renderer.includes("document.querySelectorAll('.editor-page[data-plugin-page-owner]')"));
   assert.match(renderer, /section\.dataset\.pluginPageOwner/);
   assert.match(renderer, /getPluginPageDomId\(owner\) === pageId/);
-  assert.match(renderer, /section\.hidden = !plugins\.some\(\(plugin\) => plugin\.enabled && \(plugin\.hasRenderer \|\| plugin\.tab\)\)/);
+  assert.match(renderer, /section\.hidden = !plugins\.some\(\(plugin\) => pluginSupportsActiveCore\(plugin\) && plugin\.enabled && \(plugin\.hasRenderer \|\| plugin\.tab\)\)/);
   assert.doesNotMatch(renderer, /pageBindings\.set\(pageId,\s*plugin\)/);
   assert.match(css, /\.editor-page:not\(\.active\)\s*\{\s*display:\s*none\s*!important;\s*\}/);
 });
@@ -388,7 +394,7 @@ test('project plugin roles restore plugin enabled state on plugin load', () => {
   assert.match(renderer, /async function restoreProjectPluginRoleState\(\)/);
   assert.match(renderer, /for \(const \[roleId,\s*pluginId\] of Object\.entries\(roles\)\)/);
   assert.match(renderer, /window\.electronAPI\.setPluginRole\(roleId,\s*pluginId\)/);
-  assert.match(renderer, /pluginState\.plugins = await window\.electronAPI\.listPlugins\(\)/);
+  assert.match(renderer, /pluginState\.plugins = await window\.electronAPI\.listPlugins\(\{\s*includeIncompatible:\s*true\s*\}\)/);
   assert.match(renderer, /await restoreProjectPluginRoleState\(\)/);
 });
 
@@ -401,9 +407,11 @@ test('project plugin settings persist non-role enabled state and sidebar order',
   assert.match(renderer, /function getProjectPluginEnabledSettings\(\)/);
   assert.match(renderer, /function getCurrentProjectPluginEnabledState\(\)/);
   assert.match(renderer, /\.filter\(\(plugin\) => isProjectPluginStateManaged\(plugin\)\)/);
-  assert.match(renderer, /async function restoreProjectPluginEnabledState\(\)/);
+  assert.match(renderer, /async function restoreProjectPluginEnabledState\(options = \{\}\)/);
+  assert.match(renderer, /const resetUnspecified = Boolean\(options\.resetUnspecified\)/);
+  assert.match(renderer, /return resetUnspecified \? \[plugin\.id,\s*true\] : null/);
   assert.match(renderer, /window\.electronAPI\.setPluginEnabled\(pluginId,\s*Boolean\(enabled\)\)/);
-  assert.match(renderer, /await restoreProjectPluginEnabledState\(\)/);
+  assert.match(renderer, /await restoreProjectPluginEnabledState\(\{\s*resetUnspecified:\s*options\.resetProjectPluginState\s*\}\)/);
   assert.match(renderer, /await persistProjectPluginSettings\(\{ enabled: getCurrentProjectPluginEnabledState\(\) \}\)/);
   assert.match(renderer, /persistProjectPluginSettings\(\{ sidebarOrder: pluginState\.sidebarOrder \}\)/);
   assert.match(renderer, /const projectOrder = getProjectPluginSidebarOrder\(\)/);

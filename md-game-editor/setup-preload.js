@@ -3,6 +3,11 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronSetup', {
   getStatus: () => ipcRenderer.invoke('setup:getStatus'),
+  getActiveCore: () => ipcRenderer.invoke('cores:getActive'),
+  getCatalog: () => ipcRenderer.invoke('setup:getCatalog'),
+  listVersions: (kind) => ipcRenderer.invoke('setup:listVersions', { kind }),
+  downloadTool: (payload) => ipcRenderer.invoke('setup:downloadTool', payload || {}),
+  setToolPath: (kind, value) => ipcRenderer.invoke('setup:setToolPath', { kind, value }),
   listSgdkVersions: () => ipcRenderer.invoke('setup:listSgdkVersions'),
   downloadSgdk: (tag) => ipcRenderer.invoke('setup:downloadSgdk', tag),
   setSgdkPath: (p) => ipcRenderer.invoke('setup:setSgdkPath', p),

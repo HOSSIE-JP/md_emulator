@@ -39,14 +39,25 @@ function findBundledXgmTool(payload = {}) {
   const explicit = String(payload.xgmToolPath || '');
   if (explicit) return explicit;
 
-  const candidates = [
-    path.join(__dirname, '..', '..', 'data', 'tools', 'sgdk', 'SGDK-2.11', 'bin', 'xgmtool.exe'),
-    process.env.GDK ? path.join(process.env.GDK, 'bin', 'xgmtool.exe') : '',
-    process.env.SGDK ? path.join(process.env.SGDK, 'bin', 'xgmtool.exe') : '',
-    path.join('D:', 'homebrew', 'SGDK', 'sgdk', 'current', 'bin', 'xgmtool.exe'),
+  const toolName = process.platform === 'win32' ? 'xgmtool.exe' : 'xgmtool';
+  const roots = [
+    path.join(__dirname, '..', '..', 'data', 'tools', 'sgdk', 'SGDK-2.11'),
+    process.env.GDK || '',
+    process.env.SGDK || '',
+    process.platform === 'win32' ? path.join('D:', 'homebrew', 'SGDK', 'sgdk', 'current') : '',
   ].filter(Boolean);
 
-  return candidates.find((candidate) => fs.existsSync(candidate)) || '';
+  const candidates = roots.map((root) => path.join(root, 'bin', toolName));
+  return candidates.find((candidate) => {
+    if (!fs.existsSync(candidate)) return false;
+    if (process.platform === 'win32') return true;
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }) || '';
 }
 
 function convertMidiMusic(payload = {}, context = {}) {

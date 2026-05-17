@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-05 / Plugin Runtime v2.4 / AI Control API / TileMap collision / Editor UX guardrails
+> § Last Updated: 2026-05 / Plugin Runtime v2.5 / Core Plugin / AI Control API / TileMap collision / Editor UX guardrails
 
 ---
 
@@ -29,7 +29,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 
 ### MD Game Editor のプラグインシステム
 
-- **Plugin Runtime v2.4** を採用
+- **Plugin Runtime v2.5** を採用
 - プラグインは `manifest.json` を必須とし、必要に応じて `index.js` と `renderer.js` を持つ
 - `index.js` は Electron メインプロセス (Node.js) 上で動作する（ブラウザ API は使用不可）
 - `renderer.js` は Electron renderer process の ES module として動作し、UI/capability を登録する
@@ -54,6 +54,8 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
   "version": "1.0.0",          // 必須: semver 形式
   "icon": "puzzle",            // 任意: サイドバーなどで使う組み込みアイコン名
   "types": ["build"],          // 必須: 配列で記述
+  "generator": true,           // 任意: generateSource/generateSourceAsync を持つ場合。hook 専用なら false
+  "supportedCores": ["mega-drive"], // 必須推奨: mega-drive / pc-engine / *。未指定は legacy MD 扱い
   "hooks": ["onBuildStart"],   // 任意: 実装するフック名の宣言
   "permissions": ["project.read", "project.write", "build.configure"],
   "roles": [
@@ -88,10 +90,19 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 | `asset` | アセット管理機能 | `editor` との組み合わせが一般的 |
 | `emulator` | Test Play 実行 | `onTestPlay` |
 | `converter` | 画像・音声変換などの処理/UI capability | `renderer.capabilities` / 独自 hook |
+| `core` | project core の setup / project / build / asset schema / template provider | main process 側 provider |
+
+### core / supportedCores
+
+- Runtime v2.5 では `project.json.coreId` がプロジェクト単位の実効 core。未指定の既存 MD project は `mega-drive`、`platform: "pce"` を持つ既存 PCE project は `pc-engine` として扱う
+- 新規 plugin は `supportedCores` を宣言する。MD 専用は `["mega-drive"]`、PCE 専用は `["pc-engine"]`、project FS API だけを使う共有 plugin は `["*"]`
+- `supportedCores` 未宣言の既存 plugin は後方互換のため `["mega-drive"]` 扱い
+- 現在 core に非対応の plugin は既定で非表示になり、有効化、role 選択、hook/generator 呼び出し対象から除外される
+- setup / project / build / asset schema / template のようなシステム固有機能は `types: ["core"]` の core plugin/provider 側に置き、通常 plugin は role/hook/capability に閉じる
 
 ### renderer module パターン
 
-Plugin Runtime v2.4 では、機能固有 UI は本体 `md-game-editor/renderer/renderer.js` へ直接追加せず、プラグイン配下の renderer module に置く。
+Plugin Runtime v2.5 では、機能固有 UI は本体 `md-game-editor/renderer/renderer.js` へ直接追加せず、プラグイン配下の renderer module に置く。
 
 ```js
 export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, registerCapability }) {
@@ -117,16 +128,17 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 - Build / Test Play など単一選択 plugin は `roles` で宣言し、project.json の標準保存先は `pluginRoles` とする
 - 単一選択 role で競合 plugin が無効化される場合、その plugin に依存する plugin も同時に無効化される
 - `src/boot/rom_head.c` はプロジェクト設定からエディタ本体が生成するため、build plugin のテンプレート同期で上書きしない
-- `permissions` は v2.4 では表示・レビュー用途の宣言で、sandbox 強制ではない
-- 新規 plugin で本体 `main.js` / `preload.js` / `build-system.js` の個別追記が必要に見える場合は、まず Runtime v2.4 の汎用 API 不足として扱う
+- `permissions` は v2.5 では表示・レビュー用途の宣言で、sandbox 強制ではない
+- 新規 plugin で本体 `main.js` / `preload.js` / `build-system.js` の個別追記が必要に見える場合は、まず Runtime v2.5 の汎用 API または core provider の不足として扱う
 
-### Runtime v2.4 で必ず守る開発手順
+### Runtime v2.5 で必ず守る開発手順
 
-1. `manifest.json` に `types`、`permissions`、必要な `roles`、`hooks`、`renderer.capabilities` を宣言する
+1. `manifest.json` に `types`、`supportedCores`、`permissions`、必要な `roles`、`hooks`、`renderer.capabilities` を宣言する
 2. Build / Test Play の単一選択 plugin は `roles` を宣言し、project 側は `project.json.pluginRoles` に保存する
-3. UI、modal、preview、converter 連携は plugin の `renderer.js` で実装し、本体 HTML / renderer / main / preload へ個別追記しない
-4. main process の処理が必要な場合は `hooks` と `mainApi.hooks` に同じ hook 名を宣言し、renderer から `api.plugins.invokeHook()` で呼ぶ
-5. asset 登録拡張は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として提供する。標準コピー前に独自 wizard を挟む場合は `asset-import-handler.handleImport(payload)` を使う
+3. MD 専用 plugin は `supportedCores: ["mega-drive"]`、PCE 専用 plugin は `["pc-engine"]`、共有 plugin は `["*"]` を宣言する
+4. UI、modal、preview、converter 連携は plugin の `renderer.js` で実装し、本体 HTML / renderer / main / preload へ個別追記しない
+5. main process の処理が必要な場合は `hooks` と `mainApi.hooks` に同じ hook 名を宣言し、renderer から `api.plugins.invokeHook()` で呼ぶ
+6. asset 登録拡張は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として提供する。標準コピー前に独自 wizard を挟む場合は `asset-import-handler.handleImport(payload)` を使う
 
 ---
 

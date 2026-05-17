@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const net = require('net');
+const { pathToFileURL } = require('url');
 const { shell } = require('electron');
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const { spawn, spawnSync } = require('child_process');
@@ -52,8 +53,9 @@ if (!gotSingleInstanceLock) {
 }
 
 const setupManager = require('./setup-manager');
-const buildSystem = require('./build-system');
+const buildSystem = require('./core-manager');
 const rescompManager = require('./rescomp-manager');
+const pceAssetManager = require('./pce-asset-manager');
 const pluginManager = require('./plugin-manager');
 const {
   createEditorControlService,
@@ -66,6 +68,7 @@ let setupWindow = null;
 let testPlayWindow = null;
 let testPlaySettingsWindow = null;
 let logWindow = null;
+let currentTestPlayContext = null;
 let apiServerProcess = null;
 let apiServerPort = null;
 let editorControlService = null;
@@ -398,6 +401,13 @@ function broadcastTestPlaySettings(settings) {
 }
 
 function collectProjectAssets(projectDir) {
+  if (buildSystem.getCoreIdForProjectDir(projectDir) === 'pc-engine') {
+    try {
+      return pceAssetManager.listAssets(projectDir).assets;
+    } catch (_) {
+      return [];
+    }
+  }
   let allAssets = [];
   try {
     const defs = rescompManager.listResDefinitions(projectDir);
@@ -491,6 +501,7 @@ async function invokePluginHookSafe(pluginId, hookName, payload, context = {}) {
 async function invokeRendererPluginHook(pluginId, hookName, payload) {
   const projectDir = buildSystem.getProjectDir();
   return pluginManager.invokeRendererHook(pluginId, hookName, payload || {}, {
+    coreId: buildSystem.getActiveCoreId(),
     projectDir,
     assets: collectProjectAssets(projectDir),
     logger: createPluginLogger(pluginId),
@@ -518,6 +529,7 @@ function isTempPath(filePath) {
 function pluginSupportsRole(plugin, roleId) {
   const role = String(roleId || '').trim();
   if (!role) return false;
+  if (plugin && !pluginManager.pluginSupportsCore(plugin, buildSystem.getActiveCoreId())) return false;
   const roles = Array.isArray(plugin?.roles) ? plugin.roles : [];
   return roles.some((entry) => entry?.id === role);
 }
@@ -525,7 +537,7 @@ function pluginSupportsRole(plugin, roleId) {
 function resolvePluginForRole(roleId) {
   let pluginId = buildSystem.getPluginRole(roleId);
   if (!pluginId) {
-    const fallback = pluginManager.listPlugins()
+    const fallback = pluginManager.listPlugins({ coreId: buildSystem.getActiveCoreId(), includeIncompatible: false })
       .filter((p) => p.enabled && pluginSupportsRole(p, roleId))
       .sort((a, b) => {
         const roleA = (a.roles || []).find((role) => role.id === roleId);
@@ -569,9 +581,105 @@ function focusExistingTestPlayWindow() {
   return false;
 }
 
+function findPceEmulatorCore(dataDir) {
+  const coresDir = path.join(dataDir, 'cores');
+  if (!fs.existsSync(coresDir)) return null;
+  return fs.readdirSync(coresDir).find((fileName) => /^mednafen_pce.*-wasm\.data$/i.test(fileName)) || null;
+}
+
+function resolvePceEmulatorJsRuntime(emulatorJsDir) {
+  const root = path.resolve(emulatorJsDir || '');
+  const directLoader = path.join(root, 'loader.js');
+  const nestedDataDir = path.join(root, 'data');
+  const nestedLoader = path.join(nestedDataDir, 'loader.js');
+
+  if (fs.existsSync(directLoader)) {
+    return {
+      rootDir: path.dirname(root),
+      dataDir: root,
+      loaderPath: directLoader,
+      coreAsset: findPceEmulatorCore(root),
+    };
+  }
+  if (fs.existsSync(nestedLoader)) {
+    return {
+      rootDir: root,
+      dataDir: nestedDataDir,
+      loaderPath: nestedLoader,
+      coreAsset: findPceEmulatorCore(nestedDataDir),
+    };
+  }
+  return { rootDir: root, dataDir: nestedDataDir, loaderPath: nestedLoader, coreAsset: null };
+}
+
+function makePceTestPlayContext(options = {}) {
+  const romPath = options.romPath || null;
+  if (!romPath || !fs.existsSync(romPath)) {
+    return {
+      ok: false,
+      error: 'ROM が未生成です。Build を成功させてから Test Play を実行してください。',
+      needsBuild: true,
+    };
+  }
+
+  const pceSetupManager = buildSystem.getPceSetupManager();
+  const emulatorJsDir = pceSetupManager.getEmulatorJsDir();
+  if (!emulatorJsDir) {
+    return {
+      ok: false,
+      error: 'EmulatorJS / mednafen_pce core is not configured. Setup で取得またはパス指定してください。',
+      needsSetup: true,
+    };
+  }
+
+  const runtime = resolvePceEmulatorJsRuntime(emulatorJsDir);
+  if (!fs.existsSync(runtime.loaderPath)) {
+    return {
+      ok: false,
+      error: `EmulatorJS loader.js が見つかりません: ${runtime.loaderPath}`,
+      needsSetup: true,
+    };
+  }
+  if (!runtime.coreAsset) {
+    return {
+      ok: false,
+      error: `EmulatorJS mednafen_pce core が見つかりません: ${path.join(runtime.dataDir, 'cores')}`,
+      needsSetup: true,
+    };
+  }
+
+  const romStat = fs.statSync(romPath);
+  return {
+    ok: true,
+    context: {
+      romPath,
+      romUrl: pathToFileURL(romPath).href,
+      romMtimeMs: romStat.mtimeMs,
+      romSize: romStat.size,
+      gameId: `${path.basename(romPath)}-${romStat.mtimeMs}-${romStat.size}`,
+      emulatorJsDir: runtime.rootDir,
+      emulatorJsUrl: pathToFileURL(runtime.rootDir).href.replace(/\/?$/, '/'),
+      emulatorJsDataDir: runtime.dataDir,
+      emulatorJsDataUrl: pathToFileURL(runtime.dataDir).href.replace(/\/?$/, '/'),
+      emulatorJsLoaderUrl: pathToFileURL(runtime.loaderPath).href,
+      core: 'pce',
+      coreAsset: runtime.coreAsset,
+    },
+  };
+}
+
 async function openWasmTestPlayWindow(options = {}) {
   const pluginId = String(options.pluginId || 'standard-emulator');
+  if (pluginId === 'pce-standard-emulator') {
+    const contextResult = makePceTestPlayContext(options);
+    if (!contextResult.ok) return { opened: false, ...contextResult };
+    currentTestPlayContext = contextResult.context;
+  }
   if (focusExistingTestPlayWindow()) {
+    if (pluginId === 'pce-standard-emulator') {
+      const htmlPath = resolvePluginAssetPath(pluginId, 'testplay.html');
+      testPlayWindow.loadFile(htmlPath);
+    }
     return { opened: true, reused: true };
   }
 
@@ -581,7 +689,7 @@ async function openWasmTestPlayWindow(options = {}) {
   testPlayWindow = new BrowserWindow({
     width: 800,
     height: 720,
-    title: 'Test Play - MD Game Editor',
+    title: pluginId === 'pce-standard-emulator' ? 'PCE Test Play' : 'Test Play - MD Game Editor',
     backgroundColor: '#0f1117',
     autoHideMenuBar: true,
     webPreferences: {
@@ -592,8 +700,12 @@ async function openWasmTestPlayWindow(options = {}) {
     },
   });
   const romQuery = options.romPath ? `?romPath=${encodeURIComponent(options.romPath)}` : '';
-  testPlayWindow.loadFile(htmlPath, { search: romQuery });
-  testPlayWindow.on('closed', () => { testPlayWindow = null; });
+  if (pluginId === 'pce-standard-emulator') {
+    testPlayWindow.loadFile(htmlPath);
+  } else {
+    testPlayWindow.loadFile(htmlPath, { search: romQuery });
+  }
+  testPlayWindow.on('closed', () => { testPlayWindow = null; currentTestPlayContext = null; });
   return { opened: true, reused: false };
 }
 
@@ -648,6 +760,9 @@ function createTestPlayHostApi(pluginId) {
     startApiServer: (options = {}) => startApiServer(options.port || 8080),
     stopApiServer,
     isApiServerRunning: () => ({ running: !!apiServerProcess, port: apiServerPort }),
+    getEmulatorStatus: () => buildSystem.getActiveCoreId() === 'pc-engine'
+      ? buildSystem.getPceSetupManager().getStatus().emulatorJs
+      : setupManager.getStatus(),
   };
 }
 
@@ -658,7 +773,7 @@ function syncProjectPluginRoleState() {
 
   Object.entries(roles || {}).forEach(([roleId, pluginId]) => {
     if (!roleId || !pluginId) return;
-    const result = pluginManager.setExclusiveRoleSelection(roleId, pluginId);
+    const result = pluginManager.setExclusiveRoleSelection(roleId, pluginId, { coreId: buildSystem.getActiveCoreId() });
     if (result?.ok) {
       synced.push({
         roleId,
@@ -853,6 +968,7 @@ async function runPluginGeneratorAndWrite(id) {
   const projectDir = buildSystem.getProjectDir();
   const allAssets = collectProjectAssets(projectDir);
   const genResult = await pluginManager.runGenerator(id, allAssets, {
+    coreId: buildSystem.getActiveCoreId(),
     projectDir,
     assets: allAssets,
     logger: createPluginLogger(id),
@@ -877,7 +993,7 @@ async function openTestPlayWithPlugin(romPath) {
   if (!pluginManager.isPluginEnabled(emulatorPluginId)) {
     return { opened: false, error: `Emulator プラグイン "${emulatorPluginId}" は無効です` };
   }
-  const emulatorMeta = pluginManager.listPlugins().find((p) => p.id === emulatorPluginId);
+  const emulatorMeta = pluginManager.listPlugins({ coreId: buildSystem.getActiveCoreId(), includeIncompatible: true }).find((p) => p.id === emulatorPluginId);
   if (!pluginSupportsRole(emulatorMeta, 'testplay')) {
     return { opened: false, error: `Emulator プラグイン "${emulatorPluginId}" は testplay role ではありません` };
   }
@@ -890,6 +1006,7 @@ async function openTestPlayWithPlugin(romPath) {
       projectDir: buildSystem.getProjectDir(),
     },
     {
+      coreId: buildSystem.getActiveCoreId(),
       projectDir: buildSystem.getProjectDir(),
       logger: createPluginLogger(emulatorPluginId),
       testPlay: createTestPlayHostApi(emulatorPluginId),
@@ -945,7 +1062,9 @@ function getEditorControlService() {
     },
     project_config_get: async () => buildSystem.loadProjectConfig(),
     project_config_update: async ({ patch }) => ({ config: buildSystem.saveProjectConfig(patch || {}) }),
-    asset_list: async () => rescompManager.listResDefinitions(buildSystem.getProjectDir()),
+    asset_list: async () => buildSystem.getActiveCoreId() === 'pc-engine'
+      ? pceAssetManager.listAssets(buildSystem.getProjectDir())
+      : rescompManager.listResDefinitions(buildSystem.getProjectDir()),
     asset_add: async ({ file, entry }) => rescompManager.addResEntry(buildSystem.getProjectDir(), file || 'resources.res', entry || {}),
     asset_write_file: async ({ targetPath, dataBase64, dataUrl, sourcePath }) => {
       const payload = {
@@ -984,9 +1103,9 @@ function getEditorControlService() {
       fs.writeFileSync(absPath, String(content ?? ''), 'utf-8');
       return { path: relPath || '' };
     },
-    plugin_list: async () => ({ plugins: pluginManager.listPlugins(), roles: buildSystem.getPluginRoles() }),
+    plugin_list: async () => ({ plugins: pluginManager.listPlugins({ coreId: buildSystem.getActiveCoreId(), includeIncompatible: true }), roles: buildSystem.getPluginRoles() }),
     plugin_set_role: async ({ roleId, id }) => {
-      const syncResult = pluginManager.setExclusiveRoleSelection(roleId, id || null);
+      const syncResult = pluginManager.setExclusiveRoleSelection(roleId, id || null, { coreId: buildSystem.getActiveCoreId() });
       resultOrThrow(syncResult);
       buildSystem.setPluginRole(roleId, id || null);
       return syncResult;
@@ -1589,6 +1708,41 @@ ipcMain.handle('res:writeAssetFile', async (_event, payload) => {
   }
 });
 
+ipcMain.handle('assets:list', async () => {
+  try {
+    if (buildSystem.getActiveCoreId() !== 'pc-engine') {
+      return { ok: false, error: 'assets:list is available for PC Engine projects only' };
+    }
+    return { ok: true, ...pceAssetManager.listAssets(buildSystem.getProjectDir()) };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('assets:upsert', async (_event, asset) => {
+  try {
+    if (buildSystem.getActiveCoreId() !== 'pc-engine') {
+      return { ok: false, error: 'assets:upsert is available for PC Engine projects only' };
+    }
+    const doc = pceAssetManager.upsertAsset(buildSystem.getProjectDir(), asset || {});
+    return { ok: true, ...doc };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('assets:delete', async (_event, payload) => {
+  try {
+    if (buildSystem.getActiveCoreId() !== 'pc-engine') {
+      return { ok: false, error: 'assets:delete is available for PC Engine projects only' };
+    }
+    const doc = pceAssetManager.deleteAsset(buildSystem.getProjectDir(), payload?.id || payload);
+    return { ok: true, ...doc };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 ipcMain.handle('api:startServer', async (_event, options) => {
   return startApiServer(options?.port ?? 8080);
 });
@@ -1663,8 +1817,11 @@ ipcMain.handle('debug:getWasmSnapshot', async (_event, options) => {
 });
 
 // ---- Plugin handlers ----
-ipcMain.handle('plugins:list', () => {
-  return pluginManager.listPlugins();
+ipcMain.handle('plugins:list', (_event, options = {}) => {
+  return pluginManager.listPlugins({
+    coreId: buildSystem.getActiveCoreId(),
+    includeIncompatible: options?.includeIncompatible !== false,
+  });
 });
 
 ipcMain.handle('plugins:getRendererAssets', (_event, { id }) => {
@@ -1672,7 +1829,7 @@ ipcMain.handle('plugins:getRendererAssets', (_event, { id }) => {
 });
 
 ipcMain.handle('plugins:setEnabled', (_event, { id, enabled }) => {
-  const result = pluginManager.setEnabledWithDependencies(id, Boolean(enabled));
+  const result = pluginManager.setEnabledWithDependencies(id, Boolean(enabled), { coreId: buildSystem.getActiveCoreId() });
   if (!result?.ok) {
     return { ok: false, error: result?.error || 'plugin enable failed' };
   }
@@ -1703,6 +1860,8 @@ ipcMain.handle('plugins:runGenerator', async (_event, { id }) => {
 ipcMain.handle('testplay:getSettings', async () => {
   return setupManager.getTestPlaySettings();
 });
+
+ipcMain.handle('testplay:getContext', async () => ({ ok: true, context: currentTestPlayContext }));
 
 ipcMain.handle('testplay:getDefaultSettings', async () => {
   return setupManager.getDefaultTestPlaySettings();
@@ -1762,7 +1921,40 @@ ipcMain.handle('window:openSetup', async () => {
 });
 
 ipcMain.handle('setup:getStatus', async () => {
+  if (buildSystem.getActiveCoreId() === 'pc-engine') {
+    return buildSystem.getPceSetupManager().getStatus();
+  }
   return setupManager.getStatus();
+});
+
+ipcMain.handle('setup:getCatalog', async () => {
+  if (buildSystem.getActiveCoreId() === 'pc-engine') {
+    return buildSystem.getPceSetupManager().getDownloadCatalog();
+  }
+  return { ok: false, error: 'generic setup catalog is available for PC Engine projects only' };
+});
+
+ipcMain.handle('setup:listVersions', async (_event, { kind } = {}) => {
+  if (buildSystem.getActiveCoreId() === 'pc-engine') {
+    return buildSystem.getPceSetupManager().listToolVersions(kind);
+  }
+  return { ok: false, error: 'generic setup versions are available for PC Engine projects only', versions: [] };
+});
+
+ipcMain.handle('setup:downloadTool', async (_event, payload = {}) => {
+  if (buildSystem.getActiveCoreId() === 'pc-engine') {
+    return buildSystem.getPceSetupManager().downloadTool(payload || {}, (progress) => {
+      sendToSetupWindow('setup-progress', progress);
+    });
+  }
+  return { ok: false, error: 'generic setup download is available for PC Engine projects only' };
+});
+
+ipcMain.handle('setup:setToolPath', async (_event, { kind, value } = {}) => {
+  if (buildSystem.getActiveCoreId() === 'pc-engine') {
+    return buildSystem.getPceSetupManager().setToolPath(kind, value);
+  }
+  return { ok: false, error: 'generic setup path is available for PC Engine projects only' };
 });
 
 ipcMain.handle('setup:listSgdkVersions', async () => {
@@ -1850,6 +2042,9 @@ ipcMain.handle('build:generateStructureOnly', async (_event, config) => {
 
 async function runBuildFull(options = {}) {
   try {
+    if (buildSystem.getActiveCoreId() === 'pc-engine') {
+      return runPceBuildFull(options);
+    }
     const toolchainPath = setupManager.getToolchainDir();
     const javaPath = setupManager.getJavaExePath();
     const projectDir = buildSystem.getProjectDir();
@@ -1882,6 +2077,7 @@ async function runBuildFull(options = {}) {
         toolchainPath,
       }, {
         ...pluginContext,
+        coreId: buildSystem.getActiveCoreId(),
         logger: createPluginLogger(builderPluginId),
       });
       if (buildStartResult?.ok && buildStartResult.makeVariables && typeof buildStartResult.makeVariables === 'object') {
@@ -1906,6 +2102,7 @@ async function runBuildFull(options = {}) {
           level: level || 'info',
         }, {
           ...pluginContext,
+          coreId: buildSystem.getActiveCoreId(),
           logger: createPluginLogger(builderPluginId),
         }).catch(() => {});
       }
@@ -1915,6 +2112,7 @@ async function runBuildFull(options = {}) {
       if (result.success) {
         await invokePluginHookSafe(builderPluginId, 'onBuildEnd', result, {
           ...pluginContext,
+          coreId: buildSystem.getActiveCoreId(),
           logger: createPluginLogger(builderPluginId),
         });
       } else {
@@ -1923,11 +2121,69 @@ async function runBuildFull(options = {}) {
           result,
         }, {
           ...pluginContext,
+          coreId: buildSystem.getActiveCoreId(),
           logger: createPluginLogger(builderPluginId),
         });
       }
     }
 
+    sendToRenderer('build-end', result);
+    return result;
+  } catch (err) {
+    const r = { success: false, error: err.message || String(err) };
+    sendToRenderer('build-end', r);
+    return r;
+  }
+}
+
+async function runPceBuildFull(options = {}) {
+  try {
+    const projectDir = buildSystem.getProjectDir();
+    const config = buildSystem.loadProjectConfig();
+    const builderPluginId = resolvePluginForRole('builder');
+    if (!builderPluginId) {
+      return { success: false, error: '有効な PCE Build プラグインが未設定です。Plugins 画面で有効化してください。' };
+    }
+    if (!pluginManager.isPluginEnabled(builderPluginId)) {
+      return { success: false, error: `Build プラグイン "${builderPluginId}" は無効です` };
+    }
+    const builderMeta = pluginManager.listPlugins({ coreId: 'pc-engine', includeIncompatible: true }).find((p) => p.id === builderPluginId);
+    if (!pluginSupportsRole(builderMeta, 'builder')) {
+      return { success: false, error: `Build プラグイン "${builderPluginId}" は pc-engine builder role ではありません` };
+    }
+
+    const assets = collectProjectAssets(projectDir);
+    const pluginContext = {
+      coreId: 'pc-engine',
+      projectDir,
+      assets,
+      logger: createPluginLogger(builderPluginId),
+    };
+    await invokePluginHookSafe(builderPluginId, 'onBuildStart', {
+      projectDir,
+      toolchain: config.toolchain,
+      toolchainPath: buildSystem.getPceSetupManager().getToolchainPath(config.toolchain),
+    }, pluginContext);
+
+    const result = await buildSystem.buildProject((line, level) => {
+      sendToRenderer('build-log', { text: line, level: level || 'info' });
+      void pluginManager.invokeHook(builderPluginId, 'onBuildLog', {
+        line,
+        level: level || 'info',
+      }, pluginContext).catch(() => {});
+    }, {
+      ...options,
+      config,
+    });
+
+    if (result.success) {
+      await invokePluginHookSafe(builderPluginId, 'onBuildEnd', result, pluginContext);
+    } else {
+      await invokePluginHookSafe(builderPluginId, 'onBuildError', {
+        error: result.error || 'build failed',
+        result,
+      }, pluginContext);
+    }
     sendToRenderer('build-end', result);
     return result;
   } catch (err) {
@@ -2520,14 +2776,16 @@ async function handleExportRom() {
   try {
     const cfg = buildSystem.loadProjectConfig();
     const projectName = cfg?.title || cfg?.romName || cfg?.name || buildSystem.getProjectInfo()?.projectName;
-    if (projectName) suggested = `${sanitizeExportFileName(projectName, 'rom')}.bin`;
+    if (projectName) suggested = `${sanitizeExportFileName(projectName, 'rom')}${buildSystem.getActiveCoreId() === 'pc-engine' ? '.pce' : '.bin'}`;
   } catch (_) {}
 
   const result = await dialog.showSaveDialog(owner, {
     title: 'ROM をエクスポート',
     defaultPath: suggested,
     filters: [
-      { name: 'Mega Drive ROM', extensions: ['bin', 'md', 'gen'] },
+      buildSystem.getActiveCoreId() === 'pc-engine'
+        ? { name: 'PC Engine ROM', extensions: ['pce'] }
+        : { name: 'Mega Drive ROM', extensions: ['bin', 'md', 'gen'] },
       { name: 'All Files', extensions: ['*'] },
     ],
   });
@@ -2656,7 +2914,7 @@ ipcMain.handle('plugins:getRole', async (_event, { roleId }) => {
 });
 
 ipcMain.handle('plugins:setRole', async (_event, { roleId, id }) => {
-  const syncResult = pluginManager.setExclusiveRoleSelection(roleId, id || null);
+  const syncResult = pluginManager.setExclusiveRoleSelection(roleId, id || null, { coreId: buildSystem.getActiveCoreId() });
   if (!syncResult?.ok) {
     return { ok: false, error: syncResult?.error || 'plugin role selection failed' };
   }
@@ -2666,6 +2924,14 @@ ipcMain.handle('plugins:setRole', async (_event, { roleId, id }) => {
 
 ipcMain.handle('build:getCurrentSource', async () => {
   return buildSystem.loadCurrentSource();
+});
+
+ipcMain.handle('cores:list', async () => {
+  return { ok: true, cores: buildSystem.listCores(), activeCoreId: buildSystem.getActiveCoreId() };
+});
+
+ipcMain.handle('cores:getActive', async () => {
+  return { ok: true, coreId: buildSystem.getActiveCoreId(), core: buildSystem.getCore(buildSystem.getActiveCoreId()) };
 });
 
 ipcMain.handle('build:getSampleCode', async () => {
@@ -2752,6 +3018,7 @@ ipcMain.handle('project:createNew', async (_event, payload) => {
       projectDir: created.projectDir,
       projectName: path.basename(created.projectDir),
       title: payload?.config?.title || payload?.projectName,
+      coreId: buildSystem.getCoreIdForProjectDir(created.projectDir),
       defaultProjectDir: buildSystem.getDefaultProjectDir(),
       projectsRootDir: buildSystem.getProjectsRootDir(),
       pluginRoleSync,
@@ -2816,6 +3083,7 @@ module.exports.__test = {
   saveMainWindowBounds,
   normalizeLogEntry,
   normalizeLogSnapshot,
+  buildSystem,
   syncProjectPluginRoleState,
   getEditorControlService,
   closeAuxiliaryWindows,

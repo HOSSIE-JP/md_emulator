@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "sample_image",
+      "type": "image",
+      "name": "Sample Image",
+      "source": "assets/images/sample.pceimg.json",
+      "options": {
+        "x": 2,
+        "y": 10
+      }
+    },
+    {
+      "id": "beep",
+      "type": "psg-sequence",
+      "name": "Startup Beep",
+      "source": "assets/sound/beep.json",
+      "options": {
+        "period": 512
+      }
+    }
+  ]
+}

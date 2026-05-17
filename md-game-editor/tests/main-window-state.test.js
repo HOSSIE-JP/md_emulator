@@ -12,6 +12,7 @@ function makeTempUserData() {
 }
 
 function loadMainForWindowState(userData) {
+  delete require.cache[require.resolve('../core-manager')];
   return loadWithMockedElectron(path.join(__dirname, '..', 'main.js'), {
     userData,
     app: {
@@ -26,6 +27,7 @@ function loadMainWithLifecycleHooks(userData) {
   const events = new Map();
   let lockRequests = 0;
   let quitRequests = 0;
+  delete require.cache[require.resolve('../core-manager')];
   const api = loadWithMockedElectron(path.join(__dirname, '..', 'main.js'), {
     userData,
     app: {
@@ -54,6 +56,7 @@ function loadMainWithLifecycleHooks(userData) {
 
 function loadMainWithBuildSystem(userData) {
   delete require.cache[require.resolve('../build-system')];
+  delete require.cache[require.resolve('../core-manager')];
   delete require.cache[require.resolve('../plugin-manager')];
   const main = loadWithMockedElectron(path.join(__dirname, '..', 'main.js'), {
     userData,
@@ -65,7 +68,7 @@ function loadMainWithBuildSystem(userData) {
   }).__test;
   return {
     main,
-    buildSystem: require('../build-system'),
+    buildSystem: main.buildSystem,
   };
 }
 
@@ -108,7 +111,7 @@ test('main process uses a single instance lock and app shutdown hooks', () => {
   assert.equal(typeof lifecycle.api.prepareForAppQuit, 'function');
 
   lifecycle.events.get('window-all-closed')();
-  assert.equal(lifecycle.getQuitRequests(), 1);
+  assert.equal(lifecycle.getQuitRequests(), process.platform === 'darwin' ? 0 : 1);
 });
 
 test('main lifecycle cleanup covers auxiliary windows and api child process', () => {

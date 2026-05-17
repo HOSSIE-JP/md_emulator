@@ -21,6 +21,11 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.equal(typeof api.getPluginRoles, 'function');
   assert.equal(typeof api.setPluginRole, 'function');
   assert.equal(typeof api.saveProjectConfig, 'function');
+  assert.equal(typeof api.listCores, 'function');
+  assert.equal(typeof api.getActiveCore, 'function');
+  assert.equal(typeof api.listAssets, 'function');
+  assert.equal(typeof api.upsertAsset, 'function');
+  assert.equal(typeof api.deleteAsset, 'function');
   assert.equal(typeof api.openLogWindow, 'function');
   assert.equal(typeof api.syncLogWindow, 'function');
   assert.equal(typeof api.appendLogWindowEntry, 'function');
@@ -42,6 +47,11 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   await api.saveProjectConfig({ title: 'Saved' });
   await api.runBuild({ skipClean: true });
   await api.getPluginRendererAssets('asset-manager');
+  await api.listCores();
+  await api.getActiveCore();
+  await api.listAssets();
+  await api.upsertAsset({ id: 'img', type: 'image' });
+  await api.deleteAsset('img');
   await api.invokePluginHook('audio-converter', 'convertAudio', { sourcePath: 'in.wav' });
   await api.loadOptionalAudioEngine('nuked-opn2');
   await api.openLogWindow({ entries: [] });
@@ -77,6 +87,14 @@ test('main preload exposes renderer API methods with the expected IPC channels',
     channel: 'setup:loadOptionalAudioEngine',
     args: ['nuked-opn2'],
   });
+  assert.deepEqual(invocations.find((entry) => entry.channel === 'cores:list'), {
+    channel: 'cores:list',
+    args: [],
+  });
+  assert.deepEqual(invocations.find((entry) => entry.channel === 'assets:upsert'), {
+    channel: 'assets:upsert',
+    args: [{ id: 'img', type: 'image' }],
+  });
 
   let received = null;
   api.onBuildLog((payload) => { received = payload; });
@@ -99,6 +117,11 @@ test('setup preload exposes setup IPC helpers and progress listener', async () =
   const api = exposed.electronSetup;
 
   await api.getStatus();
+  await api.getActiveCore();
+  await api.getCatalog();
+  await api.listVersions('cc65');
+  await api.downloadTool({ kind: 'cc65' });
+  await api.setToolPath('cc65', '/tools/cl65');
   await api.downloadSgdk('v2.11');
   await api.downloadEmsdk();
   await api.downloadNukedOpn2();
@@ -107,6 +130,11 @@ test('setup preload exposes setup IPC helpers and progress listener', async () =
 
   assert.deepEqual(invocations, [
     { channel: 'setup:getStatus', args: [] },
+    { channel: 'cores:getActive', args: [] },
+    { channel: 'setup:getCatalog', args: [] },
+    { channel: 'setup:listVersions', args: [{ kind: 'cc65' }] },
+    { channel: 'setup:downloadTool', args: [{ kind: 'cc65' }] },
+    { channel: 'setup:setToolPath', args: [{ kind: 'cc65', value: '/tools/cl65' }] },
     { channel: 'setup:downloadSgdk', args: ['v2.11'] },
     { channel: 'setup:downloadEmsdk', args: [] },
     { channel: 'setup:downloadNukedOpn2', args: [] },

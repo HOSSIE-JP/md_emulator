@@ -60,6 +60,8 @@ Copilot がプラグインを生成するとき、以下の順序で作業する
   "version": "1.0.0",
   "icon": "build",
   "types": ["build"],           // 必ず配列
+  "generator": true,            // generateSource/generateSourceAsync を持つ場合。hook 専用なら false
+  "supportedCores": ["mega-drive"], // mega-drive / pc-engine / *。未指定は legacy MD 扱い
   "hooks": ["onBuildStart", "onBuildEnd"],
   "permissions": ["project.read", "project.write", "build.configure"],
   "roles": [
@@ -100,7 +102,7 @@ module.exports = { generateSource, onBuildStart };
 
 ### renderer.js を持つ場合
 
-Plugin Runtime v2.4 では、Assets / Code / Converter のような機能固有 UI を本体 `md-game-editor/renderer/renderer.js` に追加しない。
+Plugin Runtime v2.5 では、Assets / Code / Converter のような機能固有 UI を本体 `md-game-editor/renderer/renderer.js` に追加しない。
 プラグイン配下の `renderer.js` で capability を登録する。
 
 ```js
@@ -127,18 +129,23 @@ renderer から main process hook を呼ぶ場合は `hooks` と `mainApi.hooks`
 asset type / import / image 変換は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として登録する。
 Build / Test Play など単一選択 plugin は `roles` で宣言し、project.json の標準保存先は `pluginRoles` とする。
 単一選択 role で競合 plugin が無効化される場合、その plugin に依存する plugin も同時に無効化される。
-`permissions` は v2.4 では表示・レビュー用途の宣言で、sandbox 強制ではない。
-新規 plugin で本体 `main.js` / `preload.js` / `build-system.js` の個別追記が必要に見える場合は、まず Runtime v2.4 の汎用 API 不足として扱う。
+Runtime v2.5 では `project.json.coreId` がプロジェクト単位の実効 core。未指定の既存 MD project は `mega-drive`、`platform: "pce"` を持つ既存 PCE project は `pc-engine` として扱う。
+新規 plugin は `supportedCores` を宣言する。MD 専用は `["mega-drive"]`、PCE 専用は `["pc-engine"]`、共有 plugin は `["*"]`。未宣言 plugin は後方互換のため MD 専用扱い。
+現在 core に非対応の plugin は既定で非表示になり、有効化、role 選択、hook/generator 呼び出し対象から除外される。
+setup / project / build / asset schema / template のようなシステム固有機能は `types: ["core"]` の core plugin/provider 側に置く。
+`permissions` は v2.5 では表示・レビュー用途の宣言で、sandbox 強制ではない。
+新規 plugin で本体 `main.js` / `preload.js` / `build-system.js` の個別追記が必要に見える場合は、まず Runtime v2.5 の汎用 API または core provider の不足として扱う。
 
-### Runtime v2.4 で必ず守る開発手順
+### Runtime v2.5 で必ず守る開発手順
 
-1. `manifest.json` に `types`、`permissions`、必要な `roles`、`hooks`、`renderer.capabilities` を宣言する
+1. `manifest.json` に `types`、`supportedCores`、`permissions`、必要な `roles`、`hooks`、`renderer.capabilities` を宣言する
 2. Build / Test Play の単一選択 plugin は `roles` を宣言し、project 側は `project.json.pluginRoles` に保存する
-3. UI、modal、preview、converter 連携は plugin の `renderer.js` で実装し、本体 HTML / renderer / main / preload へ個別追記しない
-4. main process の処理が必要な場合は `hooks` と `mainApi.hooks` に同じ hook 名を宣言し、renderer から `api.plugins.invokeHook()` で呼ぶ
-5. asset 登録拡張は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として提供する
-6. アセット参照を持つ editor plugin は、画面表示時または sidebar 再アクティブ時に `.res` / source data を再読込し、一覧・select・preview を最新化する
-7. 未保存変更がある状態で別アセット選択・新規追加・import を行う場合は、保存 / 破棄 / キャンセルを選べる plugin-owned modal を出す
+3. MD 専用 plugin は `supportedCores: ["mega-drive"]`、PCE 専用 plugin は `["pc-engine"]`、共有 plugin は `["*"]` を宣言する
+4. UI、modal、preview、converter 連携は plugin の `renderer.js` で実装し、本体 HTML / renderer / main / preload へ個別追記しない
+5. main process の処理が必要な場合は `hooks` と `mainApi.hooks` に同じ hook 名を宣言し、renderer から `api.plugins.invokeHook()` で呼ぶ
+6. asset 登録拡張は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として提供する
+7. アセット参照を持つ editor plugin は、画面表示時または sidebar 再アクティブ時に `.res` / source data を再読込し、一覧・select・preview を最新化する
+8. 未保存変更がある状態で別アセット選択・新規追加・import を行う場合は、保存 / 破棄 / キャンセルを選べる plugin-owned modal を出す
 
 ### Step 4: 配置場所を案内する
 
@@ -291,4 +298,4 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 
 ---
 
-*Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.4 / AI Control API / TileMap collision / Editor UX guardrails*
+*Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / AI Control API / TileMap collision / Editor UX guardrails*

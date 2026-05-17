@@ -8,7 +8,7 @@
  *   md-game-editor/plugins/<id>/manifest.json
  *   md-game-editor/plugins/<id>/index.js
  *
- * manifest v2.4:
+ * manifest v2.5:
  *   {
  *     "id": "plugin-id",
  *     "name": "Plugin Name",
@@ -16,6 +16,7 @@
  *     "version": "1.0.0",
  *     "icon": "puzzle",
  *     "types": ["build", "logger"],
+ *     "supportedCores": ["mega-drive", "pc-engine"] | ["*"],
  *     "roles": [{ "id": "builder", "label": "Build", "exclusive": true }],
  *     "hooks": ["onBuildStart", "onBuildLog", "onBuildEnd"]
  *   }
@@ -64,6 +65,65 @@ function normalizePluginTypes(manifest) {
     return manifest.types.map((t) => String(t || '').trim()).filter(Boolean);
   }
   return ['unknown'];
+}
+
+function normalizeSupportedCores(manifest, pluginTypes = []) {
+  const raw = Array.isArray(manifest.supportedCores) && manifest.supportedCores.length > 0
+    ? manifest.supportedCores
+    : null;
+  const normalize = (value) => {
+    const core = String(value || '').trim();
+    if (!core) return '';
+    if (core === '*') return '*';
+    if (core === 'pce' || core === 'pcengine') return 'pc-engine';
+    if (core === 'md' || core === 'megadrive' || core === 'genesis') return 'mega-drive';
+    return core;
+  };
+
+  if (raw) {
+    const cores = Array.from(new Set(raw.map(normalize).filter(Boolean)));
+    return cores.length > 0 ? cores : ['mega-drive'];
+  }
+
+  if (pluginTypes.includes('core') && manifest.core?.id) {
+    return [normalize(manifest.core.id) || 'mega-drive'];
+  }
+
+  // Runtime v2.5 以前の既存プラグインは Mega Drive 用として扱う。
+  return ['mega-drive'];
+}
+
+function normalizeCoreMetadata(manifest, pluginTypes, supportedCores) {
+  if (!pluginTypes.includes('core')) return null;
+  const core = manifest.core && typeof manifest.core === 'object' ? manifest.core : {};
+  const id = String(core.id || supportedCores.find((item) => item !== '*') || manifest.id || '').trim();
+  if (!id) return null;
+  return {
+    id,
+    label: String(core.label || core.name || manifest.name || id).trim(),
+    platform: String(core.platform || '').trim(),
+  };
+}
+
+function detectGeneratorExport(manifest, pluginDir) {
+  if (manifest.generator === false || manifest.hasGenerator === false) return false;
+  if (manifest.generator === true || manifest.hasGenerator === true) return true;
+
+  const indexPath = path.join(pluginDir, 'index.js');
+  if (!fs.existsSync(indexPath)) return false;
+  try {
+    const source = fs.readFileSync(indexPath, 'utf-8');
+    return /\bgenerateSource(?:Async)?\b/.test(source);
+  } catch (_) {
+    return false;
+  }
+}
+
+function pluginSupportsCore(plugin, coreId) {
+  const core = String(coreId || '').trim();
+  if (!core) return true;
+  const cores = Array.isArray(plugin?.supportedCores) ? plugin.supportedCores : ['mega-drive'];
+  return cores.includes('*') || cores.includes(core);
 }
 
 function normalizeHooks(manifest) {
@@ -234,7 +294,9 @@ function isPluginEnabled(id) {
 
 // ── プラグイン一覧 ──────────────────────────────────────────────────────────
 
-function listPlugins() {
+function listPlugins(options = {}) {
+  const coreId = String(options.coreId || '').trim();
+  const includeIncompatible = options.includeIncompatible !== false;
   const builtinDir = getPluginsDir();
   const userDir = getUserPluginsDir();
   const state = readState();
@@ -267,8 +329,9 @@ function listPlugins() {
       } catch (_) {}
 
       const pluginDir = path.join(baseDir, id);
-      const hasGenerator = fs.existsSync(path.join(pluginDir, 'index.js'));
       const pluginTypes = normalizePluginTypes(manifest);
+      const hasGenerator = detectGeneratorExport(manifest, pluginDir);
+      const supportedCores = normalizeSupportedCores(manifest, pluginTypes);
       const hooks = normalizeHooks(manifest);
       const rendererInfo = normalizeRenderer(manifest, pluginDir);
       const mainApi = normalizeMainApi(manifest);
@@ -282,6 +345,9 @@ function listPlugins() {
         icon: normalizeIcon(manifest),
         pluginTypes,
         pluginType: pluginTypes[0] || 'unknown',
+        supportedCores,
+        core: normalizeCoreMetadata(manifest, pluginTypes, supportedCores),
+        compatibleWithActiveCore: pluginSupportsCore({ supportedCores }, coreId),
         tab: manifest.tab || null,
         dependencies: normalizeDependencies(manifest),
         hooks,
@@ -296,6 +362,7 @@ function listPlugins() {
         isUserPlugin: isUser,  // ユーザー追加プラグインか否か
       };
     })
+    .filter((plugin) => includeIncompatible || pluginSupportsCore(plugin, coreId))
     .sort((a, b) => a.id.localeCompare(b.id, 'ja'));
 }
 
@@ -344,8 +411,9 @@ function setEnabled(id, enabled) {
   writeState(s);
 }
 
-function setEnabledWithDependencies(id, enabled) {
+function setEnabledWithDependencies(id, enabled, options = {}) {
   const pluginId = String(id || '').trim();
+  const coreId = String(options.coreId || '').trim();
   if (!pluginId) {
     return { ok: false, error: 'plugin id is empty', changed: [], changedIds: [] };
   }
@@ -354,6 +422,9 @@ function setEnabledWithDependencies(id, enabled) {
   const pluginMap = new Map(plugins.map((p) => [p.id, p]));
   if (!pluginMap.has(pluginId)) {
     return { ok: false, error: `plugin not found: ${pluginId}`, changed: [], changedIds: [] };
+  }
+  if (enabled && coreId && !pluginSupportsCore(pluginMap.get(pluginId), coreId)) {
+    return { ok: false, error: `plugin ${pluginId} is not compatible with core: ${coreId}`, changed: [], changedIds: [] };
   }
 
   const state = readState();
@@ -418,6 +489,7 @@ function setEnabledWithDependencies(id, enabled) {
     getExclusiveRoleIds(pluginMap.get(pluginId)).forEach((roleId) => {
       plugins.forEach((plugin) => {
         if (plugin.id === pluginId) return;
+        if (coreId && !pluginSupportsCore(plugin, coreId)) return;
         if (pluginSupportsExclusiveRole(plugin, roleId)) {
           disableWithDependents(plugin.id, `exclusive-role:${roleId}`);
         }
@@ -446,9 +518,10 @@ function getPluginDirectory(id) {
   return null;
 }
 
-function setExclusiveRoleSelection(roleId, id) {
+function setExclusiveRoleSelection(roleId, id, options = {}) {
   const role = String(roleId || '').trim();
   const pluginId = String(id || '').trim();
+  const coreId = String(options.coreId || '').trim();
   if (!role) {
     return { ok: false, error: 'role id is empty', changed: [], changedIds: [] };
   }
@@ -461,11 +534,14 @@ function setExclusiveRoleSelection(roleId, id) {
   if (!selected) {
     return { ok: false, error: `plugin not found: ${pluginId}`, changed: [], changedIds: [] };
   }
+  if (coreId && !pluginSupportsCore(selected, coreId)) {
+    return { ok: false, error: `plugin ${pluginId} is not compatible with core: ${coreId}`, changed: [], changedIds: [] };
+  }
   if (!pluginSupportsExclusiveRole(selected, role)) {
     return { ok: false, error: `plugin ${pluginId} does not support exclusive role: ${role}`, changed: [], changedIds: [] };
   }
 
-  return setEnabledWithDependencies(pluginId, true);
+  return setEnabledWithDependencies(pluginId, true, options);
 }
 
 // ── ジェネレータ実行 ────────────────────────────────────────────────────────
@@ -489,6 +565,10 @@ function getPlugin(id) {
 }
 
 async function runGenerator(id, assets, context = {}) {
+  const pluginInfo = listPlugins().find((plugin) => plugin.id === id);
+  if (context.coreId && pluginInfo && !pluginSupportsCore(pluginInfo, context.coreId)) {
+    return { ok: false, error: `プラグイン "${id}" は core "${context.coreId}" に対応していません` };
+  }
   if (!isPluginEnabled(id)) {
     return { ok: false, error: `プラグイン "${id}" は無効になっています` };
   }
@@ -513,6 +593,10 @@ async function runGenerator(id, assets, context = {}) {
 }
 
 async function invokeHook(id, hookName, payload = {}, context = {}) {
+  const pluginInfo = listPlugins().find((plugin) => plugin.id === id);
+  if (context.coreId && pluginInfo && !pluginSupportsCore(pluginInfo, context.coreId)) {
+    return { ok: false, error: `プラグイン "${id}" は core "${context.coreId}" に対応していません` };
+  }
   if (!isPluginEnabled(id)) {
     return { ok: false, error: `プラグイン "${id}" は無効になっています` };
   }
@@ -548,6 +632,7 @@ module.exports = {
   invokeHook,
   invokeRendererHook,
   isPluginEnabled,
+  pluginSupportsCore,
   getPluginsDir,
   getPluginDirectory,
   getUserPluginsDir,

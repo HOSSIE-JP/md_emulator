@@ -1,0 +1,12 @@
+{
+  "coreId": "pc-engine",
+  "platform": "pce",
+  "title": "PCE Sample Game",
+  "romName": "pce_sample",
+  "toolchain": "cc65",
+  "pluginRoles": {
+    "builder": "pce-sample-builder",
+    "testplay": "pce-standard-emulator"
+  },
+  "pluginSettings": {}
+}

@@ -320,12 +320,20 @@
             <span>種別</span>
             <select id="pluginTypeFilter" class="form-input">
               <option value="all">すべて</option>
+              <option value="core">core</option>
               <option value="build">build</option>
               <option value="editor">editor</option>
               <option value="asset">asset</option>
               <option value="emulator">emulator</option>
               <option value="converter">converter</option>
             </select>
+          </label>
+          <label class="plugin-filter-item plugin-filter-check">
+            <span>Core</span>
+            <label class="form-check-inline">
+              <input id="pluginCoreFilterToggle" type="checkbox" />
+              <span>非対応も表示</span>
+            </label>
           </label>
         </section>
         <section class="plugin-role-settings" id="pluginRoleSettings">
@@ -644,6 +652,10 @@
               <button class="btn-sm" id="btnProjectParentDirBrowse" type="button">フォルダを選択</button>
             </div>
             <p class="form-hint">未変更の場合は既定の projects フォルダ配下に作成します。</p>
+          </div>
+          <div class="form-group app-grid-span-2">
+            <label class="form-label">対象コア</label>
+            <select class="form-input" id="projectCoreSelect"></select>
           </div>
           <div class="form-group app-grid-span-2">
             <label class="form-label">プロジェクトフォルダ名</label>

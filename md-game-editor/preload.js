@@ -91,7 +91,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteCodeEntry: (payload) => ipcRenderer.invoke('codefs:delete', payload),
   renameCodeEntry: (payload) => ipcRenderer.invoke('codefs:rename', payload),
   // --- プラグイン ---
-  listPlugins: () => ipcRenderer.invoke('plugins:list'),
+  listPlugins: (options) => ipcRenderer.invoke('plugins:list', options || {}),
   getPluginRendererAssets: (id) => ipcRenderer.invoke('plugins:getRendererAssets', { id }),
   invokePluginHook: (id, hook, payload) => ipcRenderer.invoke('plugins:invokeHook', { id, hook, payload }),
   getPluginRoles: () => ipcRenderer.invoke('plugins:getRoles'),
@@ -100,6 +100,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setPluginEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', { id, enabled }),
   runPluginGenerator: (id) => ipcRenderer.invoke('plugins:runGenerator', { id }),
   openPluginsFolder: () => ipcRenderer.invoke('plugins:openFolder'),
+  listCores: () => ipcRenderer.invoke('cores:list'),
+  getActiveCore: () => ipcRenderer.invoke('cores:getActive'),
+  listAssets: () => ipcRenderer.invoke('assets:list'),
+  upsertAsset: (asset) => ipcRenderer.invoke('assets:upsert', asset || {}),
+  deleteAsset: (id) => ipcRenderer.invoke('assets:delete', { id }),
   // --- エクスポート ---
   exportRom: () => ipcRenderer.invoke('export:rom'),
   exportHtml: () => ipcRenderer.invoke('export:html'),

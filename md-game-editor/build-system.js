@@ -318,6 +318,7 @@ function ensureProjectStructure(projectDir, config = {}, options = {}) {
   }
 
   const meta = {
+    coreId: config.coreId || 'mega-drive',
     title: config.title || config.romName || 'MY GAME',
     author: config.author || 'AUTHOR',
     serial: config.serial || 'GM 00000000-00',

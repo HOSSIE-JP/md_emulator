@@ -41,6 +41,26 @@
     <h1>環境セットアップ</h1>
     <p class="subtitle">MD Game Editor の動作に必要なツールをセットアップします</p>
 
+    <div class="card" id="pceSetupCard" style="display:none;">
+      <div class="card-header">
+        <span class="card-title">PC Engine Core セットアップ</span>
+        <span id="pceSetupBadge" class="badge warn">確認待ち</span>
+      </div>
+      <p class="desc">cc65 / llvm-mos-sdk / SuperFamiconv / EmulatorJS を選択して取得します。EmulatorJS runtime/core は GPL 系のため、ユーザー操作で data/tools 配下へダウンロードします。</p>
+      <div class="row">
+        <select class="input-path" id="pceToolKind" style="max-width:190px;flex:0 0 190px;"></select>
+        <select class="input-path" id="pceToolVersion" style="max-width:260px;flex:0 0 260px;"></select>
+        <button class="btn" id="btnReloadPceVersions">候補更新</button>
+        <button class="btn primary" id="btnDownloadPceTool">DL</button>
+      </div>
+      <div class="desc" id="pceToolInfo" style="margin-top:10px;"></div>
+      <div class="progress-wrap" id="pceProgress">
+        <div class="progress-bar-bg"><div class="progress-bar" id="pceBar"></div></div>
+        <div class="progress-msg" id="pceMsg">...</div>
+      </div>
+      <div id="pceSetupStatus"></div>
+    </div>
+
     <!-- SGDK -->
     <div class="card" id="sgdkCard">
       <div class="card-header">
@@ -164,6 +184,135 @@
 
   <script>
     const isWin = navigator.platform.toLowerCase().includes('win');
+    let activeCoreId = 'mega-drive';
+    let pceCatalog = null;
+    const pceVersions = {};
+
+    function setMdSetupVisible(visible) {
+      ['sgdkCard', 'marsdevCard', 'javaCard', 'gccCard', 'emsdkCard', 'nukedOpn2Card'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = visible ? '' : 'none';
+      });
+      const pce = document.getElementById('pceSetupCard');
+      if (pce) pce.style.display = visible ? 'none' : '';
+    }
+
+    function formatBytes(value) {
+      const n = Number(value || 0);
+      if (!Number.isFinite(n) || n <= 0) return '';
+      if (n > 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+      if (n > 1024) return `${(n / 1024).toFixed(1)} KB`;
+      return `${n} B`;
+    }
+
+    async function initActiveCore() {
+      try {
+        const result = await window.electronSetup.getActiveCore?.();
+        activeCoreId = result?.coreId || 'mega-drive';
+      } catch (_) {
+        activeCoreId = 'mega-drive';
+      }
+      setMdSetupVisible(activeCoreId !== 'pc-engine');
+    }
+
+    async function loadPceCatalog() {
+      const result = await window.electronSetup.getCatalog();
+      if (!result?.ok) throw new Error(result?.error || 'PCE setup catalog を取得できませんでした');
+      pceCatalog = result;
+      const kindSelect = document.getElementById('pceToolKind');
+      kindSelect.innerHTML = result.tools.map((tool) => (
+        `<option value="${tool.kind}">${tool.label}</option>`
+      )).join('');
+      await loadPceVersions(kindSelect.value);
+    }
+
+    function selectedPceVersion() {
+      const kind = document.getElementById('pceToolKind').value;
+      const id = document.getElementById('pceToolVersion').value;
+      return (pceVersions[kind] || []).find((item) => item.id === id) || null;
+    }
+
+    function renderPceToolInfo() {
+      const kind = document.getElementById('pceToolKind').value;
+      const tool = pceCatalog?.tools?.find((item) => item.kind === kind);
+      const version = selectedPceVersion();
+      document.getElementById('pceToolInfo').innerHTML = tool ? [
+        `<strong>${tool.label}</strong>`,
+        tool.license ? `License: <code>${tool.license}</code>` : '',
+        tool.note || '',
+        version?.downloadUrl ? `<br><code>${version.downloadUrl}</code>` : '',
+      ].filter(Boolean).join('<br>') : '';
+    }
+
+    async function loadPceVersions(kind) {
+      const select = document.getElementById('pceToolVersion');
+      select.innerHTML = '<option value="">候補取得中...</option>';
+      const result = await window.electronSetup.listVersions(kind);
+      pceVersions[kind] = result?.versions || [];
+      if (pceVersions[kind].length === 0) {
+        select.innerHTML = '<option value="">候補なし</option>';
+      } else {
+        select.innerHTML = pceVersions[kind].map((version, index) => (
+          `<option value="${version.id}" ${index === 0 ? 'selected' : ''}>${version.label || version.version || version.id}</option>`
+        )).join('');
+      }
+      renderPceToolInfo();
+    }
+
+    function updatePceProgress(entry = {}) {
+      const received = Number(entry.receivedBytes || entry.received || 0);
+      const total = Number(entry.totalBytes || entry.total || 0);
+      const percent = Number.isFinite(Number(entry.percent)) ? Number(entry.percent) : (total > 0 ? (received / total) * 100 : 8);
+      const safePercent = Math.max(0, Math.min(100, percent));
+      setProgress('pceProgress', 'pceBar', 'pceMsg', safePercent, `${entry.message || '受信中...'} ${formatBytes(received)}${total ? ` / ${formatBytes(total)}` : ''}`);
+    }
+
+    async function loadPceStatus() {
+      const status = await window.electronSetup.getStatus();
+      const rows = [
+        ['cc65', 'cc65', status.cc65],
+        ['llvmMos', 'llvm-mos-sdk', status.llvmMos],
+        ['superfamiconv', 'SuperFamiconv', status.superfamiconv],
+        ['emulatorJs', 'EmulatorJS', status.emulatorJs],
+      ];
+      document.getElementById('pceSetupStatus').innerHTML = rows.map(([, label, item]) => `
+        <div class="path-text">${label}: ${item?.installed || item?.configured ? `OK - ${item.path || item.runtimeDir || ''}` : '未設定'}</div>
+      `).join('');
+      const isReady = (item) => Boolean(item?.installed || item?.configured);
+      const allRequired = isReady(status.cc65) && isReady(status.llvmMos) && isReady(status.superfamiconv) && isReady(status.emulatorJs);
+      const badge = document.getElementById('pceSetupBadge');
+      badge.textContent = allRequired ? '✓ セットアップ済み' : '未完了';
+      badge.className = allRequired ? 'badge ok' : 'badge warn';
+    }
+
+    async function downloadPceTool() {
+      const btn = document.getElementById('btnDownloadPceTool');
+      const kind = document.getElementById('pceToolKind').value;
+      const version = selectedPceVersion();
+      if (!version?.downloadUrl) {
+        document.getElementById('statusMsg').textContent = 'DL 可能な候補を選択してください';
+        return;
+      }
+      btn.disabled = true;
+      try {
+        window.electronSetup.onProgress(updatePceProgress);
+        updatePceProgress({ message: `${version.label || kind} を開始しています`, percent: 0 });
+        const result = await window.electronSetup.downloadTool({
+          kind,
+          settingKind: kind,
+          url: version.downloadUrl,
+          destName: version.fileName || version.label || kind,
+        });
+        document.getElementById('statusMsg').textContent = result?.ok
+          ? `${version.label || kind} のセットアップが完了しました`
+          : `エラー: ${result?.error || 'unknown'}`;
+        await loadPceStatus();
+      } catch (err) {
+        document.getElementById('statusMsg').textContent = `エラー: ${err.message || err}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
 
     async function loadSgdkVersions() {
       const select = document.getElementById('sgdkVersionSelect');
@@ -585,15 +734,32 @@
     document.getElementById('btnClose').addEventListener('click', () => window.close());
     document.getElementById('btnRefresh').addEventListener('click', async () => {
       document.getElementById('statusMsg').textContent = '確認中...';
-      await loadStatus();
+      if (activeCoreId === 'pc-engine') await loadPceStatus();
+      else await loadStatus();
       document.getElementById('statusMsg').textContent = '状態を更新しました';
     });
+    document.getElementById('pceToolKind').addEventListener('change', () => {
+      loadPceVersions(document.getElementById('pceToolKind').value).catch((err) => {
+        document.getElementById('statusMsg').textContent = `候補取得失敗: ${err.message || err}`;
+      });
+    });
+    document.getElementById('pceToolVersion').addEventListener('change', renderPceToolInfo);
+    document.getElementById('btnReloadPceVersions').addEventListener('click', () => {
+      loadPceVersions(document.getElementById('pceToolKind').value).catch((err) => {
+        document.getElementById('statusMsg').textContent = `候補更新失敗: ${err.message || err}`;
+      });
+    });
+    document.getElementById('btnDownloadPceTool').addEventListener('click', downloadPceTool);
 
     (async () => {
-      await loadSgdkVersions();
-      if (!isWin) {
-        await loadMarsdevVersions();
+      await initActiveCore();
+      if (activeCoreId === 'pc-engine') {
+        await loadPceCatalog();
+        await loadPceStatus();
+        return;
       }
+      await loadSgdkVersions();
+      if (!isWin) await loadMarsdevVersions();
       await loadStatus();
     })();
   </script>

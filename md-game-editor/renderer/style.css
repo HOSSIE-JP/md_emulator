@@ -2397,7 +2397,7 @@ button.project-path-chip {
 
 .plugin-filter-bar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 220px;
+  grid-template-columns: minmax(220px, 1fr) 220px 160px;
   gap: 12px;
   margin: 4px 0 12px;
 }
@@ -2408,6 +2408,18 @@ button.project-path-chip {
   gap: 6px;
   font-size: 12px;
   color: var(--muted);
+}
+
+.plugin-filter-check {
+  justify-content: end;
+}
+
+.form-check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  color: var(--text);
 }
 
 .plugin-logger-order-wrap {
