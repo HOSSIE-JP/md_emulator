@@ -1,6 +1,139 @@
-.asset-plugin-layout .asset-item small {
+.pce-assets-layout {
+  --asset-preview-width: 430px;
+}
+
+.pce-assets-subtitle,
+.pce-assets-muted {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.pce-assets-editor {
+  gap: 0;
+}
+
+.pce-assets-form {
+  padding: 2px 0 10px;
+}
+
+.pce-assets-inline-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pce-assets-preview-frame {
+  height: 240px;
+  flex: none;
+}
+
+.pce-assets-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 6px 0 8px;
+}
+
+.pce-assets-stat {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  min-width: 0;
+}
+
+.pce-assets-stat span {
   display: block;
   color: var(--muted);
+  font-size: 10px;
+  margin-bottom: 4px;
+}
+
+.pce-assets-stat strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.pce-assets-generated-files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0 10px;
+}
+
+.pce-assets-generated-files div {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.pce-assets-generated-files code {
+  color: var(--text);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pce-assets-modal p {
+  color: var(--text);
+  margin: 0 0 10px;
+}
+
+.pce-assets-import-panel {
+  width: min(760px, 94vw);
+  max-height: min(86vh, 780px);
+  overflow: auto;
+}
+
+.pce-assets-import-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pce-assets-import-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pce-assets-import-source {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pce-assets-import-source code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pce-assets-import-preview {
+  height: 260px;
+  flex: none;
+}
+
+@media (max-width: 980px) {
+  .pce-assets-layout {
+    --asset-preview-width: 360px;
+  }
+
+  .pce-assets-import-grid {
+    grid-template-columns: 1fr;
+  }
 }

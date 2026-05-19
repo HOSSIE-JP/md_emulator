@@ -657,6 +657,36 @@ await window.electronAPI.openPluginsFolder();
 const preview = await window.electronAPI.readTempFileAsDataUrl(tempWavPath, { deleteAfter: true });
 ```
 
+### PCE asset API
+
+PC Engine core のプロジェクトでは、PCE asset manager 用の安全な project-local IPC を利用できます。
+
+```js
+// assets/pce-assets.json を取得
+const assets = await window.electronAPI.listAssets();
+
+// PNG/BMP を project 配下へコピーし、SuperFamiconv で pce / pce_sprite へ変換する
+const imported = await window.electronAPI.importAssetImage({
+  sourcePath: '/absolute/path/source.png', // dialog で選ばれた読み取り元
+  kind: 'background',                      // "background" | "sprite"
+  id: 'title_bg',
+  paletteBank: 0,
+  tileBase: 32,
+  mapBase: 0,
+  cellWidth: 16,
+  cellHeight: 16,
+  transparentIndex: 0,
+});
+
+// project root 内の asset source だけを Data URL 化する
+const preview = await window.electronAPI.previewAssetSource('assets/images/title_bg.png');
+
+// pce-assets.json の順序を保存する
+await window.electronAPI.reorderAssets(['title_bg', 'hero_sprite']);
+```
+
+`previewAssetSource` と `reorderAssets` は絶対パス、`..`、symlink escape を拒否します。`importAssetImage` の `sourcePath` は読み取り元として dialog 由来の絶対パスを許可しますが、保存される `source` / generated file path は必ず project 相対です。BMP は renderer 側で PNG Data URL (`convertedDataUrl`) に変換してから import します。
+
 ### `PluginInfo` の型
 
 ```ts

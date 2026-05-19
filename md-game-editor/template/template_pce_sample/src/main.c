@@ -207,6 +207,83 @@ static void waitvsync(void) {}
 
 #include "generated/assets.h"
 
+#if defined(__PCE__) && !defined(__CC65__)
+static void upload_generated_bg_asset(void)
+{
+    const pce_editor_bg_asset_t *bg;
+    unsigned char palette_count;
+    if (!pce_editor_bg_asset_count) return;
+    bg = &pce_editor_bg_assets[0];
+    if (bg->palette && bg->palette_size)
+    {
+        palette_count = (unsigned char)(bg->palette_size / 32u);
+        if (!palette_count) palette_count = 1;
+        pce_vce_copy_palette(bg->palette_bank, bg->palette, palette_count);
+    }
+    if (bg->tiles && bg->tiles_size)
+    {
+        pce_vdc_copy_to_vram((uint16_t)(bg->tile_base * 16u), bg->tiles, (uint16_t)bg->tiles_size);
+    }
+    if (bg->map && bg->map_size)
+    {
+        pce_vdc_copy_to_vram((uint16_t)bg->map_base, bg->map, (uint16_t)bg->map_size);
+    }
+}
+
+static unsigned int sprite_height_attr(unsigned char height)
+{
+    if (height >= 64) return VDC_SPRITE_HEIGHT_64;
+    if (height >= 32) return VDC_SPRITE_HEIGHT_32;
+    return VDC_SPRITE_HEIGHT_16;
+}
+
+static void upload_generated_sprite_asset(void)
+{
+    const pce_editor_sprite_asset_t *sprite;
+    vdc_sprite_t satb[64];
+    unsigned char i;
+    unsigned char palette_count;
+    unsigned int attr;
+    if (!pce_editor_sprite_asset_count) return;
+    sprite = &pce_editor_sprite_assets[0];
+    if (sprite->palette && sprite->palette_size)
+    {
+        palette_count = (unsigned char)(sprite->palette_size / 32u);
+        if (!palette_count) palette_count = 1;
+        pce_vce_copy_palette((uint8_t)(16u + sprite->palette_bank), sprite->palette, palette_count);
+    }
+    if (sprite->patterns && sprite->patterns_size)
+    {
+        pce_vdc_copy_to_vram((uint16_t)(sprite->pattern_base * 64u), sprite->patterns, (uint16_t)sprite->patterns_size);
+    }
+    for (i = 0; i < 64; i++)
+    {
+        satb[i].y = 0;
+        satb[i].x = 0;
+        satb[i].pattern = 0;
+        satb[i].attr = 0;
+    }
+    attr = VDC_SPRITE_FG | VDC_SPRITE_COLOR(sprite->palette_bank);
+    if (sprite->cell_width >= 32) attr |= VDC_SPRITE_WIDTH_32;
+    attr |= sprite_height_attr(sprite->cell_height);
+    satb[0].y = (uint16_t)(sprite->y + 64u);
+    satb[0].x = (uint16_t)(sprite->x + 32u);
+    satb[0].pattern = (uint16_t)sprite->pattern_base;
+    satb[0].attr = (uint16_t)attr;
+    pce_vdc_sprite_set_table_start(0x7f00u);
+    pce_vdc_copy_to_vram(0x7f00u, satb, sizeof(satb));
+    pce_vdc_sprite_enable();
+}
+#endif
+
+static void upload_converted_assets(void)
+{
+#if defined(__PCE__) && !defined(__CC65__)
+    upload_generated_bg_asset();
+    upload_generated_sprite_asset();
+#endif
+}
+
 #define PCE_PSG_SELECT (*(volatile unsigned char *)0x0800)
 #define PCE_PSG_GLOBAL (*(volatile unsigned char *)0x0801)
 #define PCE_PSG_FREQ_LO (*(volatile unsigned char *)0x0802)
@@ -243,6 +320,18 @@ static void draw_hex(unsigned char value)
     out[2] = 0;
     textcolor(value ? COLOR_YELLOW : COLOR_LIGHTBLUE);
     cputsxy(12, 5, out);
+    textcolor(COLOR_WHITE);
+}
+
+static void draw_hex_at(unsigned char x, unsigned char y, unsigned char value)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    char out[3];
+    out[0] = hex[(value >> 4) & 0x0f];
+    out[1] = hex[value & 0x0f];
+    out[2] = 0;
+    textcolor(COLOR_LIGHTBLUE);
+    cputsxy(x, y, out);
     textcolor(COLOR_WHITE);
 }
 
@@ -294,7 +383,27 @@ static void draw_generated_image(void)
     unsigned char row;
     for (row = 0; row < pce_editor_image_row_count; row++)
     {
-        cputsxy(2, (unsigned char)(12 + row), pce_editor_image_rows[row]);
+        if (row >= 8) break;
+        cputsxy(2, (unsigned char)(14 + row), pce_editor_image_rows[row]);
+    }
+}
+
+static void draw_converted_asset_summary(void)
+{
+    cputsxy(2, 10, "Converted BG/Sprite:");
+    cputsxy(2, 11, "BG");
+    draw_hex_at(6, 11, pce_editor_bg_asset_count);
+    cputsxy(10, 11, "SPR");
+    draw_hex_at(16, 11, pce_editor_sprite_asset_count);
+    if (pce_editor_bg_asset_count)
+    {
+        cputsxy(2, 12, "BG tiles");
+        draw_hex_at(12, 12, (unsigned char)(pce_editor_bg_assets[0].tiles_size / 32u));
+    }
+    if (pce_editor_sprite_asset_count)
+    {
+        cputsxy(18, 12, "SPR pat");
+        draw_hex_at(28, 12, (unsigned char)(pce_editor_sprite_assets[0].patterns_size / 128u));
     }
 }
 
@@ -309,14 +418,16 @@ int main(void)
     textcolor(COLOR_WHITE);
     cursor(0);
     clrscr();
+    upload_converted_assets();
     textcolor(COLOR_LIGHTBLUE);
     cputsxy(2, 1, "PCE GAME EDITOR SAMPLE");
     textcolor(COLOR_WHITE);
     cputsxy(2, 3, "Hello World from PC Engine");
     cputsxy(2, 4, "FRAME:");
     cputsxy(2, 5, "PAD RAW:");
-    cputsxy(2, 10, "Generated image asset:");
-    cputsxy(2, 21, "PAD INPUT CHANGES COLORS");
+    cputsxy(2, 13, "Legacy preview:");
+    cputsxy(2, 24, "PAD INPUT CHANGES COLORS");
+    draw_converted_asset_summary();
     draw_generated_image();
     play_beep(pce_editor_tone_period);
 

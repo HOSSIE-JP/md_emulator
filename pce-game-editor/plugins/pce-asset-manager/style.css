@@ -1,6 +1,0 @@
-.asset-plugin-layout .asset-item small {
-  display: block;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}

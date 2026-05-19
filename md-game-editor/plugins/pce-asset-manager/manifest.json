@@ -6,7 +6,7 @@
   "icon": "assets",
   "types": ["editor", "asset"],
   "supportedCores": ["pc-engine"],
-  "permissions": ["project.read", "project.write", "dialog.openFile"],
+  "permissions": ["project.read", "project.write", "dialog.openFile", "asset.import", "asset.preview"],
   "tab": {
     "label": "Assets",
     "icon": "assets",
@@ -17,6 +17,6 @@
     "entry": "renderer.js",
     "styles": ["style.css"],
     "page": "assets",
-    "capabilities": ["page", "asset-manager", "asset-type-provider"]
+    "capabilities": ["page", "asset-manager", "asset-type-provider", "asset-import-handler"]
   }
 }

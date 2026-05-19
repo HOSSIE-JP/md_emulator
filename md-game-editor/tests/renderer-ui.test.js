@@ -124,6 +124,31 @@ test('asset manager res file delete and preview resize are wired', () => {
   assert.match(css, /\.asset-preview-resizer/);
 });
 
+test('PCE asset manager uses MD-style panes and plugin-owned PCE IPC workflow', () => {
+  const manifest = readPluginManifest('pce-asset-manager');
+  const renderer = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'pce-asset-manager', 'renderer.js'), 'utf-8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'pce-asset-manager', 'style.css'), 'utf-8');
+
+  assert.ok(manifest.renderer.capabilities.includes('asset-import-handler'));
+  assert.match(renderer, /assets-layout/);
+  assert.match(renderer, /asset-table/);
+  assert.match(renderer, /asset-preview-panel/);
+  assert.match(renderer, /accordion-section/);
+  assert.match(renderer, /image-preview-frame/);
+  assert.match(renderer, /palette-swatch/);
+  assert.match(renderer, /api\.createModal/);
+  assert.match(renderer, /importAssetImage/);
+  assert.match(renderer, /previewAssetSource/);
+  assert.match(renderer, /reorderAssets/);
+  assert.match(renderer, /asset-import-handler/);
+  assert.match(renderer, /pce_sprite/);
+  assert.doesNotMatch(renderer, /mini-btn|class="input"|class="select"|pane-header|confirm\(/);
+  assert.doesNotMatch(renderer, /window\.electronAPI|listResDefinitions|addResEntry|writeAssetFile|state\.rescomp/);
+  assert.match(renderer, /role="separator" aria-orientation="vertical"/);
+  assert.match(css, /\.pce-assets-layout/);
+  assert.doesNotMatch(css, /\.asset-table\s*\{|\.form-input\s*\{/);
+});
+
 test('code editor exposes advanced tree, preview, encoding, rename, and completion controls', () => {
   const html = readRendererFile('index.html');
   const renderer = readRendererFile('renderer.js');

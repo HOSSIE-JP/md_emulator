@@ -105,6 +105,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listAssets: () => ipcRenderer.invoke('assets:list'),
   upsertAsset: (asset) => ipcRenderer.invoke('assets:upsert', asset || {}),
   deleteAsset: (id) => ipcRenderer.invoke('assets:delete', { id }),
+  importAssetImage: (payload) => ipcRenderer.invoke('assets:importImage', payload || {}),
+  previewAssetSource: (relativePath) => ipcRenderer.invoke('assets:previewSource', { relativePath }),
+  reorderAssets: (ids) => ipcRenderer.invoke('assets:reorder', { ids }),
   // --- エクスポート ---
   exportRom: () => ipcRenderer.invoke('export:rom'),
   exportHtml: () => ipcRenderer.invoke('export:html'),

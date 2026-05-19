@@ -100,6 +100,29 @@ test('asset-manager declares v2.5 asset provider capabilities', () => {
   assert.doesNotMatch(appRendererSource, /midi-converter/);
 });
 
+test('PCE asset manager declares plugin-owned import workflow without MD rescomp coupling', () => {
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'pce-asset-manager', 'manifest.json'),
+    'utf-8',
+  ));
+  const rendererSource = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'pce-asset-manager', 'renderer.js'),
+    'utf-8',
+  );
+
+  assert.deepEqual(manifest.supportedCores, ['pc-engine']);
+  assert.ok(manifest.renderer.capabilities.includes('asset-type-provider'));
+  assert.ok(manifest.renderer.capabilities.includes('asset-import-handler'));
+  assert.ok(manifest.permissions.includes('asset.import'));
+  assert.match(rendererSource, /registerCapability\(['"]asset-type-provider['"]/);
+  assert.match(rendererSource, /registerCapability\(['"]asset-import-handler['"]/);
+  assert.match(rendererSource, /importAssetImage/);
+  assert.match(rendererSource, /previewAssetSource/);
+  assert.match(rendererSource, /dataUrlToPng/);
+  assert.match(rendererSource, /allowedTypes:\s*\['image',\s*'sprite'\]/);
+  assert.doesNotMatch(rendererSource, /listResDefinitions|addResEntry|writeAssetFile|deleteResEntry|state\.rescomp/);
+});
+
 function makePngChunk(type, data) {
   const chunk = Buffer.alloc(12 + data.length);
   chunk.writeUInt32BE(data.length, 0);

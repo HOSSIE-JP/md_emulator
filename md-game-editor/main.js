@@ -1743,6 +1743,42 @@ ipcMain.handle('assets:delete', async (_event, payload) => {
   }
 });
 
+ipcMain.handle('assets:importImage', async (_event, payload) => {
+  try {
+    if (buildSystem.getActiveCoreId() !== 'pc-engine') {
+      return { ok: false, error: 'assets:importImage is available for PC Engine projects only' };
+    }
+    const result = pceAssetManager.importImage(buildSystem.getProjectDir(), payload || {});
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('assets:previewSource', async (_event, payload) => {
+  try {
+    if (buildSystem.getActiveCoreId() !== 'pc-engine') {
+      return { ok: false, error: 'assets:previewSource is available for PC Engine projects only' };
+    }
+    const result = pceAssetManager.previewSource(buildSystem.getProjectDir(), payload?.relativePath || payload);
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle('assets:reorder', async (_event, payload) => {
+  try {
+    if (buildSystem.getActiveCoreId() !== 'pc-engine') {
+      return { ok: false, error: 'assets:reorder is available for PC Engine projects only' };
+    }
+    const doc = pceAssetManager.reorderAssets(buildSystem.getProjectDir(), payload?.ids || payload);
+    return { ok: true, ...doc };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 ipcMain.handle('api:startServer', async (_event, options) => {
   return startApiServer(options?.port ?? 8080);
 });
