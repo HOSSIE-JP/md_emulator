@@ -298,4 +298,4 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 
 ---
 
-*Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / AI Control API / TileMap collision / Editor UX guardrails*
+*Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / AI Control API / TileMap collision / Rhythm game plugins / Editor UX guardrails*

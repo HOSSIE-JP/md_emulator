@@ -99,6 +99,7 @@ test('PCE image import constructs SuperFamiconv commands for BG and sprites', ()
   assert.ok(bg.commandInfo.args.includes('-M'));
   assert.ok(bg.commandInfo.args.includes('pce'));
   assert.ok(bg.commandInfo.args.includes('--out-map'));
+  assert.ok(bg.commandInfo.args.includes('-P'));
   assert.equal(sprite.asset.type, 'sprite');
   assert.equal(sprite.commandInfo.mode, 'pce_sprite');
   assert.ok(sprite.commandInfo.args.includes('pce_sprite'));
@@ -207,4 +208,25 @@ test('PCE generated assets emit BG and sprite C arrays plus legacy fallback', ()
   assert.match(source, /const unsigned char pce_editor_bg_asset_count = 1/);
   assert.match(source, /const unsigned char pce_editor_sprite_asset_count = 1/);
   assert.match(source, /pce_editor_image_rows/);
+});
+
+test('PCE sample template registers generated image_gen background asset', () => {
+  const templateDir = path.join(__dirname, '..', 'template', 'template_pce_sample');
+  const doc = JSON.parse(fs.readFileSync(path.join(templateDir, 'assets', 'pce-assets.json'), 'utf-8'));
+  const asset = doc.assets.find((entry) => entry.id === 'uniform_girl_bg');
+
+  assert.ok(asset);
+  assert.equal(asset.type, 'image');
+  assert.equal(asset.options.kind, 'background');
+  assert.equal(asset.options.tileBase, 512);
+  assert.equal(asset.options.mapBase, 438);
+  assert.equal(asset.options.paletteBank, 4);
+  assert.equal(fs.existsSync(path.join(templateDir, asset.source)), true);
+  assert.equal(fs.existsSync(path.join(templateDir, asset.data.generated.paletteFile)), true);
+  assert.equal(fs.existsSync(path.join(templateDir, asset.data.generated.tilesFile)), true);
+  assert.equal(fs.existsSync(path.join(templateDir, asset.data.generated.mapFile)), true);
+  const sampleMain = fs.readFileSync(path.join(templateDir, 'src', 'main.c'), 'utf-8');
+  assert.match(sampleMain, /palette_bank \* 16u/);
+  assert.match(sampleMain, /PCE_VDC_CR_VRAM_ADD_1/);
+  assert.match(sampleMain, /pce_editor_vdc_write\(5,\s*PCE_VDC_CR_BG_ENABLE \| PCE_VDC_CR_DRAM_REFRESH \| PCE_VDC_CR_VRAM_ADD_1\)/);
 });

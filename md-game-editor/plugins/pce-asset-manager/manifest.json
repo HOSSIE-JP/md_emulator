@@ -8,15 +8,15 @@
   "supportedCores": ["pc-engine"],
   "permissions": ["project.read", "project.write", "dialog.openFile", "asset.import", "asset.preview"],
   "tab": {
-    "label": "Assets",
+    "label": "PCE Assets",
     "icon": "assets",
-    "page": "assets",
+    "page": "pce-assets",
     "order": 10
   },
   "renderer": {
     "entry": "renderer.js",
     "styles": ["style.css"],
-    "page": "assets",
+    "page": "pce-assets",
     "capabilities": ["page", "asset-manager", "asset-type-provider", "asset-import-handler"]
   }
 }

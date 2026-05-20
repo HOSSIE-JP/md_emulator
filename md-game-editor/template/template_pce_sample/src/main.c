@@ -207,11 +207,91 @@ static void waitvsync(void) {}
 
 #include "generated/assets.h"
 
-#if defined(__PCE__) && !defined(__CC65__)
+#if defined(__CC65__)
+#define PCE_VDC_CTRL (*(volatile unsigned char *)0x0200)
+#define PCE_VDC_DATA_LO (*(volatile unsigned char *)0x0202)
+#define PCE_VDC_DATA_HI (*(volatile unsigned char *)0x0203)
+#define PCE_VCE_ADDR_LO (*(volatile unsigned char *)0x0402)
+#define PCE_VCE_ADDR_HI (*(volatile unsigned char *)0x0403)
+#define PCE_VCE_DATA_LO (*(volatile unsigned char *)0x0404)
+#define PCE_VCE_DATA_HI (*(volatile unsigned char *)0x0405)
+#define PCE_VDC_CR_BG_ENABLE 0x0080u
+#define PCE_VDC_CR_DRAM_REFRESH 0x0400u
+#define PCE_VDC_CR_VRAM_ADD_1 0x0000u
+
+static void pce_editor_vdc_write(unsigned char reg, unsigned int value)
+{
+    PCE_VDC_CTRL = reg;
+    PCE_VDC_DATA_LO = (unsigned char)(value & 0xff);
+    PCE_VDC_DATA_HI = (unsigned char)((value >> 8) & 0xff);
+}
+
+static void pce_editor_vram_copy(unsigned int dest, const unsigned char *source, unsigned int length)
+{
+    pce_editor_vdc_write(5, PCE_VDC_CR_BG_ENABLE | PCE_VDC_CR_DRAM_REFRESH | PCE_VDC_CR_VRAM_ADD_1);
+    pce_editor_vdc_write(0, dest);
+    PCE_VDC_CTRL = 2;
+    while (length >= 2)
+    {
+        PCE_VDC_DATA_LO = *source++;
+        PCE_VDC_DATA_HI = *source++;
+        length -= 2;
+    }
+    if (length)
+    {
+        PCE_VDC_DATA_LO = *source;
+        PCE_VDC_DATA_HI = 0;
+    }
+}
+
+static void pce_editor_vce_copy_palette(unsigned char palette_bank, const unsigned char *source, unsigned int length)
+{
+    unsigned int offset = (unsigned int)palette_bank * 16u;
+    PCE_VCE_ADDR_LO = (unsigned char)(offset & 0xff);
+    PCE_VCE_ADDR_HI = (unsigned char)((offset >> 8) & 0xff);
+    while (length >= 2)
+    {
+        PCE_VCE_DATA_LO = *source++;
+        PCE_VCE_DATA_HI = *source++;
+        length -= 2;
+    }
+}
+
+static void upload_generated_bg_asset(void)
+{
+    const pce_editor_bg_asset_t *bg;
+    unsigned char row;
+    unsigned int row_bytes;
+    if (!pce_editor_bg_asset_count) return;
+    bg = &pce_editor_bg_assets[0];
+    if (bg->palette && bg->palette_size)
+    {
+        pce_editor_vce_copy_palette(bg->palette_bank, bg->palette, bg->palette_size);
+    }
+    if (bg->tiles && bg->tiles_size)
+    {
+        pce_editor_vram_copy((unsigned int)(bg->tile_base * 16u), bg->tiles, bg->tiles_size);
+    }
+    if (bg->map && bg->map_size)
+    {
+        row_bytes = (unsigned int)bg->width_tiles * 2u;
+        for (row = 0; row < bg->height_tiles; row++)
+        {
+            pce_editor_vram_copy(
+                (unsigned int)(bg->map_base + ((unsigned int)row * 32u)),
+                bg->map + ((unsigned int)row * row_bytes),
+                row_bytes
+            );
+        }
+    }
+}
+#elif defined(__PCE__)
 static void upload_generated_bg_asset(void)
 {
     const pce_editor_bg_asset_t *bg;
     unsigned char palette_count;
+    unsigned char row;
+    unsigned int row_bytes;
     if (!pce_editor_bg_asset_count) return;
     bg = &pce_editor_bg_assets[0];
     if (bg->palette && bg->palette_size)
@@ -226,7 +306,15 @@ static void upload_generated_bg_asset(void)
     }
     if (bg->map && bg->map_size)
     {
-        pce_vdc_copy_to_vram((uint16_t)bg->map_base, bg->map, (uint16_t)bg->map_size);
+        row_bytes = (unsigned int)bg->width_tiles * 2u;
+        for (row = 0; row < bg->height_tiles; row++)
+        {
+            pce_vdc_copy_to_vram(
+                (uint16_t)(bg->map_base + ((unsigned int)row * 32u)),
+                bg->map + ((unsigned int)row * row_bytes),
+                (uint16_t)row_bytes
+            );
+        }
     }
 }
 
@@ -278,7 +366,9 @@ static void upload_generated_sprite_asset(void)
 
 static void upload_converted_assets(void)
 {
-#if defined(__PCE__) && !defined(__CC65__)
+#if defined(__CC65__)
+    upload_generated_bg_asset();
+#elif defined(__PCE__)
     upload_generated_bg_asset();
     upload_generated_sprite_asset();
 #endif

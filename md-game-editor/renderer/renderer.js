@@ -799,6 +799,11 @@ function pluginSupportsActiveCore(plugin) {
   return cores.includes('*') || cores.includes(coreId);
 }
 
+function isStaticPageAvailableForActiveCore(pageId) {
+  if (pageId === 'assets') return getActiveCoreId() === 'mega-drive';
+  return true;
+}
+
 function getRoleDefinitions() {
   const byId = new Map();
   pluginState.plugins.forEach((plugin) => {
@@ -1134,7 +1139,7 @@ function getFirstVisiblePageId() {
   const candidates = ['assets', 'code', 'plugins', 'settings'];
   return candidates.find((pageId) => {
     const sec = document.getElementById(`page-${pageId}`);
-    return sec && !sec.hidden;
+    return sec && !sec.hidden && isStaticPageAvailableForActiveCore(pageId);
   }) || 'plugins';
 }
 
@@ -1521,7 +1526,13 @@ function applyPluginPageAvailability() {
     const section = document.getElementById(`page-${pageId}`);
     if (!section) return;
     if (section.dataset.pluginPageOwner) return;
-    section.hidden = !plugins.some((plugin) => pluginSupportsActiveCore(plugin) && plugin.enabled && (plugin.hasRenderer || plugin.tab));
+    section.hidden = !isStaticPageAvailableForActiveCore(pageId)
+      || !plugins.some((plugin) => pluginSupportsActiveCore(plugin) && plugin.enabled && (plugin.hasRenderer || plugin.tab));
+  });
+
+  document.querySelectorAll('.editor-page:not([data-plugin-page-owner])').forEach((section) => {
+    const pageId = section.id.replace(/^page-/, '');
+    if (!isStaticPageAvailableForActiveCore(pageId)) section.hidden = true;
   });
 
   if (el.pageCode?.hidden) {
@@ -5032,7 +5043,7 @@ async function loadResDefinitions({ keepSelection = false } = {}) {
     state.rescomp.files = [];
     state.rescomp.selectedFile = '';
     state.rescomp.selectedEntryLine = null;
-    renderResFileList();
+    renderResFileSelect();
     renderAssetTable();
     return;
   }

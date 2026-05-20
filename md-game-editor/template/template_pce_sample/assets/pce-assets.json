@@ -7,8 +7,17 @@
       "name": "Sample Image",
       "source": "assets/images/sample.pceimg.json",
       "options": {
+        "kind": "background",
+        "paletteBank": 0,
+        "tileBase": 32,
+        "mapBase": 0,
         "x": 2,
-        "y": 10
+        "y": 10,
+        "width": 0,
+        "height": 0,
+        "cellWidth": 8,
+        "cellHeight": 8,
+        "transparentIndex": 0
       }
     },
     {
@@ -18,6 +27,60 @@
       "source": "assets/sound/beep.json",
       "options": {
         "period": 512
+      }
+    },
+    {
+      "id": "uniform_girl_bg",
+      "type": "image",
+      "name": "Uniform Girl Background",
+      "source": "assets/images/uniform_girl_bg.png",
+      "options": {
+        "kind": "background",
+        "paletteBank": 4,
+        "tileBase": 512,
+        "mapBase": 438,
+        "x": 0,
+        "y": 0,
+        "width": 64,
+        "height": 64,
+        "cellWidth": 8,
+        "cellHeight": 8,
+        "transparentIndex": 0
+      },
+      "data": {
+        "generated": {
+          "paletteFile": "assets/generated/uniform_girl_bg/palette.bin",
+          "tilesFile": "assets/generated/uniform_girl_bg/tiles.bin",
+          "mapFile": "assets/generated/uniform_girl_bg/map.bin",
+          "previewFile": "assets/generated/uniform_girl_bg/preview.json",
+          "tileCount": 63,
+          "paletteCount": 1,
+          "vramBytes": 2144,
+          "warnings": [],
+          "paletteColors": [
+            "#dbffff",
+            "#496d49",
+            "#92b692",
+            "#dbdbdb",
+            "#004924",
+            "#92dbb6",
+            "#6d9292",
+            "#926d92",
+            "#b692b6",
+            "#920049",
+            "#92496d",
+            "#b6246d",
+            "#ff006d",
+            "#240000",
+            "#000000",
+            "#000000"
+          ]
+        },
+        "import": {
+          "originalFileName": "uniform_girl_bg.png",
+          "importedAt": "2026-05-19T14:37:40.290Z",
+          "converter": "SuperFamiconv"
+        }
       }
     }
   ]

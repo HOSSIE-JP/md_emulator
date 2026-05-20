@@ -129,6 +129,8 @@ test('PCE asset manager uses MD-style panes and plugin-owned PCE IPC workflow', 
   const renderer = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'pce-asset-manager', 'renderer.js'), 'utf-8');
   const css = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'pce-asset-manager', 'style.css'), 'utf-8');
 
+  assert.equal(manifest.tab.page, 'pce-assets');
+  assert.equal(manifest.renderer.page, 'pce-assets');
   assert.ok(manifest.renderer.capabilities.includes('asset-import-handler'));
   assert.match(renderer, /assets-layout/);
   assert.match(renderer, /asset-table/);
@@ -136,7 +138,10 @@ test('PCE asset manager uses MD-style panes and plugin-owned PCE IPC workflow', 
   assert.match(renderer, /accordion-section/);
   assert.match(renderer, /image-preview-frame/);
   assert.match(renderer, /palette-swatch/);
+  assert.match(renderer, /id="pceAssetEditorPanel"/);
+  assert.doesNotMatch(renderer, /id="assetEditorPanel"/);
   assert.match(renderer, /api\.createModal/);
+  assert.match(renderer, /picked\?\.sourcePath/);
   assert.match(renderer, /importAssetImage/);
   assert.match(renderer, /previewAssetSource/);
   assert.match(renderer, /reorderAssets/);
@@ -224,6 +229,10 @@ test('startup selects the first sidebar plugin and project creation exposes temp
   assert.match(renderer, /selectedDefaultSidebarPage:\s*false/);
   assert.match(renderer, /switchPage\(getFirstSidebarPluginPageId\(\)\s*\|\|\s*getFirstVisiblePageId\(\)\)/);
   assert.match(renderer, /function resetProjectScopedPluginUiState\(\)/);
+  assert.match(renderer, /function isStaticPageAvailableForActiveCore\(pageId\)/);
+  assert.match(renderer, /pageId === 'assets'[\s\S]*getActiveCoreId\(\) === 'mega-drive'/);
+  assert.doesNotMatch(renderer, /renderResFileList\(\)/);
+  assert.match(renderer, /if \(getActiveCoreId\(\) === 'pc-engine'\)[\s\S]*renderResFileSelect\(\)/);
   assert.match(renderer, /async function reloadProjectAfterSwitch\(\)/);
   assert.match(renderer, /resetProjectScopedPluginUiState\(\)/);
   assert.match(renderer, /loadPlugins\(\{\s*resetProjectPluginState:\s*true,\s*resetSidebarSelection:\s*true\s*\}\)/);
@@ -305,7 +314,8 @@ test('plugin page availability keeps multiple editor plugin pages independent', 
   assert.ok(renderer.includes("document.querySelectorAll('.editor-page[data-plugin-page-owner]')"));
   assert.match(renderer, /section\.dataset\.pluginPageOwner/);
   assert.match(renderer, /getPluginPageDomId\(owner\) === pageId/);
-  assert.match(renderer, /section\.hidden = !plugins\.some\(\(plugin\) => pluginSupportsActiveCore\(plugin\) && plugin\.enabled && \(plugin\.hasRenderer \|\| plugin\.tab\)\)/);
+  assert.match(renderer, /section\.hidden = !isStaticPageAvailableForActiveCore\(pageId\)[\s\S]*plugins\.some\(\(plugin\) => pluginSupportsActiveCore\(plugin\) && plugin\.enabled && \(plugin\.hasRenderer \|\| plugin\.tab\)\)/);
+  assert.match(renderer, /document\.querySelectorAll\('\.editor-page:not\(\[data-plugin-page-owner\]\)'\)/);
   assert.doesNotMatch(renderer, /pageBindings\.set\(pageId,\s*plugin\)/);
   assert.match(css, /\.editor-page:not\(\.active\)\s*\{\s*display:\s*none\s*!important;\s*\}/);
 });

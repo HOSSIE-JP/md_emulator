@@ -406,6 +406,7 @@ function buildSuperFamiconvPlan(projectDir, asset, sourceAbs, options = {}) {
   if (kind === 'background') {
     args.splice(4, 0, '--out-map', mapAbs);
     args.push('-T', String(normalized.options.tileBase || 0));
+    args.push('-P', String(normalized.options.paletteBank || 0));
   } else {
     args.push('-S');
   }

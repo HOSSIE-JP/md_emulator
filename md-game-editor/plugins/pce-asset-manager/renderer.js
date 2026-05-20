@@ -104,7 +104,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       <div class="asset-preview-resizer" role="separator" aria-orientation="vertical" data-role="resizer"></div>
 
       <aside class="asset-preview-panel">
-        <div id="assetEditorPanel" class="pce-assets-editor">
+        <div id="pceAssetEditorPanel" class="pce-assets-editor">
           <section class="accordion-section">
             <button class="accordion-header" type="button" aria-expanded="true" data-accordion="settings">
               <span class="accordion-title">設定</span><span class="accordion-chevron">⌃</span>
@@ -648,8 +648,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
           properties: ['openFile'],
           filters: [{ name: 'PNG / BMP', extensions: ['png', 'bmp'] }],
         });
-        if (!picked?.ok || !picked.filePath) return;
-        await setSource(picked.filePath);
+        const filePath = picked?.sourcePath || picked?.filePath || picked?.filePaths?.[0] || '';
+        if (picked?.canceled || !filePath) return;
+        await setSource(filePath);
       });
       tileBaseInput.addEventListener('input', () => { tileBaseInput.dataset.touched = '1'; });
       kindSelect.addEventListener('change', syncKind);

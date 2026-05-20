@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-05 / Plugin Runtime v2.5 / Core Plugin / AI Control API / TileMap collision / Editor UX guardrails
+> § Last Updated: 2026-05 / Plugin Runtime v2.5 / Core Plugin / AI Control API / TileMap collision / Rhythm game plugins / Editor UX guardrails
 
 ---
 
@@ -338,6 +338,8 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `audio-converter` | `converter` | WAV/MP3/OGG 変換と音声変換 UI |
 | `midi-converter` | `converter`, `asset` | MIDI から VGM/XGM 生成、XGM2 アセット登録 payload 生成 |
 | `md-bgm-composer` | `editor`, `converter`, `asset` | Mega Drive 向け BGM tracker、MIDI import、VGM/XGM export、XGM2 アセット登録 |
+| `rhythm-game-editor` | `editor`, `asset` | Mega Drive 向けリズムゲームの楽曲/譜面/波形/アルバムアート/ムードスプライト/システムアセット設定 |
+| `rhythm-game-builder` | `build` | リズムゲームエンジン同期、譜面/RES/C データ生成、builder role による ROM ビルド連携 |
 | `standard-emulator` | `emulator` | WASM Mega Drive エミュレーター |
 | `standard-api-emulator` | `emulator`, `tool` | REST API Mega Drive エミュレーター |
 | `ai-control` | `editor`, `tool` | 外部 AI ツール向け localhost REST / MCP bridge |
