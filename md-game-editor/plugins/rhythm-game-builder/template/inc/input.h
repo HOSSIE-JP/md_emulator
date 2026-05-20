@@ -8,7 +8,7 @@
  * Mega Drive コントローラのボタンをリズムゲームのレーンにマッピングする。
  *
  * ボタン→レーン対応:
- *   UP=0, DOWN=1, LEFT=2, RIGHT=3, A=4, B=5, C=6
+ *   LEFT=0, UP=1, DOWN=2, RIGHT=3, A=4, B=5, C=6
  */
 
 #include <genesis.h>

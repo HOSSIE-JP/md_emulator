@@ -4,7 +4,8 @@ const fs = require('fs');
 const path = require('path');
 
 const DIFFICULTIES = ['easy', 'normal', 'hard'];
-const VALID_NOTE_TYPES = new Set(['UP', 'DOWN', 'LEFT', 'RIGHT', 'A', 'B', 'C']);
+const NOTE_TYPE_ORDER = ['LEFT', 'UP', 'DOWN', 'RIGHT', 'A', 'B', 'C'];
+const VALID_NOTE_TYPES = new Set(NOTE_TYPE_ORDER);
 const VALID_PATTERNS = new Set(['TAP', 'HOLD', 'RAPID']);
 const NOTE_TYPE_MAP = {
   UP: 'NOTE_UP',
@@ -214,11 +215,11 @@ function normalizeSettings(settings = {}) {
 }
 
 function normalizeNote(note = {}) {
-  const type = String(note.type || 'UP').toUpperCase();
+  const type = String(note.type || 'LEFT').toUpperCase();
   const pattern = String(note.pattern || 'TAP').toUpperCase();
   return {
     time: Math.max(0, Number(note.time) || 0),
-    type: VALID_NOTE_TYPES.has(type) ? type : 'UP',
+    type: VALID_NOTE_TYPES.has(type) ? type : 'LEFT',
     pattern: VALID_PATTERNS.has(pattern) ? pattern : 'TAP',
     duration: Math.max(0, Number(note.duration) || 0),
   };
@@ -433,8 +434,8 @@ function buildExportSongs(projectDir) {
     song_images: {},
     charts: {
       easy: { notes: [{ time: 1, type: 'A', pattern: 'TAP' }, { time: 2, type: 'B', pattern: 'TAP' }, { time: 3, type: 'C', pattern: 'TAP' }] },
-      normal: { notes: [{ time: 1, type: 'UP', pattern: 'TAP' }, { time: 1.5, type: 'DOWN', pattern: 'TAP' }, { time: 2, type: 'LEFT', pattern: 'TAP' }, { time: 2.5, type: 'RIGHT', pattern: 'TAP' }] },
-      hard: { notes: [{ time: 1, type: 'UP', pattern: 'TAP' }, { time: 1.25, type: 'A', pattern: 'TAP' }, { time: 1.5, type: 'DOWN', pattern: 'TAP' }, { time: 1.75, type: 'B', pattern: 'TAP' }, { time: 2, type: 'C', pattern: 'TAP' }] },
+      normal: { notes: [{ time: 1, type: 'LEFT', pattern: 'TAP' }, { time: 1.5, type: 'UP', pattern: 'TAP' }, { time: 2, type: 'DOWN', pattern: 'TAP' }, { time: 2.5, type: 'RIGHT', pattern: 'TAP' }] },
+      hard: { notes: [{ time: 1, type: 'LEFT', pattern: 'TAP' }, { time: 1.25, type: 'A', pattern: 'TAP' }, { time: 1.5, type: 'DOWN', pattern: 'TAP' }, { time: 1.75, type: 'B', pattern: 'TAP' }, { time: 2, type: 'C', pattern: 'TAP' }] },
     },
   })];
 }
@@ -590,9 +591,9 @@ function generateGameDefH(songs, settings = defaultSettings()) {
     '',
     `#define MAX_SONGS           ${maxSongs}`,
     '',
-    '#define NOTE_UP             0',
-    '#define NOTE_DOWN           1',
-    '#define NOTE_LEFT           2',
+    '#define NOTE_LEFT           0',
+    '#define NOTE_UP             1',
+    '#define NOTE_DOWN           2',
     '#define NOTE_RIGHT          3',
     '#define NOTE_A              4',
     '#define NOTE_B              5',
@@ -623,13 +624,13 @@ function generateGameDefH(songs, settings = defaultSettings()) {
     '#define SCORE_HOLD_TICK     10',
     '#define SCORE_RAPID_HIT     50',
     '',
-    '#define JUDGE_LINE_X        40',
+    '#define JUDGE_LINE_Y        184',
     '#define NOTE_SPEED          2',
     '#define LANE_COUNT          7',
-    '#define LANE_Y_START        104',
-    '#define LANE_HEIGHT         16',
+    '#define LANE_X_START        16',
+    '#define LANE_WIDTH          20',
     '#define HUD_HEIGHT          32',
-    '#define NOTE_SPAWN_X        336',
+    '#define NOTE_SPAWN_Y        -16',
     '',
     '#define MAX_VISIBLE_NOTES   32',
     '#define MAX_CHART_NOTES     1024',
@@ -655,7 +656,7 @@ function generateGameDefH(songs, settings = defaultSettings()) {
     '#define GAUGE_GAIN_GREAT        30',
     '#define GAUGE_GAIN_GOOD         10',
     '#define GAUGE_DRAIN_MISS        20',
-    '#define GAUGE_SEGMENTS          10',
+    '#define GAUGE_SEGMENTS          6',
     '',
     '#endif /* _GAME_DEF_H_ */',
     '',
@@ -676,13 +677,13 @@ function generateSongDataC(songs) {
       const notes = song.charts?.[diff]?.notes || [];
       lines.push(`static const NoteData notes_${song.song_id}_${diff}[] = {`);
       if (notes.length === 0) {
-        lines.push('    { 0, NOTE_UP, PATTERN_TAP, 0 }');
+        lines.push('    { 0, NOTE_LEFT, PATTERN_TAP, 0 }');
       } else {
         notes.forEach((note, noteIndex) => {
           const frame = Math.max(0, Math.round(Number(note.time || 0) * 60));
           const duration = Math.max(0, Math.round(Number(note.duration || 0) * 60));
           const comma = noteIndex < notes.length - 1 ? ',' : '';
-          lines.push(`    { ${frame}, ${NOTE_TYPE_MAP[note.type] || 'NOTE_UP'}, ${PATTERN_MAP[note.pattern] || 'PATTERN_TAP'}, ${duration} }${comma}`);
+          lines.push(`    { ${frame}, ${NOTE_TYPE_MAP[note.type] || 'NOTE_LEFT'}, ${PATTERN_MAP[note.pattern] || 'PATTERN_TAP'}, ${duration} }${comma}`);
         });
       }
       lines.push('};', '');

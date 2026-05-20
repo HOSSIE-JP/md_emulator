@@ -1,4 +1,4 @@
-const NOTE_TYPES = ['UP', 'DOWN', 'LEFT', 'RIGHT', 'A', 'B', 'C'];
+const NOTE_TYPES = ['LEFT', 'UP', 'DOWN', 'RIGHT', 'A', 'B', 'C'];
 const NOTE_LABELS = { UP: '↑', DOWN: '↓', LEFT: '←', RIGHT: '→', A: 'A', B: 'B', C: 'C' };
 const PATTERNS = ['TAP', 'HOLD', 'RAPID'];
 const DIFFICULTIES = [

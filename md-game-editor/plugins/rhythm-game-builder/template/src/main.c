@@ -309,8 +309,10 @@ static u8  gp_prev_mood;
 static const SpriteDefinition* gp_mood_def;
 #define GAME_ALBUM_X        29 /* 232px */
 #define GAME_ALBUM_Y        2  /* 16px */
-#define MOOD_SPRITE_X       96
-#define MOOD_SPRITE_Y       4
+#define GAME_INFO_X         22 /* 176px */
+#define GAME_INFO_Y         13
+#define MOOD_SPRITE_X       184
+#define MOOD_SPRITE_Y       128
 
 static u16 getMoodAnimIndex(const SpriteDefinition* def, u8 mood)
 {
@@ -347,13 +349,14 @@ static void drawGameplayHeaderText(const SongEntry* entry)
     if (entry != NULL && entry->display_name != NULL && entry->display_name[0] != '\0')
         name = entry->display_name;
 
-    /* 楽曲名クリア＋SJIS対応描画 (1,6) max 10 chars */
+    /* 楽曲名・難易度は右側情報パネルへ描画 */
     VDP_setTextPalette(PAL0);
-    VDP_drawText("          ", 1, 6);
+    VDP_drawText("                  ", GAME_INFO_X, GAME_INFO_Y);
     draw_sjis_text(BG_A, name,
                    TILE_ATTR_FULL(PAL0, 0, 0, 0, SJIS_VRAM_BASE),
-                   1, 6, FALSE);
-    VDP_drawText(diff_names[selected_difficulty], 1, 7);
+                   GAME_INFO_X, GAME_INFO_Y, FALSE);
+    VDP_drawText("                  ", GAME_INFO_X, GAME_INFO_Y + 1);
+    VDP_drawText(diff_names[selected_difficulty], GAME_INFO_X, GAME_INFO_Y + 1);
 }
 
 

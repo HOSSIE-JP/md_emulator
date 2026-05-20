@@ -122,6 +122,14 @@ test('rhythm-game-editor hooks save, reorder, delete, and export songs', () => {
 
   const gameDef = fs.readFileSync(path.join(projectDir, 'inc', 'game_def.h'), 'utf-8');
   assert.match(gameDef, /#define MAX_SONGS\s+2/);
+  assert.match(gameDef, /#define NOTE_LEFT\s+0/);
+  assert.match(gameDef, /#define NOTE_UP\s+1/);
+  assert.match(gameDef, /#define NOTE_DOWN\s+2/);
+  assert.match(gameDef, /#define JUDGE_LINE_Y\s+184/);
+  assert.match(gameDef, /#define LANE_X_START\s+16/);
+  assert.match(gameDef, /#define NOTE_SPAWN_Y\s+-16/);
+  assert.match(gameDef, /#define GAUGE_SEGMENTS\s+6/);
+  assert.doesNotMatch(gameDef, /JUDGE_LINE_X|NOTE_SPAWN_X|LANE_Y_START|LANE_HEIGHT/);
   assert.match(gameDef, /#define SELECT_WOBBLE_AMPLITUDE_DEF\s+FIX16\(1\.2500\)/);
 
   const deleted = plugin.deleteRhythmSong({ song_id: 'sub' }, context);
@@ -152,6 +160,15 @@ test('rhythm-game-builder syncs engine, generated data, and build variables', ()
   const songData = fs.readFileSync(path.join(projectDir, 'src', 'song_data.c'), 'utf-8');
   assert.match(songData, /const u16 song_count = 1;/);
   assert.match(songData, /rhythm_snd_sample_song_bgm/);
+  assert.match(songData, /\{ 60, NOTE_LEFT, PATTERN_TAP, 0 \}[\s\S]*\{ 90, NOTE_UP, PATTERN_TAP, 0 \}[\s\S]*\{ 120, NOTE_DOWN, PATTERN_TAP, 0 \}[\s\S]*\{ 150, NOTE_RIGHT, PATTERN_TAP, 0 \}/);
+
+  const noteSource = fs.readFileSync(path.join(projectDir, 'src', 'note.c'), 'utf-8');
+  assert.match(noteSource, /laneToX/);
+  assert.match(noteSource, /JUDGE_LINE_Y - \(s16\)\(frames_until_judge \* NOTE_SPEED\)/);
+  assert.doesNotMatch(noteSource, /NOTE_SPAWN_X|JUDGE_LINE_X|laneToY/);
+
+  const inputSource = fs.readFileSync(path.join(projectDir, 'src', 'input.c'), 'utf-8');
+  assert.match(inputSource, /BUTTON_LEFT\) return NOTE_LEFT;[\s\S]*BUTTON_UP\) return NOTE_UP;[\s\S]*BUTTON_DOWN\) return NOTE_DOWN;/);
 
   const buildStart = builder.onBuildStart({ projectDir }, context);
   assert.equal(buildStart.ok, true);
@@ -174,6 +191,7 @@ test('rhythm-game-editor renderer provides waveform, converter, activation refre
   assert.match(rendererSource, /data-action="toggle-playback"/);
   assert.match(rendererSource, /data-action="stop-playback"/);
   assert.match(rendererSource, /class="rge-playback-speed"/);
+  assert.match(rendererSource, /const NOTE_TYPES = \['LEFT', 'UP', 'DOWN', 'RIGHT', 'A', 'B', 'C'\];/);
   assert.match(rendererSource, /class="rge-record-toggle"/);
   assert.match(rendererSource, /data-action="auto-bpm"/);
   assert.match(rendererSource, /data-action="auto-place"/);

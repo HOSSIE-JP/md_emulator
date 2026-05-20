@@ -2,8 +2,8 @@
  * note.c - ノートのスポーン、スクロール、判定、レンダリング
  *
  * リズムゲームの中核ロジック:
- * - ノートは画面右端 (NOTE_SPAWN_X=336) から左方向へスクロールし、
- *   判定ライン (JUDGE_LINE_X=40) に向かって移動する
+ * - ノートは画面上端 (NOTE_SPAWN_Y=-16) から下方向へスクロールし、
+ *   判定ライン (JUDGE_LINE_Y=184) に向かって移動する
  * - MAX_VISIBLE_NOTES(32) 個の ActiveNote プール（配列）で
  *   ハードウェアスプライトを効率的に管理する
  *
@@ -36,13 +36,13 @@ static u16 note_vram_index;
 static u8 last_judged_pattern;
 static u16 last_judged_duration;
 
-#define SPAWN_LEAD_FRAMES ((NOTE_SPAWN_X - JUDGE_LINE_X) / NOTE_SPEED)
+#define SPAWN_LEAD_FRAMES ((JUDGE_LINE_Y - NOTE_SPAWN_Y) / NOTE_SPEED)
 
 static s16 findFreeSlot(void);
 static void spawnNote(u16 chart_index);
 static void releaseNote(u16 index);
 
-static inline s16 laneToY(u8 lane) { return LANE_Y_START + (lane * LANE_HEIGHT); }
+static inline s16 laneToX(u8 lane) { return LANE_X_START + (lane * LANE_WIDTH); }
 
 static bool bg_drawn;
 static bool use_image_ui;
@@ -156,7 +156,7 @@ static void spawnNote(u16 chart_index) {
 	const NoteData* nd = &chart_notes[chart_index];
 	ActiveNote* an = &note_pool[slot];
 
-	an->x = NOTE_SPAWN_X;
+	an->y = NOTE_SPAWN_Y;
 	an->lane = nd->type;
 	an->pattern = nd->pattern;
 	an->target_frame = nd->frame;
@@ -167,7 +167,7 @@ static void spawnNote(u16 chart_index) {
 	an->anim_state = NOTE_ANIM_NORMAL;
 	an->anim_timer = 0;
 
-	an->sprite = SPR_addSprite(&spr_note, an->x, laneToY(an->lane), TILE_ATTR(PAL1, FALSE, FALSE, FALSE));
+	an->sprite = SPR_addSprite(&spr_note, laneToX(an->lane), an->y, TILE_ATTR(PAL1, FALSE, FALSE, FALSE));
 	if (an->sprite != NULL) {
 		SPR_setVisibility(an->sprite, VISIBLE);
 		SPR_setAnimAndFrame(an->sprite, laneToAnim(an->lane), 0);
@@ -218,20 +218,20 @@ void NOTE_update(u16 current_frame) {
 			continue;
 		}
 
-		/* 通常ノートのX座標計算 */
+		/* 通常ノートのY座標計算 */
 		s32 frames_until_judge = (s32)note_pool[i].target_frame - (s32)current_frame;
-		note_pool[i].x = JUDGE_LINE_X + (s16)(frames_until_judge * NOTE_SPEED);
+		note_pool[i].y = JUDGE_LINE_Y - (s16)(frames_until_judge * NOTE_SPEED);
 
 		if (note_pool[i].sprite != NULL) {
-			if (note_pool[i].x < -16 || note_pool[i].x >= SCREEN_W + 16) {
+			if (note_pool[i].y < -16 || note_pool[i].y >= SCREEN_H + 16) {
 				SPR_setVisibility(note_pool[i].sprite, HIDDEN);
 			} else {
 				SPR_setVisibility(note_pool[i].sprite, VISIBLE);
-				SPR_setPosition(note_pool[i].sprite, note_pool[i].x, laneToY(note_pool[i].lane));
+				SPR_setPosition(note_pool[i].sprite, laneToX(note_pool[i].lane), note_pool[i].y);
 			}
 		}
 
-		if (note_pool[i].x < -32) {
+		if (note_pool[i].y > SCREEN_H + 32) {
 			releaseNote(i);
 		}
 	}
@@ -293,7 +293,7 @@ s8 NOTE_judge(u8 lane, u16 current_frame) {
 			if (spr_note.numAnimation > NOTE_SPRITE_ANIM_HIT_EFFECT) {
 				SPR_setAnimAndFrame(note_pool[best_slot].sprite, NOTE_SPRITE_ANIM_HIT_EFFECT, 0);
 			}
-			SPR_setPosition(note_pool[best_slot].sprite, JUDGE_LINE_X, laneToY(note_pool[best_slot].lane));
+			SPR_setPosition(note_pool[best_slot].sprite, laneToX(note_pool[best_slot].lane), JUDGE_LINE_Y);
 		}
 	} else if (note_pool[best_slot].sprite != NULL) {
 		/* HOLD/RAPID: スプライト非表示にし追跡継続 */

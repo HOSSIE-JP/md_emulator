@@ -6,7 +6,7 @@
  * @brief ノートデータ構造と譜面管理モジュール
  *
  * リズムゲームの中核ロジック:
- * - ノートは右から左へスクロールし、判定ラインに向かう
+ * - ノートは上から下へスクロールし、判定ラインに向かう
  * - MAX_VISIBLE_NOTES 個の ActiveNote プールでハードウェアスプライトを管理
  * - TAP: 単押し, HOLD: 長押し, RAPID: 連打
  */
@@ -23,7 +23,7 @@
  * ============================================================ */
 typedef struct {
 	u16 frame;	  /**< 判定フレーム (60fps基準) */
-	u8 type;	  /**< ノートタイプ/レーン (NOTE_UP..NOTE_C) */
+	u8 type;	  /**< ノートタイプ/レーン (NOTE_LEFT..NOTE_C) */
 	u8 pattern;	  /**< パターン (PATTERN_TAP/HOLD/RAPID) */
 	u16 duration; /**< 持続フレーム数 (HOLD/RAPIDのみ、TAPは0) */
 } NoteData;
@@ -50,8 +50,8 @@ typedef struct {
  * スプライトの生成・移動・判定・解放を管理する。
  * ============================================================ */
 typedef struct {
-	s16 x;			  /**< 現在X座標 (px) */
-	u8 lane;		  /**< レーン番号 (NOTE_UP..NOTE_C) */
+	s16 y;			  /**< 現在Y座標 (px) */
+	u8 lane;		  /**< レーン番号 (NOTE_LEFT..NOTE_C) */
 	u8 pattern;		  /**< パターン種別 */
 	u16 target_frame; /**< 判定ライン到達フレーム */
 	u16 duration;	  /**< HOLD/RAPID の持続フレーム */
@@ -99,7 +99,7 @@ void NOTE_draw(void);
 /**
  * 指定レーンのノートを判定する。
  * 判定ウィンドウ内で最も近い未判定ノートを探す。
- * @param lane レーン番号 (NOTE_UP..NOTE_C)
+ * @param lane レーン番号 (NOTE_LEFT..NOTE_C)
  * @param current_frame 現在のゲームフレーム
  * @return 判定結果 (JUDGE_PERFECT..JUDGE_MISS)、判定対象なしは -1
  */

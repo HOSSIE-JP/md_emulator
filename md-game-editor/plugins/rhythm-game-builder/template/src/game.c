@@ -445,8 +445,8 @@ void GAME_handleInput(u16 joy, u16 changed, u16 state) {
 	/* 新たに押されたボタンを検出（changed & state = 今フレームで押された） */
 	u16 newly_pressed = changed & state;
 
-	/* ノート入力に使用するボタン一覧（7ボタン: 上下左右ABC） */
-	static const u16 note_buttons[] = {BUTTON_UP, BUTTON_DOWN, BUTTON_LEFT, BUTTON_RIGHT, BUTTON_A, BUTTON_B, BUTTON_C};
+	/* ノート入力に使用するボタン一覧（7ボタン: 左上／下右ABC） */
+	static const u16 note_buttons[] = {BUTTON_LEFT, BUTTON_UP, BUTTON_DOWN, BUTTON_RIGHT, BUTTON_A, BUTTON_B, BUTTON_C};
 
 	/* 各ノートボタンを順にチェック */
 	for (u8 i = 0; i < 7; i++) {

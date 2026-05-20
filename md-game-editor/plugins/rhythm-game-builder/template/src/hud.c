@@ -34,8 +34,8 @@ static u16 prev_combo;
 /* スプライトベースのHUD要素 */
 static Sprite* spr_judge; /* 判定テキストスプライト */
 
-/* ゲージセグメントスプライト (72px = 9セグメント) */
-#define HUD_GAUGE_SEGMENTS 9
+/* ゲージセグメントスプライト (48px = 6セグメント、右側パネル内) */
+#define HUD_GAUGE_SEGMENTS 6
 static Sprite* spr_gauge_seg[HUD_GAUGE_SEGMENTS]; /* ゲージ塗りつぶしセグメント */
 static u16 prev_gauge_segs;						  /* 前回表示したセグメント数 */
 
@@ -51,18 +51,20 @@ static void setSpriteSafeAnimFrame(Sprite* spr, const SpriteDefinition* def, u16
 	SPR_setAnimAndFrame(spr, anim, frame);
 }
 
-/* ゲージスプライト表示位置 (ピクセル座標) */
-#define GAUGE_X 8
-#define GAUGE_Y 72
+/* ゲージ・スコアは右側情報パネルへ集約する */
+#define INFO_PANEL_X 176
+#define INFO_PANEL_TILE_X 22
+#define GAUGE_X INFO_PANEL_X
+#define GAUGE_Y 84
 #define GAUGE_SEG_W 8 /* 各セグメントの幅 (1タイル=8px) */
-#define SCORE_NUM_X 4
-#define SCORE_NUM_Y 2
-#define COMBO_NUM_X 7
-#define COMBO_NUM_Y 4
+#define SCORE_NUM_X INFO_PANEL_TILE_X
+#define SCORE_NUM_Y 4
+#define COMBO_NUM_X INFO_PANEL_TILE_X
+#define COMBO_NUM_Y 8
 
 /* 判定テキストスプライト表示位置 */
-#define JUDGE_SPR_X (JUDGE_LINE_X - 32)
-#define JUDGE_SPR_Y (LANE_Y_START - 20)
+#define JUDGE_SPR_X (LANE_X_START + 32)
+#define JUDGE_SPR_Y (JUDGE_LINE_Y - 30)
 
 static void setJudgeSpritePattern(u8 judge) {
 	if (spr_judge == NULL) return;
