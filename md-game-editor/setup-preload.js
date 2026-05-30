@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('electronSetup', {
   listVersions: (kind) => ipcRenderer.invoke('setup:listVersions', { kind }),
   downloadTool: (payload) => ipcRenderer.invoke('setup:downloadTool', payload || {}),
   setToolPath: (kind, value) => ipcRenderer.invoke('setup:setToolPath', { kind, value }),
+  selectPceCdImage: () => ipcRenderer.invoke('setup:selectPceCdImage'),
+  extractPceCdIpl: (payload) => ipcRenderer.invoke('setup:extractPceCdIpl', payload || {}),
   listSgdkVersions: () => ipcRenderer.invoke('setup:listSgdkVersions'),
   downloadSgdk: (tag) => ipcRenderer.invoke('setup:downloadSgdk', tag),
   setSgdkPath: (p) => ipcRenderer.invoke('setup:setSgdkPath', p),

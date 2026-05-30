@@ -39,3 +39,25 @@ test('PCE setup manager detects llvm-mos PCE-CD companion tools and user-provide
   assert.equal(status.pceCdIpl.path, ipl);
   assert.equal(status.pceCdSystemCard.path, syscard);
 });
+
+test('PCE setup manager extracts user-owned IPL into portable tools directory', () => {
+  const userData = makeTempUserData();
+  const source = path.join(userData, 'owned-disc.iso');
+  const payload = Buffer.alloc(2048, 0x5a);
+  fs.writeFileSync(source, payload);
+
+  const setupManager = loadPceSetupManager(userData);
+  const rejected = setupManager.extractPceCdIpl({ sourcePath: source });
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.error, /確認/);
+
+  const result = setupManager.extractPceCdIpl({ sourcePath: source, confirmOwnedSource: true });
+  const status = setupManager.getStatus();
+
+  assert.equal(result.ok, true);
+  assert.equal(path.dirname(result.path), setupManager.getPceCdIplExtractDir());
+  assert.equal(fs.readFileSync(result.path).length, 2048);
+  assert.equal(status.pceCdIpl.path, result.path);
+  assert.equal(result.metadata.sourceFileName, 'owned-disc.iso');
+  assert.match(result.metadata.sha256, /^[0-9a-f]{64}$/);
+});

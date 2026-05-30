@@ -74,6 +74,18 @@ test('setup page exposes optional Nuked-OPN2 user download flow', () => {
   assert.match(html, /audioEngines\.nukedOpn2Wasm/);
 });
 
+test('setup page exposes PCE-CD IPL extraction flow', () => {
+  const html = readRendererFile('setup.html');
+
+  assert.match(html, /id="pceCdImagePath"/);
+  assert.match(html, /id="btnPickPceCdImage"/);
+  assert.match(html, /id="btnExtractPceCdIpl"/);
+  assert.match(html, /id="pceCdOwnSourceConfirm"/);
+  assert.match(html, /ISO\/CUE\/BIN/);
+  assert.match(html, /selectPceCdImage\(\)/);
+  assert.match(html, /extractPceCdIpl\(\{ sourcePath, confirmOwnedSource \}\)/);
+});
+
 test('plugin role accordion starts collapsed by default', () => {
   const html = readRendererFile('index.html');
   const renderer = readRendererFile('renderer.js');

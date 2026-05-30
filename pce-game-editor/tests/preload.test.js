@@ -146,6 +146,8 @@ test('setup preload exposes setup IPC helpers and progress listener', async () =
   await api.listVersions('llvmMos');
   await api.downloadTool({ kind: 'llvmMos' });
   await api.setToolPath('llvmMos', '/tools/mos-pce-clang');
+  await api.selectPceCdImage();
+  await api.extractPceCdIpl({ sourcePath: '/disc/game.cue', confirmOwnedSource: true });
   await api.downloadSgdk('v2.11');
   await api.downloadEmsdk();
   await api.downloadNukedOpn2();
@@ -159,6 +161,8 @@ test('setup preload exposes setup IPC helpers and progress listener', async () =
     { channel: 'setup:listVersions', args: [{ kind: 'llvmMos' }] },
     { channel: 'setup:downloadTool', args: [{ kind: 'llvmMos' }] },
     { channel: 'setup:setToolPath', args: [{ kind: 'llvmMos', value: '/tools/mos-pce-clang' }] },
+    { channel: 'setup:selectPceCdImage', args: [] },
+    { channel: 'setup:extractPceCdIpl', args: [{ sourcePath: '/disc/game.cue', confirmOwnedSource: true }] },
     { channel: 'setup:downloadSgdk', args: ['v2.11'] },
     { channel: 'setup:downloadEmsdk', args: [] },
     { channel: 'setup:downloadNukedOpn2', args: [] },

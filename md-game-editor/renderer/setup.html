@@ -62,6 +62,19 @@
         <input type="text" class="input-path" id="pceCdIplPath" placeholder="PCE-CD IPL (ipl.bin) のパス..." />
         <button class="btn" id="btnSetPceCdIpl">IPL適用</button>
       </div>
+      <div class="platform-note">
+        IPL は System Card BIOS ではありません。所有する PCE-CD / CD-ROM2 の ISO/CUE/BIN から先頭データセクタを抽出し、<code>data/tools/pce-cd/ipl/</code> に保存します。
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <input type="text" class="input-path" id="pceCdImagePath" placeholder="所有する PCE-CD ISO/CUE/BIN のパス..." />
+        <button class="btn" id="btnPickPceCdImage">画像選択</button>
+        <button class="btn primary" id="btnExtractPceCdIpl">IPL抽出</button>
+      </div>
+      <label class="desc" style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+        <input type="checkbox" id="pceCdOwnSourceConfirm" />
+        所有する CD-ROM / ディスクイメージから、個人利用目的で IPL を抽出します。
+      </label>
+      <div class="path-text" id="pceCdExtractResult">IPL 抽出結果: -</div>
       <div class="row" style="margin-top:8px;">
         <input type="text" class="input-path" id="pceCdSystemCardPath" placeholder="System Card ROM のパス (任意)..." />
         <button class="btn" id="btnSetPceCdSystemCard">System Card適用</button>
@@ -213,6 +226,13 @@
       return `${n} B`;
     }
 
+    function setPceCdExtractResult(text, isError = false) {
+      const el = document.getElementById('pceCdExtractResult');
+      if (!el) return;
+      el.textContent = text;
+      el.style.color = isError ? '#ff7b72' : '#9ba7b8';
+    }
+
     async function initActiveCore() {
       try {
         const result = await window.electronSetup.getActiveCore?.();
@@ -323,6 +343,50 @@
         await loadPceStatus();
       } catch (err) {
         document.getElementById('statusMsg').textContent = `エラー: ${err.message || err}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function pickPceCdImage() {
+      const result = await window.electronSetup.selectPceCdImage();
+      if (!result?.ok) {
+        setPceCdExtractResult(`IPL 抽出結果: ${result?.error || '画像選択に失敗しました'}`, true);
+        return;
+      }
+      if (result.canceled) return;
+      document.getElementById('pceCdImagePath').value = result.sourcePath || '';
+      setPceCdExtractResult(`IPL 抽出対象: ${result.fileName || result.sourcePath || '-'}`);
+    }
+
+    async function extractPceCdIpl() {
+      const btn = document.getElementById('btnExtractPceCdIpl');
+      const sourcePath = document.getElementById('pceCdImagePath').value.trim();
+      const confirmOwnedSource = document.getElementById('pceCdOwnSourceConfirm').checked;
+      if (!sourcePath) {
+        setPceCdExtractResult('IPL 抽出結果: ISO/CUE/BIN ファイルを選択してください', true);
+        return;
+      }
+      if (!confirmOwnedSource) {
+        setPceCdExtractResult('IPL 抽出結果: 所有ソースからの抽出確認が必要です', true);
+        return;
+      }
+      btn.disabled = true;
+      setPceCdExtractResult('IPL 抽出中...');
+      try {
+        const result = await window.electronSetup.extractPceCdIpl({ sourcePath, confirmOwnedSource });
+        if (!result?.ok) {
+          setPceCdExtractResult(`IPL 抽出結果: ${result?.error || 'unknown error'}`, true);
+          return;
+        }
+        const meta = result.metadata || {};
+        const hash = meta.sha256 ? `${meta.sha256.slice(0, 12)}...` : '-';
+        document.getElementById('pceCdIplPath').value = result.path || '';
+        setPceCdExtractResult(`IPL 抽出完了: ${result.path || '-'} / ${meta.trackMode || '-'} / sha256 ${hash}`);
+        await loadPceStatus();
+        document.getElementById('statusMsg').textContent = 'PCE-CD IPL を抽出して設定しました';
+      } catch (err) {
+        setPceCdExtractResult(`IPL 抽出結果: ${err.message || err}`, true);
       } finally {
         btn.disabled = false;
       }
@@ -764,6 +828,8 @@
       });
     });
     document.getElementById('btnDownloadPceTool').addEventListener('click', downloadPceTool);
+    document.getElementById('btnPickPceCdImage').addEventListener('click', pickPceCdImage);
+    document.getElementById('btnExtractPceCdIpl').addEventListener('click', extractPceCdIpl);
     document.getElementById('btnSetPceCdIpl').addEventListener('click', async () => {
       const p = document.getElementById('pceCdIplPath').value.trim();
       await window.electronSetup.setToolPath('pceCdIpl', p);

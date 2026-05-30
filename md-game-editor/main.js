@@ -2116,6 +2116,39 @@ ipcMain.handle('setup:setToolPath', async (_event, { kind, value } = {}) => {
   return { ok: false, error: 'generic setup path is available for PC Engine projects only' };
 });
 
+ipcMain.handle('setup:selectPceCdImage', async () => {
+  if (buildSystem.getActiveCoreId() !== 'pc-engine') {
+    return { ok: false, error: 'PCE-CD image selection is available for PC Engine projects only' };
+  }
+  const owner = (setupWindow && !setupWindow.isDestroyed()) ? setupWindow : mainWindow;
+  const result = await dialog.showOpenDialog(owner, {
+    title: 'PCE-CD ISO/CUE/BIN を選択',
+    properties: ['openFile'],
+    filters: [
+      { name: 'PCE-CD Images', extensions: ['iso', 'cue', 'bin', 'img'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return { ok: true, canceled: true, filePaths: [] };
+  }
+  const sourcePath = result.filePaths[0];
+  return {
+    ok: true,
+    canceled: false,
+    sourcePath,
+    filePaths: result.filePaths,
+    fileName: path.basename(sourcePath),
+  };
+});
+
+ipcMain.handle('setup:extractPceCdIpl', async (_event, payload = {}) => {
+  if (buildSystem.getActiveCoreId() === 'pc-engine') {
+    return buildSystem.getPceSetupManager().extractPceCdIpl(payload || {});
+  }
+  return { ok: false, error: 'PCE-CD IPL extraction is available for PC Engine projects only' };
+});
+
 ipcMain.handle('setup:listSgdkVersions', async () => {
   return setupManager.listSgdkReleases(30);
 });

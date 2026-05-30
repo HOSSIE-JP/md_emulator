@@ -146,6 +146,8 @@ test('setup preload exposes setup IPC helpers and progress listener', async () =
   await api.listVersions('cc65');
   await api.downloadTool({ kind: 'cc65' });
   await api.setToolPath('cc65', '/tools/cl65');
+  await api.selectPceCdImage();
+  await api.extractPceCdIpl({ sourcePath: '/disc/game.cue', confirmOwnedSource: true });
   await api.downloadSgdk('v2.11');
   await api.downloadEmsdk();
   await api.downloadNukedOpn2();
@@ -159,6 +161,8 @@ test('setup preload exposes setup IPC helpers and progress listener', async () =
     { channel: 'setup:listVersions', args: [{ kind: 'cc65' }] },
     { channel: 'setup:downloadTool', args: [{ kind: 'cc65' }] },
     { channel: 'setup:setToolPath', args: [{ kind: 'cc65', value: '/tools/cl65' }] },
+    { channel: 'setup:selectPceCdImage', args: [] },
+    { channel: 'setup:extractPceCdIpl', args: [{ sourcePath: '/disc/game.cue', confirmOwnedSource: true }] },
     { channel: 'setup:downloadSgdk', args: ['v2.11'] },
     { channel: 'setup:downloadEmsdk', args: [] },
     { channel: 'setup:downloadNukedOpn2', args: [] },

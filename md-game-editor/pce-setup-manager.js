@@ -5,6 +5,7 @@ const path = require('path');
 const https = require('https');
 const { spawnSync } = require('child_process');
 const { app } = require('electron');
+const iplExtractor = require('./pce-ipl-extractor');
 
 const REQUEST_HEADERS = Object.freeze({
   'User-Agent': 'pce-game-editor-setup',
@@ -366,6 +367,33 @@ function getPceCdIplPath() {
 
 function getPceCdSystemCardPath() {
   return getOptionalFileSetting('pceCdSystemCardPath');
+}
+
+function getPceCdIplExtractDir() {
+  return path.join(getToolsDir(), 'pce-cd', 'ipl');
+}
+
+function extractPceCdIpl(payload = {}) {
+  const sourcePath = String(payload.sourcePath || payload.inputPath || '').trim();
+  if (!payload.confirmOwnedSource) {
+    return { ok: false, error: '所有する PCE-CD イメージから抽出することを確認してください。' };
+  }
+  if (!sourcePath) {
+    return { ok: false, error: 'ISO/CUE/BIN ファイルを選択してください。' };
+  }
+  try {
+    const result = iplExtractor.extractIplToDirectory(sourcePath, getPceCdIplExtractDir());
+    saveSettings({ pceCdIplPath: result.outputPath });
+    return {
+      ok: true,
+      path: result.outputPath,
+      metadataPath: result.metadataPath,
+      metadata: result.metadata,
+      status: getStatus(),
+    };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
 }
 
 function setToolPath(kind, value) {
@@ -1103,6 +1131,7 @@ module.exports = {
   downloadTool,
   ensureEmulatorPlaceholder,
   executableName,
+  extractPceCdIpl,
   extractArchive,
   findEmulatorJsRuntimeDir,
   findExecutable,
@@ -1116,6 +1145,7 @@ module.exports = {
   getLlvmMosPceCdPath,
   getLlvmMosPath,
   getPceCdIplPath,
+  getPceCdIplExtractDir,
   getPceCdSystemCardPath,
   getPceMkcdPath,
   getSettingsPath,
