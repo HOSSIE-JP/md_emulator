@@ -38,14 +38,77 @@
       }
       meta.textContent = ctx.romPath;
       setStatus('Ready');
+      const installRuntimeGlobalBridge = () => {
+        if (window.__pceEjsRuntimeBridgeInstalled) return;
+        window.__pceEjsRuntimeBridgeInstalled = true;
+        const NativeBlob = window.Blob;
+        const nativeAppendChild = Element.prototype.appendChild;
+        const nativeNodeAppendChild = Node.prototype.appendChild;
+        const decoder = new TextDecoder();
+        const looksLikeEjsCore = (part) => {
+          try {
+            if (typeof part === 'string') return part.includes('EJS_Runtime');
+            if (part instanceof Uint8Array) return decoder.decode(part.slice(0, 4096)).includes('EJS_Runtime');
+            if (part instanceof ArrayBuffer) return decoder.decode(part.slice(0, 4096)).includes('EJS_Runtime');
+            if (ArrayBuffer.isView(part)) return decoder.decode(new Uint8Array(part.buffer, part.byteOffset, Math.min(part.byteLength, 4096))).includes('EJS_Runtime');
+          } catch (_) {}
+          return false;
+        };
+        const bridgeRuntimeSource = (source) => source.includes('EJS_Runtime') && !source.includes('__pceEjsRuntimeGlobalBridge')
+          ? `${source}\n;try{globalThis.__pceEjsRuntimeGlobalBridge=true;globalThis.EJS_Runtime=EJS_Runtime;}catch(_e){}\n`
+          : source;
+        function PatchedBlob(parts = [], options = {}) {
+          const type = String(options?.type || '').toLowerCase();
+          const shouldBridge = type.includes('javascript') && Array.isArray(parts) && parts.some(looksLikeEjsCore);
+          const bridgedParts = shouldBridge
+            ? parts.concat('\n;try{globalThis.__pceEjsRuntimeGlobalBridge=true;globalThis.EJS_Runtime=EJS_Runtime;}catch(_e){}\n')
+            : parts;
+          return new NativeBlob(bridgedParts, options);
+        }
+        PatchedBlob.prototype = NativeBlob.prototype;
+        Object.setPrototypeOf(PatchedBlob, NativeBlob);
+        Object.defineProperty(window, 'Blob', {
+          configurable: true,
+          writable: true,
+          value: PatchedBlob,
+        });
+        const appendChildWithEjsRuntimeBridge = function appendChildWithEjsRuntimeBridge(child) {
+          if (child && child.tagName === 'SCRIPT' && typeof child.src === 'string' && child.src.startsWith('blob:') && !child.dataset.pceEjsRuntimeBridge) {
+            const script = child;
+            fetch(script.src)
+              .then((response) => response.text())
+              .then((source) => {
+                const patchedSource = bridgeRuntimeSource(source);
+                if (patchedSource !== source) {
+                  script.src = URL.createObjectURL(new NativeBlob([patchedSource], { type: 'application/javascript' }));
+                }
+                script.dataset.pceEjsRuntimeBridge = '1';
+                nativeAppendChild.call(this, script);
+              })
+              .catch(() => nativeAppendChild.call(this, script));
+            return child;
+          }
+          return nativeAppendChild.call(this, child);
+        };
+        Element.prototype.appendChild = appendChildWithEjsRuntimeBridge;
+        Node.prototype.appendChild = function nodeAppendChildWithEjsRuntimeBridge(child) {
+          if (child && child.tagName === 'SCRIPT' && typeof child.src === 'string' && child.src.startsWith('blob:') && !child.dataset.pceEjsRuntimeBridge) {
+            return appendChildWithEjsRuntimeBridge.call(this, child);
+          }
+          return nativeNodeAppendChild.call(this, child);
+        };
+      };
+      installRuntimeGlobalBridge();
       window.EJS_player = '#game';
       window.EJS_core = 'pce';
       window.EJS_gameName = 'pce_sample.pce';
       window.EJS_gameID = ctx.gameId || ctx.romPath;
       window.EJS_color = '#23a7ff';
       window.EJS_backgroundColor = '#000000';
+      window.EJS_startOnLoaded = true;
       window.EJS_disableDatabases = true;
       window.EJS_disableLocalStorage = true;
+      window.EJS_cacheConfig = { enabled: false, cacheMaxSizeMB: 1, cacheMaxAgeMins: 1 };
       window.EJS_ready = () => setStatus('Emulator ready');
       window.EJS_onGameStart = () => setStatus('Running');
       const baseUrl = ctx.emulatorJsUrl || ctx.emulatorJsDir;

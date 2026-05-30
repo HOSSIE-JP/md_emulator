@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const net = require('net');
-const { pathToFileURL } = require('url');
+const http = require('http');
 const { shell } = require('electron');
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const { loadAppConfig, applyPortableMode } = require('../game-editor-common');
@@ -57,6 +57,9 @@ let logWindow = null;
 let currentTestPlayContext = null;
 let apiServerProcess = null;
 let apiServerPort = null;
+let pceTestPlayStaticServer = null;
+let pceTestPlayStaticPort = null;
+let pceTestPlayStaticRoots = null;
 let editorControlService = null;
 let editorControlServer = null;
 let latestLogSnapshot = { entries: [] };
@@ -681,7 +684,113 @@ function resolvePceEmulatorJsRuntime(emulatorJsDir) {
   return { rootDir: root, dataDir: nestedDataDir, loaderPath: nestedLoader, coreAsset: null };
 }
 
-function makePceTestPlayContext(options = {}) {
+function contentTypeForFile(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.js' || ext === '.mjs') return 'application/javascript; charset=utf-8';
+  if (ext === '.css') return 'text/css; charset=utf-8';
+  if (ext === '.json') return 'application/json; charset=utf-8';
+  if (ext === '.wasm') return 'application/wasm';
+  if (ext === '.html') return 'text/html; charset=utf-8';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.pce' || ext === '.bin' || ext === '.data') return 'application/octet-stream';
+  return 'application/octet-stream';
+}
+
+function sendStaticResponse(res, statusCode, body, headers = {}) {
+  res.writeHead(statusCode, {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,HEAD,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type,Range',
+    'Cross-Origin-Resource-Policy': 'cross-origin',
+    ...headers,
+  });
+  if (body != null) res.end(body);
+  else res.end();
+}
+
+function resolveStaticPath(rootDir, requestPath) {
+  const root = fs.realpathSync(rootDir);
+  const normalizedRequest = decodeURIComponent(String(requestPath || '')).replace(/^\/+/, '');
+  const target = path.resolve(root, normalizedRequest);
+  const rel = path.relative(root, target);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) return null;
+  const realTarget = fs.realpathSync(target);
+  const realRel = path.relative(root, realTarget);
+  if (realRel.startsWith('..') || path.isAbsolute(realRel)) return null;
+  return realTarget;
+}
+
+function stopPceTestPlayStaticServer() {
+  if (!pceTestPlayStaticServer) return;
+  const server = pceTestPlayStaticServer;
+  pceTestPlayStaticServer = null;
+  pceTestPlayStaticPort = null;
+  pceTestPlayStaticRoots = null;
+  try { server.close(); } catch (_) {}
+}
+
+async function startPceTestPlayStaticServer({ romPath, runtime }) {
+  const roots = {
+    romPath: path.resolve(romPath),
+    emulatorRoot: path.resolve(runtime.rootDir),
+    dataRoot: path.resolve(runtime.dataDir),
+  };
+  const sameRoots = pceTestPlayStaticRoots
+    && pceTestPlayStaticRoots.romPath === roots.romPath
+    && pceTestPlayStaticRoots.emulatorRoot === roots.emulatorRoot
+    && pceTestPlayStaticRoots.dataRoot === roots.dataRoot;
+  if (pceTestPlayStaticServer && pceTestPlayStaticPort && sameRoots) {
+    return { port: pceTestPlayStaticPort };
+  }
+  stopPceTestPlayStaticServer();
+  const port = await findAvailablePort(18730, 50);
+  if (port == null) throw new Error('PCE Test Play local server port is unavailable');
+  const server = http.createServer((req, res) => {
+    try {
+      if (req.method === 'OPTIONS') {
+        sendStaticResponse(res, 204, null);
+        return;
+      }
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        sendStaticResponse(res, 405, 'method not allowed', { 'Content-Type': 'text/plain; charset=utf-8' });
+        return;
+      }
+      const parsed = new URL(req.url || '/', `http://127.0.0.1:${port}`);
+      let filePath = null;
+      if (parsed.pathname.startsWith('/rom/')) {
+        filePath = roots.romPath;
+      } else if (parsed.pathname.startsWith('/emulatorjs-data/')) {
+        filePath = resolveStaticPath(roots.dataRoot, parsed.pathname.slice('/emulatorjs-data/'.length));
+      } else if (parsed.pathname.startsWith('/emulatorjs/')) {
+        filePath = resolveStaticPath(roots.emulatorRoot, parsed.pathname.slice('/emulatorjs/'.length));
+      }
+      if (!filePath) {
+        sendStaticResponse(res, 404, 'not found', { 'Content-Type': 'text/plain; charset=utf-8' });
+        return;
+      }
+      const stat = fs.statSync(filePath);
+      sendStaticResponse(res, 200, req.method === 'HEAD' ? null : fs.readFileSync(filePath), {
+        'Content-Type': contentTypeForFile(filePath),
+        'Content-Length': String(stat.size),
+        'Cache-Control': 'no-store',
+      });
+    } catch (err) {
+      sendStaticResponse(res, 500, String(err?.message || err), { 'Content-Type': 'text/plain; charset=utf-8' });
+    }
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
+  });
+  pceTestPlayStaticServer = server;
+  pceTestPlayStaticPort = port;
+  pceTestPlayStaticRoots = roots;
+  return { port };
+}
+
+async function makePceTestPlayContext(options = {}) {
   const romPath = options.romPath || null;
   if (!romPath || !fs.existsSync(romPath)) {
     return {
@@ -717,20 +826,22 @@ function makePceTestPlayContext(options = {}) {
     };
   }
 
+  const staticServer = await startPceTestPlayStaticServer({ romPath, runtime });
+  const staticBaseUrl = `http://127.0.0.1:${staticServer.port}`;
   const romStat = fs.statSync(romPath);
   return {
     ok: true,
     context: {
       romPath,
-      romUrl: pathToFileURL(romPath).href,
+      romUrl: `${staticBaseUrl}/rom/${encodeURIComponent(path.basename(romPath))}?v=${encodeURIComponent(`${romStat.mtimeMs}-${romStat.size}`)}`,
       romMtimeMs: romStat.mtimeMs,
       romSize: romStat.size,
       gameId: `${path.basename(romPath)}-${romStat.mtimeMs}-${romStat.size}`,
       emulatorJsDir: runtime.rootDir,
-      emulatorJsUrl: pathToFileURL(runtime.rootDir).href.replace(/\/?$/, '/'),
+      emulatorJsUrl: `${staticBaseUrl}/emulatorjs/`,
       emulatorJsDataDir: runtime.dataDir,
-      emulatorJsDataUrl: pathToFileURL(runtime.dataDir).href.replace(/\/?$/, '/'),
-      emulatorJsLoaderUrl: pathToFileURL(runtime.loaderPath).href,
+      emulatorJsDataUrl: `${staticBaseUrl}/emulatorjs-data/`,
+      emulatorJsLoaderUrl: `${staticBaseUrl}/emulatorjs-data/loader.js`,
       core: 'pce',
       coreAsset: runtime.coreAsset,
     },
@@ -740,7 +851,7 @@ function makePceTestPlayContext(options = {}) {
 async function openWasmTestPlayWindow(options = {}) {
   const pluginId = String(options.pluginId || 'standard-emulator');
   if (pluginId === 'pce-standard-emulator') {
-    const contextResult = makePceTestPlayContext(options);
+    const contextResult = await makePceTestPlayContext(options);
     if (!contextResult.ok) return { opened: false, ...contextResult };
     currentTestPlayContext = contextResult.context;
   }
@@ -774,7 +885,11 @@ async function openWasmTestPlayWindow(options = {}) {
   } else {
     testPlayWindow.loadFile(htmlPath, { search: romQuery });
   }
-  testPlayWindow.on('closed', () => { testPlayWindow = null; currentTestPlayContext = null; });
+  testPlayWindow.on('closed', () => {
+    testPlayWindow = null;
+    currentTestPlayContext = null;
+    if (pluginId === 'pce-standard-emulator') stopPceTestPlayStaticServer();
+  });
   return { opened: true, reused: false };
 }
 
