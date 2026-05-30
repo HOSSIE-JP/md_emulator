@@ -5,8 +5,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { loadWithMockedElectron } = require('./helpers/mock-electron');
+const { loadAppConfig } = require('../../game-editor-common');
 
 function makeTempUserData() {
+  loadAppConfig({
+    appRoot: path.join(__dirname, '..'),
+    defaultCoreId: 'mega-drive',
+    allowedCoreIds: ['mega-drive', 'pc-engine'],
+    pluginsRoot: path.join(__dirname, '..', 'plugins'),
+  });
   const root = path.join(__dirname, '..', 'node_modules', '.plugin-test-tmp');
   fs.mkdirSync(root, { recursive: true });
   return fs.mkdtempSync(path.join(root, 'md-editor-plugin-test-'));
@@ -136,20 +143,6 @@ test('listPlugins marks hasGenerator only when generateSource is exported or dec
   assert.equal(plugins.get('hook-only-builder').hasGenerator, false);
   assert.equal(plugins.get('source-builder').hasGenerator, true);
   assert.equal(plugins.get('manifest-builder').hasGenerator, true);
-  assert.equal(plugins.get('pce-sample-builder').hasGenerator, false);
-});
-
-test('built-in PCE asset editor suite is scoped to the PC Engine core', () => {
-  const userData = makeTempUserData();
-  const pluginManager = loadWithMockedElectron(path.join(__dirname, '..', 'plugin-manager.js'), { userData });
-  const pcePlugins = new Map(pluginManager.listPlugins({ coreId: 'pc-engine' }).map((plugin) => [plugin.id, plugin]));
-
-  ['pce-asset-manager', 'pce-sprite-editor', 'pce-music-editor', 'pce-palette-editor', 'pce-image-converter', 'pce-audio-converter'].forEach((id) => {
-    assert.equal(pcePlugins.has(id), true, `${id} should be available for PC Engine`);
-    assert.deepEqual(pcePlugins.get(id).supportedCores, ['pc-engine']);
-  });
-  assert.equal(pcePlugins.get('pce-asset-manager').renderer.capabilities.includes('audio-import-handler'), true);
-  assert.equal(pcePlugins.get('pce-music-editor').tab.page, 'pce-music-editor');
 });
 
 test('setEnabledWithDependencies enables dependencies and reports missing ones', () => {
@@ -377,4 +370,17 @@ test('renderer hook invocation rejects disabled plugins', async () => {
   const result = await pluginManager.invokeRendererHook('alpha', 'convertAudio', {}, {});
   assert.equal(result.ok, false);
   assert.match(result.error, /not allowed/);
+});
+
+
+test('MD built-in plugins do not include PCE-only plugin directories', () => {
+  const userData = makeTempUserData();
+  const pluginManager = loadWithMockedElectron(path.join(__dirname, '..', 'plugin-manager.js'), { userData });
+  const plugins = new Map(pluginManager.listPlugins({ coreId: 'mega-drive', includeIncompatible: true }).map((plugin) => [plugin.id, plugin]));
+
+  assert.equal(plugins.has('mega-drive-core'), true);
+  assert.equal(plugins.has('pc-engine-core'), false);
+  assert.equal(plugins.has('pce-asset-manager'), false);
+  assert.equal(plugins.has('code-editor'), true);
+  assert.deepEqual(plugins.get('code-editor').supportedCores, ['*']);
 });

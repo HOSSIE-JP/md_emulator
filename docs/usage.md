@@ -386,3 +386,11 @@ python3 -m http.server 8000 --directory frontend
 ```
 
 **詳細な手順・Electron 対応・TypeScript 利用方法は [docs/embedding.md](embedding.md) を参照してください。**
+
+
+## MD/PCE Game Editor split
+
+- MD Game Editor and PCE Game Editor are now separate Electron apps: use `npm --prefix md-game-editor start` for Mega Drive work and `npm --prefix pce-game-editor start` for PC Engine work.
+- Each app has its own `userData`, `projects`, `tools`, plugins, templates, package metadata, and packaging output name.
+- PCE Game Editor performs a one-time non-destructive copy of existing PC Engine projects from the old MD editor project locations. Existing folders in the PCE target are never overwritten. PC Engine builds are standardized on llvm-mos-sdk; cc65 is not exposed in the PCE setup flow.
+- Built-in PCE plugins live under `pce-game-editor/plugins`; `md-game-editor/plugins` keeps Mega Drive plugins plus shared `supportedCores: ["*"]` plugins such as `code-editor`.

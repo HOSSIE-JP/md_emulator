@@ -302,3 +302,11 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 ---
 
 *Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins / Dungeon generated wall patterns / Dungeon SGDK TILESET/TILEMAP assets / Dungeon template / Editor UX guardrails*
+
+
+## MD/PCE split note
+
+- Mega Drive plugins are developed under `md-game-editor/plugins/<plugin-id>/`.
+- PC Engine plugins are developed under `pce-game-editor/plugins/<plugin-id>/`.
+- Shared plugins must explicitly declare `supportedCores: ["*"]`; v1 shared distribution includes `code-editor`.
+- Core-specific plugins should not be copied between apps unless their manifest support and runtime behavior are intentionally made shared.

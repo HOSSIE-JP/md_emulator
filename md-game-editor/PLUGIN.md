@@ -1326,3 +1326,11 @@ AI Control API の詳細は [AI_CONTROL.md](AI_CONTROL.md) を参照してくだ
 - project state を変更する tool は `dryRun: true` または `confirm: true` が必要
 - MCP stdio sidecar は `scripts/md-game-editor-mcp.js` で、`MD_EDITOR_CONTROL_URL` と `MD_EDITOR_CONTROL_TOKEN` を環境変数から読む
 - stdout には MCP JSON-RPC メッセージだけを出し、診断ログは stderr に出す
+
+
+## MD/PCE split note
+
+- Mega Drive plugins are developed under `md-game-editor/plugins/<plugin-id>/`.
+- PC Engine plugins are developed under `pce-game-editor/plugins/<plugin-id>/`.
+- Shared plugins must explicitly declare `supportedCores: ["*"]`; v1 shared distribution includes `code-editor`.
+- Core-specific plugins should not be copied between apps unless their manifest support and runtime behavior are intentionally made shared.

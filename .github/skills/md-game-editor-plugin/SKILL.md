@@ -392,3 +392,11 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 - 繰り返し UI は各行に同じ label を置かず、ヘッダー行 + テーブル型にする。Animation Rows では `ROW / 有効 / 既定 time / 状態` のような列にする。
 - 再生・停止・先頭・末尾・loop は icon button を使う。周辺文脈で意味が明確な select label は `1 (4 frames)` のように簡潔にする。
 - SPRITE は画像ファイルではなく RESCOMP 定義として preview する。`imageSmoothingEnabled = false`、`time=0` 停止、ROW ごとの有効フレーム数、time 数字 overlay、collision overlay を反映する。
+
+
+## MD/PCE split note
+
+- Mega Drive plugins are developed under `md-game-editor/plugins/<plugin-id>/`.
+- PC Engine plugins are developed under `pce-game-editor/plugins/<plugin-id>/`.
+- Shared plugins must explicitly declare `supportedCores: ["*"]`; v1 shared distribution includes `code-editor`.
+- Core-specific plugins should not be copied between apps unless their manifest support and runtime behavior are intentionally made shared.

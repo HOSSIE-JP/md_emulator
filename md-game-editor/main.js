@@ -5,7 +5,10 @@ const net = require('net');
 const { pathToFileURL } = require('url');
 const { shell } = require('electron');
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
+const { loadAppConfig, applyPortableMode } = require('../game-editor-common');
 const { spawn, spawnSync } = require('child_process');
+const gameEditorAppConfig = loadAppConfig(require('./app.config'));
+if (typeof app.setName === 'function') app.setName(gameEditorAppConfig.productName || gameEditorAppConfig.displayName || app.getName());
 const electronPackageJson = require('./package.json');
 const iconv = require('iconv-lite');
 
@@ -25,25 +28,8 @@ const appBuildMeta = readAppBuildMeta();
 
 // ── Portable mode detection ────────────────────────────────────────────────
 // Must run before any app.getPath() call (including those inside require'd modules).
-// Packaged: place a file named "portable" next to the .exe / .app to activate.
-// Dev:      place a file named ".portable" in the md-game-editor/ source directory.
-(function applyPortableMode() {
-  let markerExists = false;
-  let dataDir;
-
-  if (app.isPackaged) {
-    const exeDir = path.dirname(app.getPath('exe'));
-    markerExists = fs.existsSync(path.join(exeDir, 'portable'));
-    dataDir = path.join(exeDir, 'data');
-  } else {
-    markerExists = fs.existsSync(path.join(__dirname, '.portable'));
-    dataDir = path.join(__dirname, 'data');
-  }
-
-  if (markerExists) {
-    app.setPath('userData', dataDir);
-    app.setPath('logs', path.join(dataDir, 'logs'));
-  }
+(function applyConfiguredPortableMode() {
+  applyPortableMode(app, __dirname);
 })();
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();

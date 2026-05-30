@@ -11,6 +11,8 @@ function collectTestFiles(dir) {
         return collectTestFiles(fullPath);
       }
       if (entry.isFile() && entry.name.endsWith('.test.js')) {
+        const mdExcludedAfterSplit = new Set(['pce-asset-manager.test.js', 'pce-setup-manager.test.js']);
+        if (mdExcludedAfterSplit.has(entry.name)) return [];
         return [fullPath];
       }
       return [];

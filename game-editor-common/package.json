@@ -1,0 +1,7 @@
+{
+  "name": "game-editor-common",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "description": "Shared configuration and app separation helpers for MD/PCE game editors"
+}

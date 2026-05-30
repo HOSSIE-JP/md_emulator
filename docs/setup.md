@@ -51,3 +51,11 @@ npm run wasm:build
 ## Bundled ROM
 
 `npm run wasm:build` / `npm run wasm:build:release` は、`frontend/roms/` 配下のファイル一覧から `frontend/roms/index.json` を再生成します。WASM プレイヤーでは、画面上のファイル選択またはドラッグ&ドロップでもROMを読み込めます。
+
+
+## MD/PCE Game Editor split
+
+- MD Game Editor and PCE Game Editor are now separate Electron apps: use `npm --prefix md-game-editor start` for Mega Drive work and `npm --prefix pce-game-editor start` for PC Engine work.
+- Each app has its own `userData`, `projects`, `tools`, plugins, templates, package metadata, and packaging output name.
+- PCE Game Editor performs a one-time non-destructive copy of existing PC Engine projects from the old MD editor project locations. Existing folders in the PCE target are never overwritten. PC Engine builds are standardized on llvm-mos-sdk; cc65 is not exposed in the PCE setup flow.
+- Built-in PCE plugins live under `pce-game-editor/plugins`; `md-game-editor/plugins` keeps Mega Drive plugins plus shared `supportedCores: ["*"]` plugins such as `code-editor`.
