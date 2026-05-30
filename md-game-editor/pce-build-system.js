@@ -9,7 +9,7 @@ const setupManager = require('./pce-setup-manager');
 
 const DEFAULT_PROJECT_NAME = 'sample_pce_game';
 const TEMPLATE_PROJECT_PREFIX = 'template_';
-const DEFAULT_TOOLCHAIN = 'cc65';
+const DEFAULT_TOOLCHAIN = 'llvm-mos';
 
 function ensureDirSync(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -59,11 +59,28 @@ function normalizeToolchain(value) {
   return value === 'llvm-mos' ? 'llvm-mos' : 'cc65';
 }
 
+function normalizeTargetMedia(value) {
+  return String(value || '').trim().toLowerCase() === 'cd' ? 'cd' : 'hucard';
+}
+
+function normalizeCdConfig(value = {}) {
+  const raw = value && typeof value === 'object' ? value : {};
+  const isoName = String(raw.isoName || raw.cueName || '').trim();
+  return {
+    iplPath: String(raw.iplPath || '').trim(),
+    systemCardPath: String(raw.systemCardPath || '').trim(),
+    isoName,
+    dataFiles: Array.isArray(raw.dataFiles) ? raw.dataFiles.map((entry) => String(entry || '').trim()).filter(Boolean) : [],
+    cddaTracks: Array.isArray(raw.cddaTracks) ? raw.cddaTracks.map((entry) => String(entry || '').trim()).filter(Boolean) : [],
+  };
+}
+
 function normalizeProjectConfig(config = {}) {
   const romName = String(config.romName || config.title || 'pce_sample').trim() || 'pce_sample';
   const pluginRoles = config.pluginRoles && typeof config.pluginRoles === 'object'
     ? { ...config.pluginRoles }
     : {};
+  const targetMedia = normalizeTargetMedia(config.targetMedia || config.media);
   return {
     coreId: 'pc-engine',
     platform: 'pce',
@@ -73,6 +90,8 @@ function normalizeProjectConfig(config = {}) {
     region: String(config.region || 'JUE').trim() || 'JUE',
     romName,
     toolchain: normalizeToolchain(config.toolchain || DEFAULT_TOOLCHAIN),
+    targetMedia,
+    cd: normalizeCdConfig(config.cd),
     pluginRoles: {
       builder: 'pce-sample-builder',
       testplay: 'pce-standard-emulator',
@@ -106,6 +125,10 @@ function saveProjectConfig(patch = {}) {
   const next = normalizeProjectConfig({
     ...current,
     ...patch,
+    cd: {
+      ...(current.cd || {}),
+      ...(patch.cd || {}),
+    },
     pluginRoles: {
       ...(current.pluginRoles || {}),
       ...(patch.pluginRoles || {}),
@@ -274,6 +297,7 @@ function listProjects() {
         projectName: entry.name,
         title: cfg.title,
         toolchain: cfg.toolchain,
+        targetMedia: cfg.targetMedia,
         current: path.resolve(projectDir) === currentProjectDir,
       };
     });
@@ -299,6 +323,7 @@ function getProjectInfo() {
     title: cfg.title,
     romName: cfg.romName,
     toolchain: cfg.toolchain,
+    targetMedia: cfg.targetMedia,
     projectsRootDir: ensureProjectsRootDir(),
   };
 }
@@ -357,17 +382,122 @@ function collectSourceFiles(projectDir) {
   return sourceFiles.filter((filePath) => fs.existsSync(filePath));
 }
 
+function resolveProjectRelativeFile(projectDir, relativePath) {
+  const raw = String(relativePath || '').trim();
+  if (!raw) return null;
+  const resolved = path.resolve(projectDir, raw);
+  const rel = path.relative(path.resolve(projectDir), resolved);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`CD data file must be under project root: ${raw}`);
+  }
+  return fs.existsSync(resolved) ? resolved : null;
+}
+
+function resolveOptionalExternalFile(value) {
+  const raw = String(value || '').trim();
+  return raw && fs.existsSync(raw) ? path.resolve(raw) : null;
+}
+
+function buildPceMkcdArgs(projectDir, config, commandInfo) {
+  const cdConfig = normalizeCdConfig(config.cd);
+  const args = [];
+  const iplPath = resolveOptionalExternalFile(cdConfig.iplPath) || setupManager.getPceCdIplPath();
+  if (iplPath) {
+    args.push('--ipl', iplPath);
+  }
+  args.push(commandInfo.isoPath);
+  args.push(commandInfo.elfPath);
+  cdConfig.dataFiles
+    .map((entry) => resolveProjectRelativeFile(projectDir, entry))
+    .filter(Boolean)
+    .forEach((filePath) => args.push(filePath));
+  return { args, iplPath };
+}
+
+function cueRelativePath(fromDir, absPath) {
+  return path.relative(fromDir, absPath).replace(/\\/g, '/');
+}
+
+function collectCddaTracks(projectDir, cuePath) {
+  let doc;
+  try {
+    doc = assetManager.readAssetDocument(projectDir);
+  } catch (_) {
+    return [];
+  }
+  const cueDir = path.dirname(cuePath);
+  return doc.assets
+    .filter((asset) => asset.type === 'cdda-track')
+    .map((asset) => {
+      const generated = asset.data?.generated || {};
+      const rel = generated.outputFile || asset.source || '';
+      if (!rel) return null;
+      const absPath = path.resolve(projectDir, rel);
+      return {
+        id: asset.id,
+        track: Math.max(2, Math.min(99, Number(asset.options?.track) || 2)),
+        file: cueRelativePath(cueDir, absPath),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.track - b.track || a.id.localeCompare(b.id, 'ja'));
+}
+
+function writeCueFile(commandInfo) {
+  const lines = [
+    `FILE "${path.basename(commandInfo.isoPath)}" BINARY`,
+    '  TRACK 01 MODE1/2048',
+    '    INDEX 01 00:00:00',
+  ];
+  for (const track of commandInfo.cddaTracks || []) {
+    lines.push(`FILE "${track.file}" WAVE`);
+    lines.push(`  TRACK ${String(track.track).padStart(2, '0')} AUDIO`);
+    lines.push('    INDEX 01 00:00:00');
+  }
+  lines.push('');
+  fs.writeFileSync(commandInfo.cuePath, lines.join('\n'), 'utf-8');
+}
+
 function buildCommandForProject(projectDir, config = {}, toolPath = null) {
   const toolchain = normalizeToolchain(config.toolchain);
+  const targetMedia = normalizeTargetMedia(config.targetMedia);
   const outDir = path.join(projectDir, 'out');
   const romBase = sanitizeRomName(config.romName || config.title);
   ensureDirSync(outDir);
   const sources = collectSourceFiles(projectDir);
+  if (targetMedia === 'cd') {
+    if (toolchain !== 'llvm-mos') {
+      throw new Error('PCE-CD target requires llvm-mos toolchain');
+    }
+    const command = setupManager.getLlvmMosPceCdPath() || toolPath || 'mos-pce-cd-clang';
+    const elfPath = path.join(outDir, `${romBase}.elf`);
+    const isoPath = path.join(outDir, `${romBase}.iso`);
+    const cuePath = path.join(outDir, `${romBase}.cue`);
+    const commandInfo = {
+      toolchain,
+      targetMedia,
+      command,
+      args: ['-Os', '-DPCE_EDITOR_TARGET_CD=1', '-o', elfPath, ...sources],
+      cwd: projectDir,
+      env: buildSpawnEnv(command, toolchain),
+      elfPath,
+      isoPath,
+      cuePath,
+      romPath: cuePath,
+      mkcdCommand: setupManager.getPceMkcdPath() || 'pce-mkcd',
+    };
+    const mkcd = buildPceMkcdArgs(projectDir, config, commandInfo);
+    commandInfo.mkcdArgs = mkcd.args;
+    commandInfo.iplPath = mkcd.iplPath;
+    commandInfo.cddaTracks = collectCddaTracks(projectDir, cuePath);
+    return commandInfo;
+  }
   if (toolchain === 'llvm-mos') {
     const command = toolPath || 'mos-pce-clang';
     const romPath = path.join(outDir, `${romBase}.pce`);
     return {
       toolchain,
+      targetMedia,
       command,
       args: ['-Os', '-o', romPath, ...sources],
       cwd: projectDir,
@@ -380,6 +510,7 @@ function buildCommandForProject(projectDir, config = {}, toolPath = null) {
   const romPath = path.join(outDir, `${romBase}.pce`);
   return {
     toolchain,
+    targetMedia,
     command,
     args: ['-t', 'pce', '-O', '-o', binPath, ...sources],
     cwd: projectDir,
@@ -393,7 +524,7 @@ function buildProject(onLog, options = {}) {
   return new Promise((resolve) => {
     const projectDir = getProjectDir();
     ensureProjectStructure(projectDir, loadProjectConfigFromDir(projectDir));
-    const config = normalizeProjectConfig({ ...loadProjectConfigFromDir(projectDir), ...options.config });
+    let config = normalizeProjectConfig({ ...loadProjectConfigFromDir(projectDir), ...options.config });
     const log = (message, level = 'info') => onLog?.(String(message), level);
     let generated;
     try {
@@ -403,15 +534,51 @@ function buildProject(onLog, options = {}) {
       return;
     }
 
-    const toolPath = setupManager.getToolchainPath(config.toolchain);
+    if (generated.requiresLlvmMos && config.toolchain !== 'llvm-mos') {
+      const llvmMosPath = setupManager.getToolchainPath('llvm-mos');
+      if (!llvmMosPath && !options.allowMissingToolchain) {
+        resolve({
+          success: false,
+          error: 'This PCE project uses banked generated assets and requires llvm-mos. Setup で llvm-mos-sdk を設定してください。',
+          generated,
+        });
+        return;
+      }
+      config = normalizeProjectConfig({ ...config, toolchain: 'llvm-mos' });
+      log('Banked PCE assets require llvm-mos; using llvm-mos for this build.', 'info');
+      if (!options.dryRun && !options.config?.toolchain) {
+        saveProjectConfig({ toolchain: 'llvm-mos' });
+      }
+    }
+
+    const toolPath = config.targetMedia === 'cd'
+      ? setupManager.getLlvmMosPceCdPath()
+      : setupManager.getToolchainPath(config.toolchain);
     if (!toolPath && !options.allowMissingToolchain) {
-      resolve({ success: false, error: `${config.toolchain} toolchain is not configured. Setup を実行してください。` });
+      resolve({ success: false, error: `${config.targetMedia === 'cd' ? 'llvm-mos PCE-CD' : config.toolchain} toolchain is not configured. Setup を実行してください。` });
       return;
     }
 
-    const commandInfo = buildCommandForProject(projectDir, config, toolPath);
+    let commandInfo;
+    try {
+      commandInfo = buildCommandForProject(projectDir, config, toolPath);
+    } catch (err) {
+      resolve({ success: false, error: err.message || String(err) });
+      return;
+    }
+    if (commandInfo.targetMedia === 'cd' && !setupManager.getPceMkcdPath() && !options.allowMissingToolchain) {
+      resolve({ success: false, error: 'pce-mkcd is not configured. llvm-mos-sdk の PCE-CD ツールを Setup してください。', commandInfo });
+      return;
+    }
+    if (commandInfo.targetMedia === 'cd' && !commandInfo.iplPath && !options.allowMissingToolchain) {
+      resolve({ success: false, error: 'PCE-CD build requires ipl.bin. Setup で IPL パスを指定してください。', commandInfo });
+      return;
+    }
     log(`Generated assets: ${generated.assetCount} assets`);
     log(`Build command: ${commandInfo.command} ${commandInfo.args.join(' ')}`);
+    if (commandInfo.targetMedia === 'cd') {
+      log(`PCE-CD image command: ${commandInfo.mkcdCommand} ${commandInfo.mkcdArgs.join(' ')}`);
+    }
 
     if (options.dryRun) {
       resolve({ success: true, dryRun: true, commandInfo, generated });
@@ -437,6 +604,30 @@ function buildProject(onLog, options = {}) {
         if (commandInfo.toolchain === 'cc65') {
           romInfo = postprocessCc65PceRom(commandInfo.binPath, commandInfo.romPath);
         }
+        if (commandInfo.targetMedia === 'cd') {
+          const mkcd = spawn(commandInfo.mkcdCommand, commandInfo.mkcdArgs, {
+            cwd: commandInfo.cwd,
+            env: commandInfo.env,
+            windowsHide: true,
+          });
+          mkcd.stdout.on('data', (data) => data.toString().split(/\r?\n/).filter(Boolean).forEach((line) => log(line, 'info')));
+          mkcd.stderr.on('data', (data) => data.toString().split(/\r?\n/).filter(Boolean).forEach((line) => log(line, 'error')));
+          mkcd.on('error', (err) => resolve({ success: false, error: err.message || String(err), commandInfo }));
+          mkcd.on('exit', (mkcdCode) => {
+            if (mkcdCode !== 0) {
+              resolve({ success: false, error: `pce-mkcd failed (exit code: ${mkcdCode})`, commandInfo });
+              return;
+            }
+            try {
+              writeCueFile(commandInfo);
+              const romSize = fs.existsSync(commandInfo.isoPath) ? fs.statSync(commandInfo.isoPath).size : 0;
+              resolve({ success: true, romPath: commandInfo.romPath, isoPath: commandInfo.isoPath, cuePath: commandInfo.cuePath, romSize, commandInfo, romInfo });
+            } catch (err) {
+              resolve({ success: false, error: err.message || String(err), commandInfo });
+            }
+          });
+          return;
+        }
         const romSize = fs.existsSync(commandInfo.romPath) ? fs.statSync(commandInfo.romPath).size : 0;
         resolve({ success: true, romPath: commandInfo.romPath, romSize, commandInfo, romInfo });
       } catch (err) {
@@ -448,7 +639,8 @@ function buildProject(onLog, options = {}) {
 
 function getLastRomPath() {
   const config = loadProjectConfig();
-  const romPath = path.join(getProjectDir(), 'out', `${sanitizeRomName(config.romName || config.title)}.pce`);
+  const ext = normalizeTargetMedia(config.targetMedia) === 'cd' ? '.cue' : '.pce';
+  const romPath = path.join(getProjectDir(), 'out', `${sanitizeRomName(config.romName || config.title)}${ext}`);
   return fs.existsSync(romPath) ? romPath : null;
 }
 
@@ -464,6 +656,7 @@ module.exports = {
   DEFAULT_PROJECT_NAME,
   DEFAULT_TOOLCHAIN,
   buildCommandForProject,
+  collectCddaTracks,
   buildProject,
   createProjectFromTemplate,
   createProjectInRoot,
@@ -487,6 +680,7 @@ module.exports = {
   loadProjectConfigFromDir,
   normalizeProjectConfig,
   normalizeProjectName,
+  normalizeTargetMedia,
   normalizeToolchain,
   openProject,
   postprocessCc65PceRom,
@@ -494,4 +688,5 @@ module.exports = {
   saveProjectConfig,
   setPluginRole,
   setProjectDir,
+  writeCueFile,
 };

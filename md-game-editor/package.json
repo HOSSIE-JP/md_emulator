@@ -10,7 +10,7 @@
     "mcp": "node scripts/md-game-editor-mcp.js",
     "prepare:dist": "node scripts/prepare-dist.js",
     "test": "node tests/run-tests.js",
-    "start": "npm run inject-build-meta && npm run copy-pkg && electron .",
+    "start": "node scripts/start-electron.js",
     "dev": "npm run start",
     "build:mac": "npm run prepare:dist && electron-builder --mac",
     "build:win": "npm run prepare:dist && electron-builder --win zip",

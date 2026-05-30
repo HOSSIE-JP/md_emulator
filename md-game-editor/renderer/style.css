@@ -159,6 +159,36 @@ button.project-path-chip {
   display: contents;
 }
 
+.plugin-renderer-error {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 20px;
+  border: 1px solid rgba(226, 109, 92, 0.35);
+  border-radius: 8px;
+  background: rgba(226, 109, 92, 0.08);
+  color: var(--text);
+}
+
+.plugin-renderer-error h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.plugin-renderer-error p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.plugin-renderer-error pre {
+  margin: 0;
+  overflow: auto;
+  color: var(--red);
+  font: 12px/1.5 monospace;
+  white-space: pre-wrap;
+}
+
 .nav-btn {
   display: flex;
   flex-direction: column;

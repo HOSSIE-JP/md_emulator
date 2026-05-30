@@ -11,6 +11,11 @@
 }
 
 .pce-assets-editor {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  flex-direction: column;
   gap: 0;
 }
 
@@ -27,6 +32,53 @@
 .pce-assets-preview-frame {
   height: 240px;
   flex: none;
+}
+
+.pce-assets-preview-frame audio {
+  width: 100%;
+  align-self: center;
+}
+
+.pce-assets-sound-preview {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 160px;
+}
+
+.pce-assets-sound-preview[hidden] {
+  display: none;
+}
+
+.pce-assets-sound-meter {
+  width: min(240px, 84%);
+  height: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.pce-assets-sound-meter span {
+  display: block;
+  width: 0%;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.18s ease-out;
+}
+
+.pce-assets-preview-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.pce-assets-preview-caption {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
 }
 
 .pce-assets-stats {
@@ -81,6 +133,61 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pce-assets-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.pce-assets-check input {
+  width: 14px;
+  height: 14px;
+}
+
+.pce-assets-waveform {
+  display: flex;
+  align-items: end;
+  gap: 2px;
+  height: 36px;
+  padding: 6px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.pce-assets-waveform span {
+  flex: 1;
+  min-width: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  opacity: 0.8;
+}
+
+.pce-assets-sequence {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.pce-assets-sequence div {
+  display: grid;
+  grid-template-columns: 28px 1fr 72px;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.pce-assets-sequence code,
+.pce-assets-sequence strong {
+  color: var(--text);
+  font-size: 11px;
 }
 
 .pce-assets-modal p {

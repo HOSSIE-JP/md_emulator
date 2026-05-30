@@ -75,6 +75,7 @@ let editorControlService = null;
 let editorControlServer = null;
 let latestLogSnapshot = { entries: [] };
 let isQuitting = false;
+let forcedQuitTimer = null;
 
 const MAIN_WINDOW_DEFAULT_BOUNDS = { width: 1280, height: 860 };
 const MAIN_WINDOW_MIN_BOUNDS = { width: 960, height: 640 };
@@ -130,9 +131,62 @@ function saveMainWindowBounds(win) {
   }
 }
 
+function closeDevToolsForWindow(win) {
+  if (!win || win.isDestroyed?.()) return false;
+  const contents = win.webContents;
+  if (!contents || typeof contents.closeDevTools !== 'function') return false;
+
+  try {
+    if (typeof contents.isDevToolsOpened === 'function' && !contents.isDevToolsOpened()) {
+      return false;
+    }
+    contents.closeDevTools();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function getTrackedWindows() {
+  const tracked = [
+    mainWindow,
+    debugWindow,
+    setupWindow,
+    testPlayWindow,
+    testPlaySettingsWindow,
+    logWindow,
+  ];
+  const all = typeof BrowserWindow.getAllWindows === 'function'
+    ? BrowserWindow.getAllWindows()
+    : [];
+  const seen = new Set();
+  return [...tracked, ...all].filter((win) => {
+    if (!win || win.isDestroyed?.()) return false;
+    if (seen.has(win)) return false;
+    seen.add(win);
+    return true;
+  });
+}
+
+function closeOpenDevTools() {
+  return getTrackedWindows()
+    .map(closeDevToolsForWindow)
+    .filter(Boolean).length;
+}
+
+function registerWindowCloseDevTools(win) {
+  if (win && typeof win.on === 'function') {
+    win.on('close', () => {
+      closeDevToolsForWindow(win);
+    });
+  }
+  return win;
+}
+
 function closeWindowIfOpen(win) {
   if (!win || win.isDestroyed?.()) return false;
   try {
+    closeDevToolsForWindow(win);
     win.close();
     return true;
   } catch (_) {
@@ -180,28 +234,57 @@ function stopApiServerSync() {
     return true;
   }
 
-  try {
-    process.kill(-proc.pid, 'SIGTERM');
-  } catch (_) {
-    try {
-      proc.kill('SIGTERM');
-    } catch (__) {
-    }
-  }
+  signalApiServerProcess(proc, 'SIGTERM');
+  const forceKillTimer = setTimeout(() => {
+    signalApiServerProcess(proc, 'SIGKILL');
+  }, 1500);
+  forceKillTimer.unref?.();
   return true;
 }
 
 function prepareForAppQuit() {
   isQuitting = true;
+  closeOpenDevTools();
   saveMainWindowBounds(mainWindow);
   closeAuxiliaryWindows();
   stopEditorControlServer();
   stopApiServerSync();
 }
 
+function requestAppQuit(options = {}) {
+  const forceExitAfterMs = Number(options.forceExitAfterMs ?? 2500);
+  const exitCode = Number.isInteger(options.exitCode) ? options.exitCode : 0;
+
+  prepareForAppQuit();
+  app.quit();
+
+  if (forceExitAfterMs > 0 && process.versions?.electron) {
+    if (forcedQuitTimer) {
+      clearTimeout(forcedQuitTimer);
+    }
+    forcedQuitTimer = setTimeout(() => {
+      process.exit(exitCode);
+    }, forceExitAfterMs);
+    forcedQuitTimer.unref?.();
+  }
+
+  return { ok: true };
+}
+
+function installProcessTerminationHandlers() {
+  if (!process.versions?.electron) return;
+  ['SIGINT', 'SIGTERM', 'SIGHUP'].forEach((signal) => {
+    process.once(signal, () => {
+      requestAppQuit({ exitCode: 0, forceExitAfterMs: 2500 });
+    });
+  });
+}
+
+installProcessTerminationHandlers();
+
 function createWindow() {
   const bounds = readMainWindowBounds();
-  mainWindow = new BrowserWindow({
+  mainWindow = registerWindowCloseDevTools(new BrowserWindow({
     ...bounds,
     backgroundColor: '#101217',
     webPreferences: {
@@ -210,7 +293,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false,
     },
-  });
+  }));
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
@@ -235,7 +318,7 @@ function openDebugWindow(options = {}) {
     return { opened: true, reused: true };
   }
 
-  debugWindow = new BrowserWindow({
+  debugWindow = registerWindowCloseDevTools(new BrowserWindow({
     width: 1100,
     height: 760,
     backgroundColor: '#101217',
@@ -246,7 +329,7 @@ function openDebugWindow(options = {}) {
       nodeIntegration: false,
       sandbox: false,
     },
-  });
+  }));
 
   const debugFile = mode === 'wasm'
     ? path.join(__dirname, 'renderer', 'debug-wasm.html')
@@ -356,7 +439,7 @@ function openLogWindow(snapshot = latestLogSnapshot) {
     return { ok: true, reused: true };
   }
 
-  logWindow = new BrowserWindow({
+  logWindow = registerWindowCloseDevTools(new BrowserWindow({
     width: 920,
     height: 560,
     title: 'Log - MD Game Editor',
@@ -368,7 +451,7 @@ function openLogWindow(snapshot = latestLogSnapshot) {
       nodeIntegration: false,
       sandbox: false,
     },
-  });
+  }));
   logWindow.setMenu(null);
   logWindow.setMenuBarVisibility(false);
 
@@ -686,7 +769,7 @@ async function openWasmTestPlayWindow(options = {}) {
   const htmlPath = resolvePluginAssetPath(pluginId, 'testplay.html');
   const preloadPath = resolvePluginAssetPath(pluginId, 'testplay-preload.js');
 
-  testPlayWindow = new BrowserWindow({
+  testPlayWindow = registerWindowCloseDevTools(new BrowserWindow({
     width: 800,
     height: 720,
     title: pluginId === 'pce-standard-emulator' ? 'PCE Test Play' : 'Test Play - MD Game Editor',
@@ -698,7 +781,7 @@ async function openWasmTestPlayWindow(options = {}) {
       nodeIntegration: false,
       sandbox: false,
     },
-  });
+  }));
   const romQuery = options.romPath ? `?romPath=${encodeURIComponent(options.romPath)}` : '';
   if (pluginId === 'pce-standard-emulator') {
     testPlayWindow.loadFile(htmlPath);
@@ -720,7 +803,7 @@ async function openApiTestPlayWindow(options = {}) {
   const startResult = await startApiServer(options.port || 8080);
   const port = startResult.port || startResult.currentPort || apiServerPort || options.port || 8080;
 
-  testPlayWindow = new BrowserWindow({
+  testPlayWindow = registerWindowCloseDevTools(new BrowserWindow({
     width: 1120,
     height: 760,
     title: 'Test Play API - MD Game Editor',
@@ -732,7 +815,7 @@ async function openApiTestPlayWindow(options = {}) {
       nodeIntegration: false,
       sandbox: false,
     },
-  });
+  }));
 
   const search = new URLSearchParams();
   search.set('port', String(port));
@@ -1239,17 +1322,68 @@ function sanitizeExportFileName(value, fallback = 'rom') {
   return base || fallback;
 }
 
-function stopApiServer() {
+function waitForProcessExit(proc, timeoutMs) {
+  return new Promise((resolve) => {
+    if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
+      resolve(true);
+      return;
+    }
+
+    let settled = false;
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    timer.unref?.();
+
+    function finish(exited) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      proc.off?.('exit', onExit);
+      proc.off?.('error', onError);
+      resolve(exited);
+    }
+
+    function onExit() {
+      finish(true);
+    }
+
+    function onError() {
+      finish(false);
+    }
+
+    proc.once('exit', onExit);
+    proc.once('error', onError);
+  });
+}
+
+function signalApiServerProcess(proc, signal) {
+  if (!proc || !proc.pid) return false;
+  if (process.platform === 'win32') {
+    try {
+      return proc.kill(signal);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  try {
+    process.kill(-proc.pid, signal);
+    return true;
+  } catch (_) {
+    try {
+      return proc.kill(signal);
+    } catch (__) {
+      return false;
+    }
+  }
+}
+
+async function stopApiServer() {
   if (!apiServerProcess) {
     apiServerPort = null;
-    return Promise.resolve(false);
+    return false;
   }
 
   const proc = apiServerProcess;
-
-  const waitForExit = new Promise((resolve) => {
-    proc.once('exit', () => resolve(true));
-  });
 
   if (process.platform === 'win32') {
     const killer = spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f'], {
@@ -1258,26 +1392,17 @@ function stopApiServer() {
     });
     killer.on('exit', () => {});
   } else {
-    try {
-      process.kill(-proc.pid, 'SIGTERM');
-    } catch (_err) {
-      try {
-        proc.kill('SIGTERM');
-      } catch (__err) {
-      }
-    }
+    signalApiServerProcess(proc, 'SIGTERM');
 
-    setTimeout(() => {
-      try {
-        process.kill(-proc.pid, 'SIGKILL');
-      } catch (_err) {
-      }
+    const forceKillTimer = setTimeout(() => {
+      signalApiServerProcess(proc, 'SIGKILL');
     }, 1500);
+    forceKillTimer.unref?.();
   }
 
   apiServerProcess = null;
   apiServerPort = null;
-  return waitForExit;
+  return waitForProcessExit(proc, 3500);
 }
 
 function resolveApiLaunch() {
@@ -1755,6 +1880,18 @@ ipcMain.handle('assets:importImage', async (_event, payload) => {
   }
 });
 
+ipcMain.handle('assets:importAudio', async (_event, payload) => {
+  try {
+    if (buildSystem.getActiveCoreId() !== 'pc-engine') {
+      return { ok: false, error: 'assets:importAudio is available for PC Engine projects only' };
+    }
+    const result = pceAssetManager.importAudio(buildSystem.getProjectDir(), payload || {});
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 ipcMain.handle('assets:previewSource', async (_event, payload) => {
   try {
     if (buildSystem.getActiveCoreId() !== 'pc-engine') {
@@ -1914,7 +2051,7 @@ ipcMain.handle('window:openTestPlaySettings', async () => {
     testPlaySettingsWindow.focus();
     return { opened: true, reused: true };
   }
-  testPlaySettingsWindow = new BrowserWindow({
+  testPlaySettingsWindow = registerWindowCloseDevTools(new BrowserWindow({
     width: 840,
     height: 760,
     title: 'Test Play Settings - MD Game Editor',
@@ -1926,7 +2063,7 @@ ipcMain.handle('window:openTestPlaySettings', async () => {
       nodeIntegration: false,
       sandbox: false,
     },
-  });
+  }));
   testPlaySettingsWindow.loadFile(path.join(__dirname, 'renderer', 'testplay-settings.html'));
   testPlaySettingsWindow.on('closed', () => { testPlaySettingsWindow = null; });
   return { opened: true, reused: false };
@@ -1938,7 +2075,7 @@ ipcMain.handle('window:openSetup', async () => {
     setupWindow.focus();
     return { opened: true, reused: true };
   }
-  setupWindow = new BrowserWindow({
+  setupWindow = registerWindowCloseDevTools(new BrowserWindow({
     width: 720,
     height: 640,
     title: 'Setup - MD Game Editor',
@@ -1950,7 +2087,7 @@ ipcMain.handle('window:openSetup', async () => {
       nodeIntegration: false,
       sandbox: false,
     },
-  });
+  }));
   setupWindow.loadFile(path.join(__dirname, 'renderer', 'setup.html'));
   setupWindow.on('closed', () => { setupWindow = null; });
   return { opened: true, reused: false };
@@ -3065,8 +3202,7 @@ ipcMain.handle('project:createNew', async (_event, payload) => {
 });
 
 ipcMain.handle('app:quit', async () => {
-  app.quit();
-  return { ok: true };
+  return requestAppQuit({ forceExitAfterMs: 2500 });
 });
 
 app.on('second-instance', () => {
@@ -3100,6 +3236,7 @@ app.on('before-quit', () => {
 });
 
 app.on('will-quit', () => {
+  closeOpenDevTools();
   stopEditorControlServer();
   stopApiServerSync();
 });
@@ -3122,9 +3259,14 @@ module.exports.__test = {
   buildSystem,
   syncProjectPluginRoleState,
   getEditorControlService,
+  closeDevToolsForWindow,
+  closeOpenDevTools,
+  closeWindowIfOpen,
   closeAuxiliaryWindows,
   stopApiServerSync,
   stopEditorControlServer,
   prepareForAppQuit,
+  requestAppQuit,
+  waitForProcessExit,
   resolveUnderCodeRoot,
 };

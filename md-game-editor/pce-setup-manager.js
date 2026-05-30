@@ -317,6 +317,32 @@ function getLlvmMosPath() {
   return findExecutable(getLlvmMosBaseDir(), executableNamesForTool(TOOL_DEFINITIONS.llvmMos));
 }
 
+function getLlvmMosCompanionTool(baseName, settingKey) {
+  const settings = loadSettings();
+  if (settingKey && settings[settingKey] && fs.existsSync(settings[settingKey])) return settings[settingKey];
+  const names = [
+    executableName(baseName),
+    baseName,
+    `${baseName}.exe`,
+    `${baseName}.cmd`,
+    `${baseName}.bat`,
+  ];
+  const primary = getLlvmMosPath();
+  if (primary) {
+    const candidate = findExecutable(path.dirname(primary), names);
+    if (candidate) return candidate;
+  }
+  return findExecutable(getLlvmMosBaseDir(), names);
+}
+
+function getLlvmMosPceCdPath() {
+  return getLlvmMosCompanionTool('mos-pce-cd-clang', 'llvmMosPceCdPath');
+}
+
+function getPceMkcdPath() {
+  return getLlvmMosCompanionTool('pce-mkcd', 'pceMkcdPath');
+}
+
 function getSuperFamiconvPath() {
   const settings = loadSettings();
   if (settings.superfamiconvPath && fs.existsSync(settings.superfamiconvPath)) return settings.superfamiconvPath;
@@ -329,13 +355,30 @@ function getEmulatorJsDir() {
   return findEmulatorJsRuntimeDir(getEmulatorBaseDir());
 }
 
+function getOptionalFileSetting(key) {
+  const settings = loadSettings();
+  return settings[key] && fs.existsSync(settings[key]) ? settings[key] : null;
+}
+
+function getPceCdIplPath() {
+  return getOptionalFileSetting('pceCdIplPath');
+}
+
+function getPceCdSystemCardPath() {
+  return getOptionalFileSetting('pceCdSystemCardPath');
+}
+
 function setToolPath(kind, value) {
   const abs = value ? path.resolve(String(value)) : '';
   const keyByKind = {
     cc65: 'cc65Path',
     llvmMos: 'llvmMosPath',
+    llvmMosPceCd: 'llvmMosPceCdPath',
+    pceMkcd: 'pceMkcdPath',
     superfamiconv: 'superfamiconvPath',
     emulatorJs: 'emulatorJsDir',
+    pceCdIpl: 'pceCdIplPath',
+    pceCdSystemCard: 'pceCdSystemCardPath',
   };
   const key = keyByKind[kind];
   if (!key) throw new Error(`unknown tool kind: ${kind}`);
@@ -349,14 +392,22 @@ function getToolchainPath(toolchain) {
 function getStatus() {
   const cc65Path = getCc65Path();
   const llvmMosPath = getLlvmMosPath();
+  const llvmMosPceCdPath = getLlvmMosPceCdPath();
+  const pceMkcdPath = getPceMkcdPath();
   const superfamiconvPath = getSuperFamiconvPath();
   const emulatorJsDir = getEmulatorJsDir();
+  const pceCdIplPath = getPceCdIplPath();
+  const pceCdSystemCardPath = getPceCdSystemCardPath();
   return {
     toolsDir: getToolsDir(),
     cc65: { configured: Boolean(cc65Path), path: cc65Path },
     llvmMos: { configured: Boolean(llvmMosPath), path: llvmMosPath },
+    llvmMosPceCd: { configured: Boolean(llvmMosPceCdPath), path: llvmMosPceCdPath },
+    pceMkcd: { configured: Boolean(pceMkcdPath), path: pceMkcdPath },
     superfamiconv: { configured: Boolean(superfamiconvPath), path: superfamiconvPath },
     emulatorJs: { configured: Boolean(emulatorJsDir), path: emulatorJsDir },
+    pceCdIpl: { configured: Boolean(pceCdIplPath), path: pceCdIplPath },
+    pceCdSystemCard: { configured: Boolean(pceCdSystemCardPath), path: pceCdSystemCardPath },
   };
 }
 
@@ -1062,7 +1113,11 @@ module.exports = {
   getEmulatorBaseDir,
   getEmulatorJsDir,
   getLlvmMosBaseDir,
+  getLlvmMosPceCdPath,
   getLlvmMosPath,
+  getPceCdIplPath,
+  getPceCdSystemCardPath,
+  getPceMkcdPath,
   getSettingsPath,
   getStatus,
   getSuperFamiconvBaseDir,

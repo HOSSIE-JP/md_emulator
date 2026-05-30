@@ -30,7 +30,7 @@ const CORES = Object.freeze([
     name: 'PC Engine',
     shortName: 'PCE',
     platform: 'pce',
-    description: 'cc65 / llvm-mos を使う PC Engine HuCard プロジェクト',
+    description: 'llvm-mos を標準に HuCard / 実験的 PCE-CD を扱う PC Engine プロジェクト',
   },
 ]);
 

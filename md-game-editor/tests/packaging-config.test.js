@@ -20,6 +20,17 @@ test('packaging declares main-process runtime dependencies', () => {
   assert.equal(pkg.devDependencies?.['iconv-lite'], undefined);
 });
 
+test('development start script forwards stop signals to Electron', () => {
+  const pkg = readPackageJson();
+  const scriptPath = path.join(__dirname, '..', 'scripts', 'start-electron.js');
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.equal(pkg.scripts?.start, 'node scripts/start-electron.js');
+  assert.match(script, /SIGTERM/);
+  assert.match(script, /child\.kill\(signal\)/);
+  assert.match(script, /child\.kill\('SIGKILL'\)/);
+});
+
 test('packaging includes the bundled game editor template projects', () => {
   const config = readPackageConfig();
 

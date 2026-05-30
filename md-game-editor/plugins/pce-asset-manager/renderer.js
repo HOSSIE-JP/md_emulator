@@ -1,5 +1,7 @@
 const IMAGE_EXTS = ['.png', '.bmp'];
+const AUDIO_EXTS = ['.wav'];
 const SPRITE_CELL_SIZES = ['16x16', '16x32', '16x64', '32x16', '32x32', '32x64'];
+const PCE_PSG_CLOCK = 3579545;
 
 function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -29,6 +31,34 @@ function isImageAsset(asset = {}) {
   return asset.type === 'image' || asset.type === 'sprite';
 }
 
+function isAudioAsset(asset = {}) {
+  return asset.type === 'adpcm' || asset.type === 'cdda-track';
+}
+
+function isPsgAsset(asset = {}) {
+  return asset.type === 'psg-song' || asset.type === 'psg-sfx' || asset.type === 'psg-sequence';
+}
+
+function psgPeriod(asset = {}) {
+  const pattern = Array.isArray(asset.options?.pattern)
+    ? asset.options.pattern
+    : Array.isArray(asset.data?.pattern) ? asset.data.pattern : [];
+  const firstPeriod = pattern.find((step) => Number.isFinite(Number(step?.period)))?.period;
+  return Math.max(1, asNumber(firstPeriod ?? asset.options?.period, 512));
+}
+
+function psgFrequency(period) {
+  return Math.max(40, Math.min(5000, PCE_PSG_CLOCK / (32 * Math.max(1, asNumber(period, 512)))));
+}
+
+function psgPattern(asset = {}) {
+  const pattern = Array.isArray(asset.options?.pattern)
+    ? asset.options.pattern
+    : Array.isArray(asset.data?.pattern) ? asset.data.pattern : [];
+  if (pattern.length) return pattern;
+  return [{ period: psgPeriod(asset), volume: asset.options?.volume ?? 12, length: 1 }];
+}
+
 function generatedInfo(asset = {}) {
   return asset.data?.generated || {};
 }
@@ -56,12 +86,14 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         <div class="asset-list-header">
           <div>
             <h2>PCE Assets</h2>
-            <p class="pce-assets-subtitle">BG / Sprite / PSG を PC Engine 向けに管理します</p>
+            <p class="pce-assets-subtitle">BG / Sprite / Palette / PSG / ADPCM / CD-DA を PC Engine 向けに管理します</p>
           </div>
           <div class="asset-list-header-actions">
-            <button class="btn-primary" data-action="import" type="button">画像を取り込み</button>
-            <button class="btn-sm" data-action="new-psg" type="button">PSG</button>
-            <button class="icon-btn-xs" data-action="refresh" type="button" title="更新" aria-label="更新">R</button>
+            <button class="icon-btn" data-action="import" type="button" title="画像を取り込み" aria-label="画像を取り込み">▧</button>
+            <button class="icon-btn" data-action="import-audio" type="button" title="音声を取り込み" aria-label="音声を取り込み">♪</button>
+            <button class="icon-btn" data-action="new-psg" type="button" title="PSG SFX を追加" aria-label="PSG SFX を追加">♪+</button>
+            <button class="icon-btn" data-action="new-palette" type="button" title="Palette を追加" aria-label="Palette を追加">▦</button>
+            <button class="icon-btn" data-action="refresh" type="button" title="更新" aria-label="更新">↻</button>
           </div>
         </div>
 
@@ -76,7 +108,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
               <option value="all">すべて</option>
               <option value="image">BG image</option>
               <option value="sprite">Sprite sheet</option>
-              <option value="psg-sequence">PSG</option>
+              <option value="palette">Palette</option>
+              <option value="psg-song">PSG song</option>
+              <option value="psg-sfx">PSG SFX</option>
+              <option value="adpcm">ADPCM</option>
+              <option value="cdda-track">CD-DA</option>
             </select>
           </label>
         </div>
@@ -119,10 +155,13 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
                   <select class="form-select" data-field="type">
                     <option value="image">BG image</option>
                     <option value="sprite">Sprite sheet</option>
-                    <option value="psg-sequence">PSG sequence</option>
+                    <option value="palette">Palette</option>
+                    <option value="psg-song">PSG song</option>
+                    <option value="psg-sfx">PSG SFX</option>
+                    <option value="adpcm">ADPCM</option>
+                    <option value="cdda-track">CD-DA track</option>
                     <option value="tileset">Tileset</option>
                     <option value="tilemap">Tilemap</option>
-                    <option value="palette">Palette</option>
                   </select>
                   <label class="form-label">Name</label>
                   <input class="form-input" data-field="name" />
@@ -152,10 +191,24 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
                   <input class="form-input" data-field="transparentIndex" type="number" min="0" max="15" />
                   <label class="form-label">PSG period</label>
                   <input class="form-input" data-field="period" type="number" min="1" max="4095" />
+                  <label class="form-label">BPM / Steps</label>
+                  <div class="pce-assets-inline-fields">
+                    <input class="form-input" data-field="bpm" type="number" min="30" max="300" />
+                    <input class="form-input" data-field="steps" type="number" min="1" max="256" />
+                  </div>
+                  <label class="form-label">Sample rate</label>
+                  <input class="form-input" data-field="sampleRate" type="number" min="4000" max="44100" />
+                  <label class="form-label">Track</label>
+                  <input class="form-input" data-field="track" type="number" min="2" max="99" />
+                  <label class="form-label">Loop</label>
+                  <label class="pce-assets-check">
+                    <input data-field="loop" type="checkbox" />
+                    <span>繰り返し再生</span>
+                  </label>
                 </div>
                 <div class="form-actions-inline">
                   <button class="btn-primary" data-action="save" type="submit" disabled>保存</button>
-                  <button class="btn-sm" data-action="delete" type="button" disabled>削除</button>
+                  <button class="icon-btn" data-action="delete" type="button" title="削除" aria-label="削除" disabled>✕</button>
                 </div>
                 <div class="form-error" data-role="form-error"></div>
               </form>
@@ -169,6 +222,15 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
             <div class="accordion-body" data-accordion-body="preview">
               <div class="image-preview-frame pce-assets-preview-frame">
                 <img data-role="source-preview" alt="PCE asset preview" hidden />
+                <audio data-role="audio-preview" controls hidden></audio>
+                <div class="pce-assets-sound-preview" data-role="sound-preview" hidden>
+                  <div class="pce-assets-sound-meter" aria-hidden="true"><span data-role="sound-meter-bar"></span></div>
+                  <div class="pce-assets-preview-actions">
+                    <button class="icon-btn" data-action="preview-play" type="button" title="再生" aria-label="再生">▶</button>
+                    <button class="icon-btn" data-action="preview-stop" type="button" title="停止" aria-label="停止">■</button>
+                  </div>
+                  <div class="pce-assets-preview-caption" data-role="sound-caption"></div>
+                </div>
                 <div class="inline-no-preview" data-role="no-preview">プレビューできる画像がありません</div>
               </div>
               <div class="inline-preview-info" data-role="preview-info"></div>
@@ -207,6 +269,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   const noSelectionEl = root.querySelector('[data-role="no-selection"]');
   const formErrorEl = root.querySelector('[data-role="form-error"]');
   const previewImgEl = root.querySelector('[data-role="source-preview"]');
+  const audioPreviewEl = root.querySelector('[data-role="audio-preview"]');
+  const soundPreviewEl = root.querySelector('[data-role="sound-preview"]');
+  const soundMeterBarEl = root.querySelector('[data-role="sound-meter-bar"]');
+  const soundCaptionEl = root.querySelector('[data-role="sound-caption"]');
   const noPreviewEl = root.querySelector('[data-role="no-preview"]');
   const previewInfoEl = root.querySelector('[data-role="preview-info"]');
   const generatedStatsEl = root.querySelector('[data-role="generated-stats"]');
@@ -230,20 +296,91 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     cellSize: root.querySelector('[data-field="cellSize"]'),
     transparentIndex: root.querySelector('[data-field="transparentIndex"]'),
     period: root.querySelector('[data-field="period"]'),
+    bpm: root.querySelector('[data-field="bpm"]'),
+    steps: root.querySelector('[data-field="steps"]'),
+    sampleRate: root.querySelector('[data-field="sampleRate"]'),
+    track: root.querySelector('[data-field="track"]'),
+    loop: root.querySelector('[data-field="loop"]'),
   };
 
   let assets = [];
   let selectedId = '';
   let draggedId = '';
+  let psgAudioContext = null;
+  let psgPreviewNodes = [];
+  let psgPreviewToken = 0;
 
   function selectedAsset() {
     return assets.find((asset) => asset.id === selectedId) || null;
   }
 
+  function stopPsgPreview() {
+    psgPreviewToken += 1;
+    psgPreviewNodes.forEach((node) => {
+      try {
+        if (typeof node.stop === 'function') node.stop(0);
+      } catch (_err) {
+        // Oscillator may already have completed its scheduled one-shot.
+      }
+      try {
+        node.disconnect?.();
+      } catch (_err) {
+        // Best-effort cleanup only.
+      }
+    });
+    psgPreviewNodes = [];
+    if (soundMeterBarEl) soundMeterBarEl.style.width = '0%';
+  }
+
+  function playPsgPreview(asset = selectedAsset()) {
+    if (!isPsgAsset(asset)) return;
+    stopPsgPreview();
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) {
+      previewInfoEl.textContent = 'この環境では PSG プレビューを再生できません';
+      return;
+    }
+    psgAudioContext ||= new AudioContextCtor();
+    void psgAudioContext.resume?.();
+    const gain = psgAudioContext.createGain();
+    gain.gain.setValueAtTime(0.0001, psgAudioContext.currentTime);
+    gain.connect(psgAudioContext.destination);
+    psgPreviewNodes.push(gain);
+
+    const bpm = Math.max(30, asNumber(asset.options?.bpm, 150));
+    const baseStepSeconds = Math.max(0.04, Math.min(0.32, 60 / bpm / 2));
+    const steps = psgPattern(asset).slice(0, asset.type === 'psg-song' ? 32 : 8);
+    const previewToken = psgPreviewToken;
+    let time = psgAudioContext.currentTime + 0.03;
+    steps.forEach((step) => {
+      const osc = psgAudioContext.createOscillator();
+      const period = Math.max(1, asNumber(step.period, psgPeriod(asset)));
+      const volume = Math.max(0.02, Math.min(0.18, asNumber(step.volume, 12) / 15 * 0.18));
+      const duration = baseStepSeconds * Math.max(1, asNumber(step.length, 1));
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(psgFrequency(period), time);
+      gain.gain.setValueAtTime(volume, time);
+      gain.gain.setValueAtTime(0.0001, time + Math.max(0.02, duration - 0.01));
+      osc.connect(gain);
+      osc.start(time);
+      osc.stop(time + duration);
+      psgPreviewNodes.push(osc);
+      time += duration;
+    });
+    if (soundMeterBarEl) soundMeterBarEl.style.width = '100%';
+    window.setTimeout(() => {
+      if (previewToken === psgPreviewToken) stopPsgPreview();
+    }, Math.max(120, (time - psgAudioContext.currentTime) * 1000 + 80));
+  }
+
   function typeLabel(asset = {}) {
     if (asset.type === 'image') return 'BG';
     if (asset.type === 'sprite') return 'SPR';
-    if (asset.type === 'psg-sequence') return 'PSG';
+    if (asset.type === 'palette') return 'PAL';
+    if (asset.type === 'psg-song') return 'SONG';
+    if (asset.type === 'psg-sfx' || asset.type === 'psg-sequence') return 'SFX';
+    if (asset.type === 'adpcm') return 'ADPCM';
+    if (asset.type === 'cdda-track') return 'CDDA';
     return String(asset.type || '').toUpperCase();
   }
 
@@ -268,7 +405,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       const warnings = [...(generated.warnings || []), asset.pathError].filter(Boolean);
       const tileText = isImageAsset(asset)
         ? `${generated.tileCount || 0} / ${generated.paletteCount || 0} pal`
-        : asset.type === 'psg-sequence' ? `${asset.options?.period || 512} Hz` : '-';
+        : isPsgAsset(asset) ? `${asset.options?.period || 512} period`
+          : isAudioAsset(asset) ? `${generated.sampleRate || asset.options?.sampleRate || 0} Hz`
+            : asset.type === 'palette' ? `${asset.options?.colors?.length || generated.paletteColors?.length || 0} colors`
+              : '-';
       return `
         <tr class="asset-row ${asset.id === selectedId ? 'active' : ''}" data-id="${esc(asset.id)}" draggable="true">
           <td class="asset-drag-cell"><span class="drag-handle" title="並び替え">&#8942;&#8942;</span></td>
@@ -277,7 +417,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
           <td class="asset-path-cell">${esc(asset.source || '(generated)')}</td>
           <td>${esc(tileText)}</td>
           <td>${warnings.length ? `<span class="asset-warning">${warnings.length}</span>` : '<span class="pce-assets-muted">0</span>'}</td>
-          <td class="asset-actions-cell"><button class="icon-btn-xs" type="button" data-row-delete="${esc(asset.id)}" title="削除" aria-label="削除">Del</button></td>
+          <td class="asset-actions-cell"><button class="icon-btn-xs" type="button" data-row-delete="${esc(asset.id)}" title="削除" aria-label="削除">✕</button></td>
         </tr>
       `;
     }).join('');
@@ -317,21 +457,38 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   function setFieldVisibility(asset) {
     const isImage = isImageAsset(asset);
     const isSprite = imageKind(asset) === 'sprite';
-    const isPsg = asset?.type === 'psg-sequence';
-    ['paletteBank', 'tileBase', 'mapBase', 'x', 'y', 'width', 'height', 'cellSize', 'transparentIndex'].forEach((key) => {
+    const isPsg = isPsgAsset(asset);
+    const isAudio = isAudioAsset(asset);
+    const isCdda = asset?.type === 'cdda-track';
+    const isPalette = asset?.type === 'palette';
+    function setVisible(key, show) {
       const input = fields[key];
-      const label = input?.closest?.('.asset-edit-grid') ? null : null;
       if (!input) return;
-      const labelEl = input.parentElement?.classList.contains('pce-assets-inline-fields')
-        ? input.parentElement.previousElementSibling
-        : input.previousElementSibling;
-      const container = input.parentElement?.classList.contains('pce-assets-inline-fields') ? input.parentElement : input;
-      const show = isImage && (key !== 'cellSize' || isSprite) && (key !== 'mapBase' || !isSprite);
-      container.hidden = !show;
+      const row = input.parentElement?.classList.contains('pce-assets-inline-fields') || input.parentElement?.classList.contains('pce-assets-check')
+        ? input.parentElement
+        : input;
+      const labelEl = row.previousElementSibling;
+      row.hidden = !show;
       if (labelEl) labelEl.hidden = !show;
-    });
-    fields.period.hidden = !isPsg;
-    fields.period.previousElementSibling.hidden = !isPsg;
+    }
+    const visibility = {
+      paletteBank: isImage || isPalette,
+      tileBase: isImage,
+      mapBase: isImage && !isSprite,
+      x: isImage,
+      y: isImage,
+      width: isImage,
+      height: isImage,
+      cellSize: isImage && isSprite,
+      transparentIndex: isImage,
+      period: isPsg,
+      bpm: isPsg,
+      steps: isPsg,
+      sampleRate: isAudio && !isCdda,
+      track: isCdda,
+      loop: isAudio || asset?.type === 'psg-song',
+    };
+    Object.entries(visibility).forEach(([key, show]) => setVisible(key, show));
   }
 
   function fillForm(asset) {
@@ -342,12 +499,17 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     deleteButton.disabled = !asset;
     formErrorEl.textContent = '';
     if (!asset) {
+      stopPsgPreview();
       previewImgEl.hidden = true;
+      audioPreviewEl.hidden = true;
+      soundPreviewEl.hidden = true;
       noPreviewEl.hidden = false;
       previewInfoEl.textContent = '';
+      soundCaptionEl.textContent = '';
       generatedStatsEl.innerHTML = '';
       generatedFilesEl.innerHTML = '';
       paletteEl.innerHTML = '';
+      paletteEl.hidden = false;
       diagnosticsEl.innerHTML = '<p class="asset-no-selection-hint">診断対象がありません</p>';
       return;
     }
@@ -365,6 +527,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     fields.cellSize.value = `${options.cellWidth || 16}x${options.cellHeight || 16}`;
     fields.transparentIndex.value = options.transparentIndex ?? 0;
     fields.period.value = options.period ?? 512;
+    fields.bpm.value = options.bpm ?? 150;
+    fields.steps.value = options.steps ?? 32;
+    fields.sampleRate.value = options.sampleRate ?? 16000;
+    fields.track.value = options.track ?? 2;
+    fields.loop.checked = Boolean(options.loop);
     setFieldVisibility(asset);
     renderGenerated(asset);
     void loadPreview(asset);
@@ -374,8 +541,33 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const current = selectedAsset() || {};
     const type = fields.type.value;
     const [cellWidth, cellHeight] = String(fields.cellSize.value || '16x16').split('x').map((value) => asNumber(value, 16));
-    const options = type === 'psg-sequence'
-      ? { ...(current.options || {}), period: asNumber(fields.period.value, 512) }
+    const options = type === 'psg-song' || type === 'psg-sfx' || type === 'psg-sequence'
+      ? {
+          ...(current.options || {}),
+          kind: type === 'psg-song' ? 'song' : 'sfx',
+          period: asNumber(fields.period.value, 512),
+          bpm: asNumber(fields.bpm.value, 150),
+          steps: asNumber(fields.steps.value, 32),
+          loop: type === 'psg-song' && fields.loop.checked,
+        }
+      : type === 'adpcm'
+        ? {
+            ...(current.options || {}),
+            sampleRate: asNumber(fields.sampleRate.value, 16000),
+            loop: fields.loop.checked,
+          }
+        : type === 'cdda-track'
+          ? {
+              ...(current.options || {}),
+              track: asNumber(fields.track.value, 2),
+              loop: fields.loop.checked,
+            }
+          : type === 'palette'
+            ? {
+                ...(current.options || {}),
+                target: current.options?.target || 'bg',
+                paletteBank: asNumber(fields.paletteBank.value, 0),
+              }
       : {
           ...(current.options || {}),
           kind: type === 'sprite' ? 'sprite' : 'background',
@@ -402,45 +594,130 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   }
 
   async function loadPreview(asset) {
+    stopPsgPreview();
     previewImgEl.hidden = true;
+    audioPreviewEl.hidden = true;
+    soundPreviewEl.hidden = true;
     noPreviewEl.hidden = false;
     previewInfoEl.textContent = '';
-    if (!asset?.source || !IMAGE_EXTS.includes(extname(asset.source))) return;
+    soundCaptionEl.textContent = '';
+    if (audioPreviewEl.src) {
+      audioPreviewEl.pause();
+      audioPreviewEl.removeAttribute('src');
+    }
+    if (isPsgAsset(asset)) {
+      const period = psgPeriod(asset);
+      const frequency = psgFrequency(period);
+      soundPreviewEl.hidden = false;
+      noPreviewEl.hidden = true;
+      soundCaptionEl.textContent = `${typeLabel(asset)} / period ${period} / ${Math.round(frequency)} Hz`;
+      previewInfoEl.textContent = asset.type === 'psg-song'
+        ? 'PSG 矩形波シーケンスをプレビューします'
+        : 'PSG SFX をワンショット再生します';
+      return;
+    }
+    if (!asset?.source) return;
+    const ext = extname(asset.source);
+    if (!IMAGE_EXTS.includes(ext) && !AUDIO_EXTS.includes(ext)) return;
     const result = await api.electronAPI.previewAssetSource(asset.source);
     if (!result?.ok || !result.dataUrl) {
       previewInfoEl.textContent = result?.error || 'プレビューを取得できませんでした';
       return;
     }
-    previewImgEl.src = result.dataUrl;
-    previewImgEl.hidden = false;
+    if (AUDIO_EXTS.includes(ext)) {
+      audioPreviewEl.src = result.dataUrl;
+      audioPreviewEl.hidden = false;
+    } else {
+      previewImgEl.src = result.dataUrl;
+      previewImgEl.hidden = false;
+    }
     noPreviewEl.hidden = true;
     previewInfoEl.textContent = `${result.mime || ''} / ${Math.round((result.size || 0) / 1024)} KB`;
   }
 
   function renderGenerated(asset) {
     const generated = generatedInfo(asset);
-    generatedStatsEl.innerHTML = `
-      <div class="pce-assets-stat"><span>Tile / Pattern</span><strong>${esc(generated.tileCount || 0)}</strong></div>
-      <div class="pce-assets-stat"><span>Palette</span><strong>${esc(generated.paletteCount || 0)}</strong></div>
-      <div class="pce-assets-stat"><span>VRAM bytes</span><strong>${esc(generated.vramBytes || 0)}</strong></div>
-    `;
-    const files = [
-      ['palette', generated.paletteFile],
-      [asset.type === 'sprite' ? 'patterns' : 'tiles', generated.tilesFile],
-      ['map', generated.mapFile],
-      ['preview', generated.previewFile],
-    ].filter((entry) => entry[1]);
+    const warnings = [...(generated.warnings || []), asset.pathError].filter(Boolean);
+    let files = [];
+    let waveform = '';
+
+    paletteEl.hidden = true;
+    paletteEl.innerHTML = '';
+
+    if (isImageAsset(asset)) {
+      generatedStatsEl.innerHTML = `
+        <div class="pce-assets-stat"><span>${asset.type === 'sprite' ? 'Pattern' : 'Tile'}</span><strong>${esc(generated.tileCount || 0)}</strong></div>
+        <div class="pce-assets-stat"><span>Palette</span><strong>${esc(generated.paletteCount || 0)}</strong></div>
+        <div class="pce-assets-stat"><span>VRAM bytes</span><strong>${esc(generated.vramBytes || 0)}</strong></div>
+      `;
+      files = [
+        ['palette', generated.paletteFile],
+        [asset.type === 'sprite' ? 'patterns' : 'tiles', generated.tilesFile],
+        ['map', asset.type === 'sprite' ? '' : generated.mapFile],
+        ['preview', generated.previewFile],
+      ].filter((entry) => entry[1]);
+      const colors = generated.paletteColors?.length ? generated.paletteColors : [];
+      paletteEl.hidden = false;
+      paletteEl.innerHTML = colors.length
+        ? colors.slice(0, 64).map((color, index) => `<span class="palette-swatch ${index % 16 === 0 ? 'is-transparent' : ''}" style="background:${esc(color)}" title="${index}: ${esc(color)}"></span>`).join('')
+        : Array.from({ length: 16 }, (_unused, index) => `<span class="palette-swatch is-empty ${index === 0 ? 'is-transparent' : ''}" title="${index}"></span>`).join('');
+    } else if (asset.type === 'palette') {
+      const colors = asset.options?.colors || generated.paletteColors || [];
+      generatedStatsEl.innerHTML = `
+        <div class="pce-assets-stat"><span>Target</span><strong>${esc(asset.options?.target || 'bg')}</strong></div>
+        <div class="pce-assets-stat"><span>Palette bank</span><strong>${esc(asset.options?.paletteBank ?? 0)}</strong></div>
+        <div class="pce-assets-stat"><span>Colors</span><strong>${esc(colors.length)}</strong></div>
+      `;
+      files = generated.paletteFile ? [['palette', generated.paletteFile]] : [];
+      paletteEl.hidden = false;
+      paletteEl.innerHTML = colors.length
+        ? colors.slice(0, 64).map((color, index) => `<span class="palette-swatch ${index % 16 === 0 ? 'is-transparent' : ''}" style="background:${esc(color)}" title="${index}: ${esc(color)}"></span>`).join('')
+        : Array.from({ length: 16 }, (_unused, index) => `<span class="palette-swatch is-empty ${index === 0 ? 'is-transparent' : ''}" title="${index}"></span>`).join('');
+    } else if (isPsgAsset(asset)) {
+      const period = psgPeriod(asset);
+      const pattern = psgPattern(asset);
+      generatedStatsEl.innerHTML = `
+        <div class="pce-assets-stat"><span>Sound</span><strong>${esc(typeLabel(asset))}</strong></div>
+        <div class="pce-assets-stat"><span>Period / Hz</span><strong>${esc(`${period} / ${Math.round(psgFrequency(period))}`)}</strong></div>
+        <div class="pce-assets-stat"><span>Steps</span><strong>${esc(asset.options?.steps || pattern.length || 0)}</strong></div>
+      `;
+      files = asset.source ? [['source', asset.source]] : [];
+      const rows = pattern.slice(0, 16).map((step, index) => {
+        const stepPeriod = Math.max(1, asNumber(step.period, period));
+        return `<div><span>${index + 1}</span><code>period ${esc(stepPeriod)}</code><strong>${esc(Math.round(psgFrequency(stepPeriod)))} Hz</strong></div>`;
+      }).join('');
+      diagnosticsEl.innerHTML = `
+        <div class="pce-assets-sequence">${rows}</div>
+        ${warnings.length ? warnings.map((warning) => `<div class="asset-warning">${esc(warning)}</div>`).join('') : '<p class="pce-assets-muted">警告はありません</p>'}
+      `;
+    } else if (isAudioAsset(asset)) {
+      generatedStatsEl.innerHTML = `
+        <div class="pce-assets-stat"><span>Sample rate</span><strong>${esc(generated.sampleRate || asset.options?.sampleRate || 0)}</strong></div>
+        <div class="pce-assets-stat"><span>Seconds</span><strong>${esc(Number(generated.durationSeconds || 0).toFixed(2))}</strong></div>
+        <div class="pce-assets-stat"><span>Bytes</span><strong>${esc(generated.byteLength || 0)}</strong></div>
+      `;
+      files = [
+        ['audio', generated.outputFile],
+        ['source', asset.source],
+      ].filter((entry) => entry[1]);
+      waveform = Array.isArray(generated.waveform) && generated.waveform.length
+        ? `<div class="pce-assets-waveform">${generated.waveform.slice(0, 64).map((value) => `<span style="height:${Math.max(2, Math.round(Number(value) * 30))}px"></span>`).join('')}</div>`
+        : '';
+    } else {
+      generatedStatsEl.innerHTML = `
+        <div class="pce-assets-stat"><span>Type</span><strong>${esc(asset.type || '-')}</strong></div>
+        <div class="pce-assets-stat"><span>Source</span><strong>${esc(asset.source ? 'あり' : 'なし')}</strong></div>
+        <div class="pce-assets-stat"><span>Status</span><strong>-</strong></div>
+      `;
+    }
     generatedFilesEl.innerHTML = files.length
       ? files.map(([label, file]) => `<div><span>${esc(label)}</span><code>${esc(file)}</code></div>`).join('')
       : '<p class="asset-no-selection-hint">まだ変換結果がありません</p>';
-    const colors = generated.paletteColors || [];
-    paletteEl.innerHTML = colors.length
-      ? colors.slice(0, 64).map((color, index) => `<span class="palette-swatch ${index % 16 === 0 ? 'is-transparent' : ''}" style="background:${esc(color)}" title="${index}: ${esc(color)}"></span>`).join('')
-      : Array.from({ length: 16 }, (_unused, index) => `<span class="palette-swatch is-empty ${index === 0 ? 'is-transparent' : ''}" title="${index}"></span>`).join('');
-    const warnings = [...(generated.warnings || []), asset.pathError].filter(Boolean);
-    diagnosticsEl.innerHTML = warnings.length
-      ? warnings.map((warning) => `<div class="asset-warning">${esc(warning)}</div>`).join('')
-      : '<p class="pce-assets-muted">警告はありません</p>';
+    if (!isPsgAsset(asset)) {
+      diagnosticsEl.innerHTML = warnings.length
+        ? `${waveform}${warnings.map((warning) => `<div class="asset-warning">${esc(warning)}</div>`).join('')}`
+        : waveform || '<p class="pce-assets-muted">警告はありません</p>';
+    }
   }
 
   function selectAsset(id) {
@@ -592,7 +869,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
               <img data-import-preview alt="Import preview" hidden />
               <div class="inline-no-preview" data-import-no-preview>PNG / BMP を選択してください</div>
             </div>
-            <div class="form-hint" data-import-hint>BG は SuperFamiconv `pce`、Sprite は `pce_sprite` で変換します。</div>
+            <div class="form-hint" data-import-hint>BG は SuperFamiconv <code>pce</code>、Sprite は <code>pce_sprite</code> で変換します。</div>
             <div class="form-error" data-import-error></div>
             <div class="form-actions-inline modal-actions-end">
               <button class="btn-sm" type="button" data-import-cancel>キャンセル</button>
@@ -707,6 +984,148 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     });
   }
 
+  async function openAudioImportWizard(defaultKind = 'adpcm', importFile = null) {
+    return new Promise((resolve) => {
+      const modal = api.createModal({
+        id: `${plugin.id}-audio-import-modal-${Date.now()}`,
+        panelClassName: 'app-panel pce-assets-import-panel',
+        html: `
+          <div class="page-header modal-header">
+            <h2>PCE 音声取り込み</h2>
+            <button class="icon-btn" type="button" data-import-cancel>✕</button>
+          </div>
+          <form class="settings-form compact-form pce-assets-import-form">
+            <div class="pce-assets-import-grid">
+              <label class="form-group">
+                <span class="form-label">種別</span>
+                <select class="form-select" name="kind">
+                  <option value="adpcm" ${defaultKind !== 'cdda-track' ? 'selected' : ''}>ADPCM sample</option>
+                  <option value="cdda-track" ${defaultKind === 'cdda-track' ? 'selected' : ''}>CD-DA track</option>
+                </select>
+              </label>
+              <label class="form-group">
+                <span class="form-label">ID</span>
+                <input class="form-input form-input-mono" name="id" />
+              </label>
+              <label class="form-group">
+                <span class="form-label">Name</span>
+                <input class="form-input" name="name" />
+              </label>
+              <label class="form-group" data-adpcm-only>
+                <span class="form-label">ADPCM sample rate</span>
+                <input class="form-input" name="sampleRate" type="number" min="4000" max="32000" value="16000" />
+              </label>
+              <label class="form-group" data-cdda-only>
+                <span class="form-label">CD-DA track</span>
+                <input class="form-input" name="track" type="number" min="2" max="99" value="2" />
+              </label>
+              <label class="form-group">
+                <span class="form-label">Loop</span>
+                <label class="pce-assets-check"><input name="loop" type="checkbox" /><span>loop</span></label>
+              </label>
+            </div>
+            <div class="pce-assets-import-source">
+              <button class="btn-sm" type="button" data-pick-audio>WAVを選択</button>
+              <code data-source-label>未選択</code>
+            </div>
+            <audio controls data-audio-preview hidden></audio>
+            <div class="form-hint" data-import-hint>ADPCM は OKI/MSM5205 系4bit、CD-DA は 44.1kHz/16bit/stereo WAV に正規化します。</div>
+            <div class="form-error" data-import-error></div>
+            <div class="form-actions-inline modal-actions-end">
+              <button class="btn-sm" type="button" data-import-cancel>キャンセル</button>
+              <button class="btn-primary" type="submit">変換して保存</button>
+            </div>
+          </form>
+        `,
+      });
+      const form = modal.panel.querySelector('form');
+      const sourceLabel = modal.panel.querySelector('[data-source-label]');
+      const preview = modal.panel.querySelector('[data-audio-preview]');
+      const error = modal.panel.querySelector('[data-import-error]');
+      const kindSelect = form.elements.kind;
+      let sourcePath = importFile?.sourcePath || '';
+      let sourceFileName = importFile?.fileName || '';
+
+      function syncKind() {
+        const isCdda = kindSelect.value === 'cdda-track';
+        modal.panel.querySelectorAll('[data-cdda-only]').forEach((el) => { el.hidden = !isCdda; });
+        modal.panel.querySelectorAll('[data-adpcm-only]').forEach((el) => { el.hidden = isCdda; });
+      }
+
+      async function setSource(filePath) {
+        sourcePath = filePath || '';
+        sourceFileName = sourcePath.split(/[\\/]/).pop() || '';
+        form.elements.id.value = sourceFileName.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]+/g, '_');
+        form.elements.name.value = sourceFileName.replace(/\.[^.]+$/, '');
+        sourceLabel.textContent = sourcePath || '未選択';
+        preview.hidden = true;
+        if (!sourcePath) return;
+        const read = await api.electronAPI.readFileAsDataUrl(sourcePath);
+        if (!read?.ok) {
+          error.textContent = read?.error || '音声を読み込めません';
+          return;
+        }
+        preview.src = read.dataUrl;
+        preview.hidden = false;
+      }
+
+      modal.panel.querySelector('[data-pick-audio]').addEventListener('click', async () => {
+        error.textContent = '';
+        const picked = await api.electronAPI.pickFile({
+          properties: ['openFile'],
+          filters: [{ name: 'WAV', extensions: ['wav'] }],
+        });
+        const filePath = picked?.sourcePath || picked?.filePath || picked?.filePaths?.[0] || '';
+        if (picked?.canceled || !filePath) return;
+        await setSource(filePath);
+      });
+      kindSelect.addEventListener('change', syncKind);
+      modal.panel.querySelectorAll('[data-import-cancel]').forEach((button) => {
+        button.addEventListener('click', () => {
+          modal.close();
+          modal.destroy?.();
+          resolve(null);
+        }, { once: true });
+      });
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        error.textContent = '';
+        if (!sourcePath) {
+          error.textContent = 'WAVを選択してください';
+          return;
+        }
+        try {
+          const result = await api.electronAPI.importAssetAudio({
+            sourcePath,
+            sourceFileName,
+            kind: form.elements.kind.value,
+            id: form.elements.id.value,
+            name: form.elements.name.value,
+            sampleRate: asNumber(form.elements.sampleRate?.value, 16000),
+            track: asNumber(form.elements.track?.value, 2),
+            loop: Boolean(form.elements.loop?.checked),
+          });
+          if (!result?.ok) throw new Error(result?.error || '取り込みに失敗しました');
+          logger.info(`PCE audio imported: ${result.asset?.id || form.elements.id.value}`);
+          modal.close();
+          modal.destroy?.();
+          resolve(result.asset || null);
+        } catch (err) {
+          error.textContent = err.message || String(err);
+        }
+      });
+      syncKind();
+      if (sourcePath) void setSource(sourcePath);
+      modal.open();
+    }).then(async (asset) => {
+      if (asset) {
+        selectedId = asset.id;
+        await reload();
+      }
+      return asset;
+    });
+  }
+
   root.querySelectorAll('[data-accordion]').forEach((button) => {
     button.addEventListener('click', () => {
       const key = button.dataset.accordion;
@@ -719,19 +1138,45 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 
   searchEl.addEventListener('input', renderRows);
   typeFilterEl.addEventListener('change', renderRows);
-  fields.type.addEventListener('change', () => setFieldVisibility(collectFormAsset()));
+  fields.type.addEventListener('change', () => {
+    const draftAsset = collectFormAsset();
+    setFieldVisibility(draftAsset);
+    renderGenerated(draftAsset);
+    void loadPreview(draftAsset);
+  });
   formEl.addEventListener('submit', saveSelected);
   deleteButton.addEventListener('click', () => deleteAsset());
+  root.querySelector('[data-action="preview-play"]').addEventListener('click', () => playPsgPreview());
+  root.querySelector('[data-action="preview-stop"]').addEventListener('click', stopPsgPreview);
   root.querySelector('[data-action="refresh"]').addEventListener('click', reload);
   root.querySelector('[data-action="import"]').addEventListener('click', () => openImportWizard('background'));
+  root.querySelector('[data-action="import-audio"]').addEventListener('click', () => openAudioImportWizard('adpcm'));
   root.querySelector('[data-action="new-psg"]').addEventListener('click', () => {
     const id = `beep_${Date.now()}`;
     assets.push({
       id,
-      type: 'psg-sequence',
+      type: 'psg-sfx',
       name: 'Beep',
       source: 'assets/sound/beep.json',
-      options: { period: 512 },
+      options: { period: 512, bpm: 150, steps: 16, loop: false },
+      data: {},
+    });
+    selectedId = id;
+    renderRows();
+    fillForm(selectedAsset());
+  });
+  root.querySelector('[data-action="new-palette"]').addEventListener('click', () => {
+    const id = `palette_${Date.now()}`;
+    assets.push({
+      id,
+      type: 'palette',
+      name: 'Palette',
+      source: '',
+      options: {
+        target: 'bg',
+        paletteBank: 0,
+        colors: ['#000000', '#ffffff', '#777777', '#ffcc33'],
+      },
       data: {},
     });
     selectedId = id;
@@ -745,8 +1190,27 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     openImportWizard,
     async handleImport(file = {}) {
       const ext = String(file.ext || extname(file.sourcePath || file.path || '')).toLowerCase();
-      if (!IMAGE_EXTS.includes(ext)) return null;
-      return openImportWizard(file.kind === 'sprite' ? 'sprite' : 'background', {
+      if (IMAGE_EXTS.includes(ext)) {
+        return openImportWizard(file.kind === 'sprite' ? 'sprite' : 'background', {
+          sourcePath: file.sourcePath || file.path,
+          fileName: file.fileName || '',
+        });
+      }
+      if (AUDIO_EXTS.includes(ext)) {
+        return openAudioImportWizard(file.kind === 'cdda-track' ? 'cdda-track' : 'adpcm', {
+          sourcePath: file.sourcePath || file.path,
+          fileName: file.fileName || '',
+        });
+      }
+      return null;
+    },
+  });
+  registerCapability('audio-import-handler', {
+    pluginId: plugin.id,
+    async handleImport(file = {}) {
+      const ext = String(file.ext || extname(file.sourcePath || file.path || '')).toLowerCase();
+      if (!AUDIO_EXTS.includes(ext)) return null;
+      return openAudioImportWizard(file.kind === 'cdda-track' ? 'cdda-track' : 'adpcm', {
         sourcePath: file.sourcePath || file.path,
         fileName: file.fileName || '',
       });
@@ -764,13 +1228,16 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
           isImageInput: true,
         };
       }
-      if (['.wav', '.vgm', '.json'].includes(ext)) {
-        return { initialType: 'psg-sequence', allowedTypes: ['psg-sequence'], defaultSubdir: 'assets/sound' };
+      if (ext === '.wav') {
+        return { initialType: 'adpcm', allowedTypes: ['adpcm', 'cdda-track'], defaultSubdir: 'assets/adpcm' };
+      }
+      if (['.vgm', '.json'].includes(ext)) {
+        return { initialType: 'psg-sfx', allowedTypes: ['psg-song', 'psg-sfx'], defaultSubdir: 'assets/sound' };
       }
       return null;
     },
   });
 
   void reload();
-  return { deactivate() {} };
+  return { deactivate: stopPsgPreview };
 }

@@ -109,6 +109,7 @@ test('main process uses a single instance lock and app shutdown hooks', () => {
   assert.equal(typeof lifecycle.events.get('will-quit'), 'function');
   assert.equal(typeof lifecycle.events.get('window-all-closed'), 'function');
   assert.equal(typeof lifecycle.api.prepareForAppQuit, 'function');
+  assert.equal(typeof lifecycle.api.requestAppQuit, 'function');
 
   lifecycle.events.get('window-all-closed')();
   assert.equal(lifecycle.getQuitRequests(), process.platform === 'darwin' ? 0 : 1);
@@ -117,12 +118,32 @@ test('main process uses a single instance lock and app shutdown hooks', () => {
 test('main lifecycle cleanup covers auxiliary windows and api child process', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
 
+  assert.match(source, /function closeDevToolsForWindow\([\s\S]*closeDevTools/);
+  assert.match(source, /function prepareForAppQuit\(\)[\s\S]*closeOpenDevTools/);
   assert.match(source, /function closeAuxiliaryWindows\(\)[\s\S]*debugWindow/);
   assert.match(source, /function closeAuxiliaryWindows\(\)[\s\S]*setupWindow/);
   assert.match(source, /function closeAuxiliaryWindows\(\)[\s\S]*testPlayWindow/);
   assert.match(source, /function closeAuxiliaryWindows\(\)[\s\S]*testPlaySettingsWindow/);
   assert.match(source, /function closeAuxiliaryWindows\(\)[\s\S]*logWindow/);
   assert.match(source, /function stopApiServerSync\(\)[\s\S]*taskkill/);
+  assert.match(source, /function installProcessTerminationHandlers\(\)[\s\S]*SIGTERM/);
+  assert.match(source, /async function stopApiServer\(\)[\s\S]*waitForProcessExit/);
+});
+
+test('closing an editor window also closes its DevTools', () => {
+  const api = loadMainForWindowState(makeTempUserData());
+  const calls = [];
+  const fakeWindow = {
+    isDestroyed: () => false,
+    webContents: {
+      isDevToolsOpened: () => true,
+      closeDevTools: () => calls.push('devtools'),
+    },
+    close: () => calls.push('window'),
+  };
+
+  assert.equal(api.closeWindowIfOpen(fakeWindow), true);
+  assert.deepEqual(calls, ['devtools', 'window']);
 });
 
 test('log snapshots are normalized and capped for popout forwarding', () => {

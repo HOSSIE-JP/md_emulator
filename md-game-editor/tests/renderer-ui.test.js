@@ -137,8 +137,15 @@ test('PCE asset manager uses MD-style panes and plugin-owned PCE IPC workflow', 
   assert.match(renderer, /asset-preview-panel/);
   assert.match(renderer, /accordion-section/);
   assert.match(renderer, /image-preview-frame/);
+  assert.match(renderer, /pce-assets-sound-preview/);
+  assert.match(renderer, /playPsgPreview/);
+  assert.match(renderer, /data-action="preview-play"/);
+  assert.match(renderer, /isPsgAsset\(asset\)[\s\S]*Sound[\s\S]*Period \/ Hz[\s\S]*Steps/);
   assert.match(renderer, /palette-swatch/);
   assert.match(renderer, /id="pceAssetEditorPanel"/);
+  assert.match(renderer, /data-action="import"[\s\S]*title="画像を取り込み"/);
+  assert.match(renderer, /data-action="import-audio"[\s\S]*title="音声を取り込み"/);
+  assert.doesNotMatch(renderer, /data-row-delete="[^"]*"[\s\S]*>Del<\/button>/);
   assert.doesNotMatch(renderer, /id="assetEditorPanel"/);
   assert.match(renderer, /api\.createModal/);
   assert.match(renderer, /picked\?\.sourcePath/);
@@ -317,7 +324,10 @@ test('plugin page availability keeps multiple editor plugin pages independent', 
   assert.match(renderer, /section\.hidden = !isStaticPageAvailableForActiveCore\(pageId\)[\s\S]*plugins\.some\(\(plugin\) => pluginSupportsActiveCore\(plugin\) && plugin\.enabled && \(plugin\.hasRenderer \|\| plugin\.tab\)\)/);
   assert.match(renderer, /document\.querySelectorAll\('\.editor-page:not\(\[data-plugin-page-owner\]\)'\)/);
   assert.doesNotMatch(renderer, /pageBindings\.set\(pageId,\s*plugin\)/);
+  assert.match(renderer, /function showPluginRendererError\(plugin,\s*root,\s*err\)/);
+  assert.match(renderer, /showPluginRendererError\(plugin,\s*root,\s*err\)/);
   assert.match(css, /\.editor-page:not\(\.active\)\s*\{\s*display:\s*none\s*!important;\s*\}/);
+  assert.match(css, /\.plugin-renderer-error/);
 });
 
 test('startup requires project selection and quits when canceled', () => {

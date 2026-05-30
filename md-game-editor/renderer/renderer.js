@@ -1090,6 +1090,18 @@ function clearPluginRuntime() {
   document.querySelectorAll('.editor-page[data-plugin-page-owner]').forEach((page) => page.remove());
 }
 
+function showPluginRendererError(plugin, root, err) {
+  if (!root) return;
+  const message = String(err?.message || err || 'unknown error');
+  root.innerHTML = `
+    <div class="plugin-renderer-error">
+      <h2>${escHtml(plugin?.name || plugin?.id || 'Plugin')} を読み込めませんでした</h2>
+      <p>プラグイン renderer の初期化に失敗しました。詳細は Log を確認してください。</p>
+      <pre>${escHtml(message)}</pre>
+    </div>
+  `;
+}
+
 async function activatePluginRenderers() {
   clearPluginRuntime();
 
@@ -1131,6 +1143,7 @@ async function activatePluginRenderers() {
       }
     } catch (err) {
       logger.error(`renderer 読み込み失敗: ${String(err?.message || err)}`);
+      showPluginRendererError(plugin, root, err);
     }
   }
 }
@@ -2909,6 +2922,16 @@ function validateSerial(value) {
   return '';
 }
 
+function safeMdAuthor(value) {
+  const text = String(value || '').trim();
+  return validateAuthor(text) ? 'AUTHOR' : text;
+}
+
+function safeMdSerial(value) {
+  const text = String(value || '').trim().toUpperCase();
+  return validateSerial(text) ? 'GM 00000000-00' : text;
+}
+
 function collectAndValidateSettings({ showError = true } = {}) {
   if (getActiveCoreId() === 'pc-engine') {
     const title = el.settingTitle?.value.trim() || state.projectConfig.title || state.projectConfig.romName || 'pce_sample';
@@ -3235,8 +3258,8 @@ async function loadProjectConfig() {
       const normalized = {
         coreId,
         title: cfg.title || cfg.romName || state.projectConfig.title,
-        author: cfg.author || state.projectConfig.author,
-        serial: cfg.serial || state.projectConfig.serial,
+        author: coreId === 'pc-engine' ? (cfg.author || state.projectConfig.author) : safeMdAuthor(cfg.author || state.projectConfig.author),
+        serial: coreId === 'pc-engine' ? (cfg.serial || state.projectConfig.serial) : safeMdSerial(cfg.serial || state.projectConfig.serial),
         region: cfg.region || 'JUE',
       };
       state.projectConfig = { ...state.projectConfig, ...cfg, ...normalized };

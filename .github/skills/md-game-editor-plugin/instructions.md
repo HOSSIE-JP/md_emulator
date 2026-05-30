@@ -127,6 +127,9 @@ editor plugin の `pageRoot` / `root` は `<section class="editor-page">` 自体
 プラグイン同士の連携は `api.capabilities.get()` / `api.capabilities.require()` / `api.events.on()` / `api.events.emit()` を使い、本体側に個別 plugin ID の分岐を追加しない。
 renderer から main process hook を呼ぶ場合は `hooks` と `mainApi.hooks` の両方に宣言し、`api.plugins.invokeHook()` または `window.electronAPI.invokePluginHook()` を使う。
 asset type / import / image 変換は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として登録する。
+PC Engine core の asset schema は `assets/pce-assets.json` v2 を標準にし、`image` / `sprite` / `palette` / `psg-song` / `psg-sfx` / `adpcm` / `cdda-track` を扱う。旧 `psg-sequence` は `psg-sfx` として正規化する。
+PCE 専用の標準 editor/converter は `pce-asset-manager` / `pce-sprite-editor` / `pce-palette-editor` / `pce-music-editor` / `pce-image-converter` / `pce-audio-converter` とし、`supportedCores: ["pc-engine"]` を宣言する。
+PCE-CD は `targetMedia: "cd"` + `toolchain: "llvm-mos"` の実験的ターゲットで、IPL / System Card はユーザー指定ファイルに限定し、plugin や repository に同梱しない。
 Build / Test Play など単一選択 plugin は `roles` で宣言し、project.json の標準保存先は `pluginRoles` とする。
 単一選択 role で競合 plugin が無効化される場合、その plugin に依存する plugin も同時に無効化される。
 Runtime v2.5 では `project.json.coreId` がプロジェクト単位の実効 core。未指定の既存 MD project は `mega-drive`、`platform: "pce"` を持つ既存 PCE project は `pc-engine` として扱う。
@@ -298,4 +301,4 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 
 ---
 
-*Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / AI Control API / TileMap collision / Rhythm game plugins / Editor UX guardrails*
+*Last Updated: 2026-05 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins / Dungeon generated wall patterns / Dungeon SGDK TILESET/TILEMAP assets / Dungeon template / Editor UX guardrails*

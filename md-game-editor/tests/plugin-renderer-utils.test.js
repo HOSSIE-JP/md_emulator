@@ -10,6 +10,12 @@ async function importPluginModule(...segments) {
   return import(pathToFileURL(path.join(__dirname, '..', 'plugins', ...segments)).href);
 }
 
+async function importPluginSourceAsModule(...segments) {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'plugins', ...segments), 'utf-8');
+  const url = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+  return import(url);
+}
+
 test('asset-manager utility functions keep asset defaults stable', async () => {
   const utils = await importPluginModule('asset-manager', 'asset-utils.mjs');
 
@@ -121,6 +127,12 @@ test('PCE asset manager declares plugin-owned import workflow without MD rescomp
   assert.match(rendererSource, /dataUrlToPng/);
   assert.match(rendererSource, /allowedTypes:\s*\['image',\s*'sprite'\]/);
   assert.doesNotMatch(rendererSource, /listResDefinitions|addResEntry|writeAssetFile|deleteResEntry|state\.rescomp/);
+});
+
+test('PCE asset manager renderer remains importable as an ES module', async () => {
+  const module = await importPluginSourceAsModule('pce-asset-manager', 'renderer.js');
+
+  assert.equal(typeof module.activatePlugin, 'function');
 });
 
 function makePngChunk(type, data) {

@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-05 / Plugin Runtime v2.5 / Core Plugin / AI Control API / TileMap collision / Rhythm game plugins / Editor UX guardrails
+> § Last Updated: 2026-05 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins / Dungeon generated wall patterns / Dungeon SGDK TILESET/TILEMAP assets / Dungeon template / Editor UX guardrails
 
 ---
 
@@ -125,6 +125,9 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 - プラグイン同士の連携は `api.capabilities.get()` / `api.capabilities.require()` / `api.events.on()` / `api.events.emit()` を使い、本体側に個別 plugin ID の分岐を追加しない
 - renderer から main process hook を呼ぶ場合は `hooks` と `mainApi.hooks` の両方に宣言し、`api.plugins.invokeHook()` または `window.electronAPI.invokePluginHook()` を使う
 - asset type / import / image 変換は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として登録する。標準コピー前に独自 wizard を挟む場合は `asset-import-handler.handleImport(payload)` を実装する
+- PCE core では `assets/pce-assets.json` v2 を使い、標準タイプは `image` / `sprite` / `palette` / `psg-song` / `psg-sfx` / `adpcm` / `cdda-track`。旧 `psg-sequence` は `psg-sfx` として扱う
+- 組み込み PCE editor は `pce-asset-manager` / `pce-sprite-editor` / `pce-palette-editor` / `pce-music-editor`、converter は `pce-image-converter` / `pce-audio-converter`
+- PCE-CD は `project.json.targetMedia: "cd"` と `toolchain: "llvm-mos"` を前提にした実験的ターゲット。IPL / System Card はユーザー指定ファイルとして扱い、リポジトリや plugin へ同梱しない
 - Build / Test Play など単一選択 plugin は `roles` で宣言し、project.json の標準保存先は `pluginRoles` とする
 - 単一選択 role で競合 plugin が無効化される場合、その plugin に依存する plugin も同時に無効化される
 - `src/boot/rom_head.c` はプロジェクト設定からエディタ本体が生成するため、build plugin のテンプレート同期で上書きしない
@@ -340,6 +343,8 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `md-bgm-composer` | `editor`, `converter`, `asset` | Mega Drive 向け BGM tracker、MIDI import、VGM/XGM export、XGM2 アセット登録 |
 | `rhythm-game-editor` | `editor`, `asset` | Mega Drive 向けリズムゲームの楽曲/譜面/波形/アルバムアート/ムードスプライト/システムアセット設定 |
 | `rhythm-game-builder` | `build` | リズムゲームエンジン同期、譜面/RES/C データ生成、builder role による ROM ビルド連携 |
+| `dungeon-game-editor` | `editor` | Mega Drive 向け 3D ダンジョンの薄壁フロア編集、ランダム生成、ミニマップ付き 3D プレビュー、フロア別素材設定、3Dビュー由来の SGDK TILESET/TILEMAP アセット生成 |
+| `dungeon-game-builder` | `build` | 25x16 BG タイル描画のダンジョンエンジン同期、フロア/生成済みビュー TILEMAP アセット、builder role による ROM ビルド連携 |
 | `standard-emulator` | `emulator` | WASM Mega Drive エミュレーター |
 | `standard-api-emulator` | `emulator`, `tool` | REST API Mega Drive エミュレーター |
 | `ai-control` | `editor`, `tool` | 外部 AI ツール向け localhost REST / MCP bridge |

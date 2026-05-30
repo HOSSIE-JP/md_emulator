@@ -139,6 +139,19 @@ test('listPlugins marks hasGenerator only when generateSource is exported or dec
   assert.equal(plugins.get('pce-sample-builder').hasGenerator, false);
 });
 
+test('built-in PCE asset editor suite is scoped to the PC Engine core', () => {
+  const userData = makeTempUserData();
+  const pluginManager = loadWithMockedElectron(path.join(__dirname, '..', 'plugin-manager.js'), { userData });
+  const pcePlugins = new Map(pluginManager.listPlugins({ coreId: 'pc-engine' }).map((plugin) => [plugin.id, plugin]));
+
+  ['pce-asset-manager', 'pce-sprite-editor', 'pce-music-editor', 'pce-palette-editor', 'pce-image-converter', 'pce-audio-converter'].forEach((id) => {
+    assert.equal(pcePlugins.has(id), true, `${id} should be available for PC Engine`);
+    assert.deepEqual(pcePlugins.get(id).supportedCores, ['pc-engine']);
+  });
+  assert.equal(pcePlugins.get('pce-asset-manager').renderer.capabilities.includes('audio-import-handler'), true);
+  assert.equal(pcePlugins.get('pce-music-editor').tab.page, 'pce-music-editor');
+});
+
 test('setEnabledWithDependencies enables dependencies and reports missing ones', () => {
   const userData = makeTempUserData();
   writePlugin(userData, 'alpha', { dependencies: ['beta', 'missing-plugin'] });

@@ -89,7 +89,7 @@ npm run copy-pkg
 
 ```powershell
 cd md-game-editor
-npm start          # copy-pkg → electron . でアプリを起動
+npm start          # 起動準備後、Electron をシグナル転送ラッパー経由で起動
 # または
 npm run dev        # start と同等
 ```

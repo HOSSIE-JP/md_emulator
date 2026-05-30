@@ -1,241 +1,64 @@
+#include <stdint.h>
+
 #if defined(__CC65__)
 #include <conio.h>
 #include <joystick.h>
 #include <pce.h>
 #elif defined(__PCE__)
 #include <pce.h>
-#include <stdint.h>
-
-#define COLOR_BLACK 0
-#define COLOR_WHITE 1
-#define COLOR_YELLOW 7
-#define COLOR_LIGHTBLUE 14
-#define COLOR_GRAY2 12
-
-#define TEXT_COLS 32
-#define FONT_BASE_TILE 256
-
-static unsigned char pce_text_palette = 0;
-static unsigned char pce_text_ready = 0;
-
-static const uint8_t glyph_blank[7] = { 0, 0, 0, 0, 0, 0, 0 };
-static const uint8_t glyph_hash[7] = { 10, 31, 10, 10, 31, 10, 0 };
-static const uint8_t glyph_dot[7] = { 0, 0, 0, 0, 0, 12, 12 };
-static const uint8_t glyph_colon[7] = { 0, 12, 12, 0, 12, 12, 0 };
-static const uint8_t glyph_dash[7] = { 0, 0, 0, 31, 0, 0, 0 };
-static const uint8_t glyph_slash[7] = { 1, 2, 4, 8, 16, 0, 0 };
-static const uint8_t glyph_0[7] = { 14, 17, 19, 21, 25, 17, 14 };
-static const uint8_t glyph_1[7] = { 4, 12, 4, 4, 4, 4, 14 };
-static const uint8_t glyph_2[7] = { 14, 17, 1, 2, 4, 8, 31 };
-static const uint8_t glyph_3[7] = { 30, 1, 1, 14, 1, 1, 30 };
-static const uint8_t glyph_4[7] = { 2, 6, 10, 18, 31, 2, 2 };
-static const uint8_t glyph_5[7] = { 31, 16, 30, 1, 1, 17, 14 };
-static const uint8_t glyph_6[7] = { 6, 8, 16, 30, 17, 17, 14 };
-static const uint8_t glyph_7[7] = { 31, 1, 2, 4, 8, 8, 8 };
-static const uint8_t glyph_8[7] = { 14, 17, 17, 14, 17, 17, 14 };
-static const uint8_t glyph_9[7] = { 14, 17, 17, 15, 1, 2, 12 };
-static const uint8_t glyph_A[7] = { 14, 17, 17, 31, 17, 17, 17 };
-static const uint8_t glyph_B[7] = { 30, 17, 17, 30, 17, 17, 30 };
-static const uint8_t glyph_C[7] = { 14, 17, 16, 16, 16, 17, 14 };
-static const uint8_t glyph_D[7] = { 30, 17, 17, 17, 17, 17, 30 };
-static const uint8_t glyph_E[7] = { 31, 16, 16, 30, 16, 16, 31 };
-static const uint8_t glyph_F[7] = { 31, 16, 16, 30, 16, 16, 16 };
-static const uint8_t glyph_G[7] = { 14, 17, 16, 23, 17, 17, 14 };
-static const uint8_t glyph_H[7] = { 17, 17, 17, 31, 17, 17, 17 };
-static const uint8_t glyph_I[7] = { 14, 4, 4, 4, 4, 4, 14 };
-static const uint8_t glyph_J[7] = { 7, 2, 2, 2, 18, 18, 12 };
-static const uint8_t glyph_K[7] = { 17, 18, 20, 24, 20, 18, 17 };
-static const uint8_t glyph_L[7] = { 16, 16, 16, 16, 16, 16, 31 };
-static const uint8_t glyph_M[7] = { 17, 27, 21, 21, 17, 17, 17 };
-static const uint8_t glyph_N[7] = { 17, 25, 21, 19, 17, 17, 17 };
-static const uint8_t glyph_O[7] = { 14, 17, 17, 17, 17, 17, 14 };
-static const uint8_t glyph_P[7] = { 30, 17, 17, 30, 16, 16, 16 };
-static const uint8_t glyph_Q[7] = { 14, 17, 17, 17, 21, 18, 13 };
-static const uint8_t glyph_R[7] = { 30, 17, 17, 30, 20, 18, 17 };
-static const uint8_t glyph_S[7] = { 15, 16, 16, 14, 1, 1, 30 };
-static const uint8_t glyph_T[7] = { 31, 4, 4, 4, 4, 4, 4 };
-static const uint8_t glyph_U[7] = { 17, 17, 17, 17, 17, 17, 14 };
-static const uint8_t glyph_V[7] = { 17, 17, 17, 17, 17, 10, 4 };
-static const uint8_t glyph_W[7] = { 17, 17, 17, 21, 21, 21, 10 };
-static const uint8_t glyph_X[7] = { 17, 17, 10, 4, 10, 17, 17 };
-static const uint8_t glyph_Y[7] = { 17, 17, 10, 4, 4, 4, 4 };
-static const uint8_t glyph_Z[7] = { 31, 1, 2, 4, 8, 16, 31 };
-
-static const uint8_t *glyph_for(unsigned char c)
-{
-    if (c >= 'a' && c <= 'z') c = (unsigned char)(c - 32);
-    switch (c)
-    {
-        case '#': return glyph_hash;
-        case '.': return glyph_dot;
-        case ':': return glyph_colon;
-        case '-': return glyph_dash;
-        case '/': return glyph_slash;
-        case '0': return glyph_0;
-        case '1': return glyph_1;
-        case '2': return glyph_2;
-        case '3': return glyph_3;
-        case '4': return glyph_4;
-        case '5': return glyph_5;
-        case '6': return glyph_6;
-        case '7': return glyph_7;
-        case '8': return glyph_8;
-        case '9': return glyph_9;
-        case 'A': return glyph_A;
-        case 'B': return glyph_B;
-        case 'C': return glyph_C;
-        case 'D': return glyph_D;
-        case 'E': return glyph_E;
-        case 'F': return glyph_F;
-        case 'G': return glyph_G;
-        case 'H': return glyph_H;
-        case 'I': return glyph_I;
-        case 'J': return glyph_J;
-        case 'K': return glyph_K;
-        case 'L': return glyph_L;
-        case 'M': return glyph_M;
-        case 'N': return glyph_N;
-        case 'O': return glyph_O;
-        case 'P': return glyph_P;
-        case 'Q': return glyph_Q;
-        case 'R': return glyph_R;
-        case 'S': return glyph_S;
-        case 'T': return glyph_T;
-        case 'U': return glyph_U;
-        case 'V': return glyph_V;
-        case 'W': return glyph_W;
-        case 'X': return glyph_X;
-        case 'Y': return glyph_Y;
-        case 'Z': return glyph_Z;
-        default: return glyph_blank;
-    }
-}
-
-static void upload_font_tile(unsigned char c)
-{
-    uint8_t tile[32];
-    unsigned char y;
-    const uint8_t *glyph = glyph_for(c);
-    for (y = 0; y < 8; y++)
-    {
-        const uint8_t bits = y < 7 ? (uint8_t)(glyph[y] << 1) : 0;
-        tile[(y * 2)] = bits;
-        tile[(y * 2) + 1] = 0;
-        tile[16 + (y * 2)] = 0;
-        tile[16 + (y * 2) + 1] = 0;
-    }
-    pce_vdc_copy_to_vram((uint16_t)((FONT_BASE_TILE + c) * 16u), tile, sizeof(tile));
-}
-
-static void init_text_screen(void)
-{
-    unsigned int c;
-    uint16_t row[TEXT_COLS];
-    unsigned char y;
-    if (pce_text_ready) return;
-    pce_vdc_set_resolution(256, 224, VCE_COLORBURST_ON);
-    pce_vdc_bg_set_size(VDC_BG_SIZE_32_32);
-    pce_vdc_set_copy_word();
-    pce_vce_set_color(VCE_COLOR_INDEX(0, 0), VCE_COLOR(0, 0, 0));
-    pce_vce_set_color(VCE_COLOR_INDEX(0, 1), VCE_COLOR(7, 7, 7));
-    pce_vce_set_color(VCE_COLOR_INDEX(1, 0), VCE_COLOR(0, 0, 0));
-    pce_vce_set_color(VCE_COLOR_INDEX(1, 1), VCE_COLOR(7, 7, 0));
-    pce_vce_set_color(VCE_COLOR_INDEX(2, 0), VCE_COLOR(0, 0, 0));
-    pce_vce_set_color(VCE_COLOR_INDEX(2, 1), VCE_COLOR(2, 5, 7));
-    pce_vce_set_color(VCE_COLOR_INDEX(3, 0), VCE_COLOR(0, 0, 0));
-    pce_vce_set_color(VCE_COLOR_INDEX(3, 1), VCE_COLOR(4, 4, 4));
-    for (c = 0; c < 128; c++)
-    {
-        upload_font_tile((unsigned char)c);
-    }
-    for (c = 0; c < TEXT_COLS; c++)
-    {
-        row[c] = (uint16_t)(FONT_BASE_TILE + ' ');
-    }
-    for (y = 0; y < 28; y++)
-    {
-        pce_vdc_copy_to_vram((uint16_t)(y * TEXT_COLS), row, sizeof(row));
-    }
-    pce_vdc_bg_enable();
-    pce_text_ready = 1;
-}
-
-static void bgcolor(unsigned char color) { (void)color; }
-static void bordercolor(unsigned char color) { (void)color; }
-static void cursor(unsigned char onoff) { (void)onoff; }
-static void textcolor(unsigned char color)
-{
-    pce_text_palette = color == COLOR_YELLOW ? 1 : (color == COLOR_LIGHTBLUE ? 2 : (color == COLOR_GRAY2 ? 3 : 0));
-}
-static void clrscr(void) { pce_text_ready = 0; init_text_screen(); }
-static void cputsxy(unsigned char x, unsigned char y, const char *s)
-{
-    uint16_t addr;
-    uint16_t entry;
-    unsigned char ch;
-    init_text_screen();
-    while (*s && x < TEXT_COLS)
-    {
-        ch = (unsigned char)*s++;
-        if (ch >= 'a' && ch <= 'z') ch = (unsigned char)(ch - 32);
-        addr = (uint16_t)(y * TEXT_COLS + x);
-        entry = (uint16_t)(((uint16_t)pce_text_palette << 12) | (FONT_BASE_TILE + ch));
-        pce_vdc_copy_to_vram(addr, &entry, sizeof(entry));
-        x++;
-    }
-}
-static void waitvsync(void)
-{
-    volatile unsigned int delay;
-    for (delay = 0; delay < 6000; delay++) {}
-}
-#else
-#include <stdint.h>
-static void bgcolor(unsigned char color) { (void)color; }
-static void bordercolor(unsigned char color) { (void)color; }
-static void cputsxy(unsigned char x, unsigned char y, const char *s) { (void)x; (void)y; (void)s; }
-static void cursor(unsigned char onoff) { (void)onoff; }
-static void clrscr(void) {}
-static void textcolor(unsigned char color) { (void)color; }
-static void waitvsync(void) {}
-#define COLOR_BLACK 0
-#define COLOR_WHITE 1
-#define COLOR_YELLOW 7
-#define COLOR_LIGHTBLUE 14
-#define COLOR_GRAY2 12
 #endif
 
 #include "generated/assets.h"
 
+#define PAD_I 0x01u
+#define PAD_II 0x02u
+#define PAD_SEL 0x04u
+#define PAD_RUN 0x08u
+#define PAD_UP 0x10u
+#define PAD_RIGHT 0x20u
+#define PAD_DOWN 0x40u
+#define PAD_LEFT 0x80u
+
+#define PCE_VCE_ADDR_LO (*(volatile uint8_t *)0x0402)
+#define PCE_VCE_ADDR_HI (*(volatile uint8_t *)0x0403)
+#define PCE_VCE_DATA_LO (*(volatile uint8_t *)0x0404)
+#define PCE_VCE_DATA_HI (*(volatile uint8_t *)0x0405)
+
+#define PCE_PSG_SELECT (*(volatile uint8_t *)0x0800)
+#define PCE_PSG_GLOBAL (*(volatile uint8_t *)0x0801)
+#define PCE_PSG_FREQ_LO (*(volatile uint8_t *)0x0802)
+#define PCE_PSG_FREQ_HI (*(volatile uint8_t *)0x0803)
+#define PCE_PSG_CONTROL (*(volatile uint8_t *)0x0804)
+#define PCE_PSG_BALANCE (*(volatile uint8_t *)0x0805)
+#define PCE_PSG_WAVE (*(volatile uint8_t *)0x0806)
+
 #if defined(__CC65__)
-#define PCE_VDC_CTRL (*(volatile unsigned char *)0x0200)
-#define PCE_VDC_DATA_LO (*(volatile unsigned char *)0x0202)
-#define PCE_VDC_DATA_HI (*(volatile unsigned char *)0x0203)
-#define PCE_VCE_ADDR_LO (*(volatile unsigned char *)0x0402)
-#define PCE_VCE_ADDR_HI (*(volatile unsigned char *)0x0403)
-#define PCE_VCE_DATA_LO (*(volatile unsigned char *)0x0404)
-#define PCE_VCE_DATA_HI (*(volatile unsigned char *)0x0405)
+#define PCE_VDC_CTRL (*(volatile uint8_t *)0x0200)
+#define PCE_VDC_DATA_LO (*(volatile uint8_t *)0x0202)
+#define PCE_VDC_DATA_HI (*(volatile uint8_t *)0x0203)
 #define PCE_VDC_CR_BG_ENABLE 0x0080u
 #define PCE_VDC_CR_DRAM_REFRESH 0x0400u
 #define PCE_VDC_CR_VRAM_ADD_1 0x0000u
 
-static void pce_editor_vdc_write(unsigned char reg, unsigned int value)
+static uint8_t pce_pad_ready = 0;
+
+static void pce_editor_vdc_write(uint8_t reg, uint16_t value)
 {
     PCE_VDC_CTRL = reg;
-    PCE_VDC_DATA_LO = (unsigned char)(value & 0xff);
-    PCE_VDC_DATA_HI = (unsigned char)((value >> 8) & 0xff);
+    PCE_VDC_DATA_LO = (uint8_t)(value & 0xffu);
+    PCE_VDC_DATA_HI = (uint8_t)((value >> 8) & 0xffu);
 }
 
-static void pce_editor_vram_copy(unsigned int dest, const unsigned char *source, unsigned int length)
+static void pce_editor_vram_copy(uint16_t dest, const uint8_t *source, uint16_t length)
 {
     pce_editor_vdc_write(5, PCE_VDC_CR_BG_ENABLE | PCE_VDC_CR_DRAM_REFRESH | PCE_VDC_CR_VRAM_ADD_1);
     pce_editor_vdc_write(0, dest);
     PCE_VDC_CTRL = 2;
-    while (length >= 2)
+    while (length >= 2u)
     {
         PCE_VDC_DATA_LO = *source++;
         PCE_VDC_DATA_HI = *source++;
-        length -= 2;
+        length = (uint16_t)(length - 2u);
     }
     if (length)
     {
@@ -244,299 +67,316 @@ static void pce_editor_vram_copy(unsigned int dest, const unsigned char *source,
     }
 }
 
-static void pce_editor_vce_copy_palette(unsigned char palette_bank, const unsigned char *source, unsigned int length)
+static void pce_editor_init_video(void)
 {
-    unsigned int offset = (unsigned int)palette_bank * 16u;
-    PCE_VCE_ADDR_LO = (unsigned char)(offset & 0xff);
-    PCE_VCE_ADDR_HI = (unsigned char)((offset >> 8) & 0xff);
-    while (length >= 2)
-    {
-        PCE_VCE_DATA_LO = *source++;
-        PCE_VCE_DATA_HI = *source++;
-        length -= 2;
-    }
+    bordercolor(0);
+    bgcolor(0);
+    cursor(0);
+    clrscr();
 }
 
-static void upload_generated_bg_asset(void)
+static uint8_t read_pad_raw(void)
 {
-    const pce_editor_bg_asset_t *bg;
-    unsigned char row;
-    unsigned int row_bytes;
-    if (!pce_editor_bg_asset_count) return;
-    bg = &pce_editor_bg_assets[0];
-    if (bg->palette && bg->palette_size)
-    {
-        pce_editor_vce_copy_palette(bg->palette_bank, bg->palette, bg->palette_size);
-    }
-    if (bg->tiles && bg->tiles_size)
-    {
-        pce_editor_vram_copy((unsigned int)(bg->tile_base * 16u), bg->tiles, bg->tiles_size);
-    }
-    if (bg->map && bg->map_size)
-    {
-        row_bytes = (unsigned int)bg->width_tiles * 2u;
-        for (row = 0; row < bg->height_tiles; row++)
-        {
-            pce_editor_vram_copy(
-                (unsigned int)(bg->map_base + ((unsigned int)row * 32u)),
-                bg->map + ((unsigned int)row * row_bytes),
-                row_bytes
-            );
-        }
-    }
-}
-#elif defined(__PCE__)
-static void upload_generated_bg_asset(void)
-{
-    const pce_editor_bg_asset_t *bg;
-    unsigned char palette_count;
-    unsigned char row;
-    unsigned int row_bytes;
-    if (!pce_editor_bg_asset_count) return;
-    bg = &pce_editor_bg_assets[0];
-    if (bg->palette && bg->palette_size)
-    {
-        palette_count = (unsigned char)(bg->palette_size / 32u);
-        if (!palette_count) palette_count = 1;
-        pce_vce_copy_palette(bg->palette_bank, bg->palette, palette_count);
-    }
-    if (bg->tiles && bg->tiles_size)
-    {
-        pce_vdc_copy_to_vram((uint16_t)(bg->tile_base * 16u), bg->tiles, (uint16_t)bg->tiles_size);
-    }
-    if (bg->map && bg->map_size)
-    {
-        row_bytes = (unsigned int)bg->width_tiles * 2u;
-        for (row = 0; row < bg->height_tiles; row++)
-        {
-            pce_vdc_copy_to_vram(
-                (uint16_t)(bg->map_base + ((unsigned int)row * 32u)),
-                bg->map + ((unsigned int)row * row_bytes),
-                (uint16_t)row_bytes
-            );
-        }
-    }
-}
-
-static unsigned int sprite_height_attr(unsigned char height)
-{
-    if (height >= 64) return VDC_SPRITE_HEIGHT_64;
-    if (height >= 32) return VDC_SPRITE_HEIGHT_32;
-    return VDC_SPRITE_HEIGHT_16;
-}
-
-static void upload_generated_sprite_asset(void)
-{
-    const pce_editor_sprite_asset_t *sprite;
-    vdc_sprite_t satb[64];
-    unsigned char i;
-    unsigned char palette_count;
-    unsigned int attr;
-    if (!pce_editor_sprite_asset_count) return;
-    sprite = &pce_editor_sprite_assets[0];
-    if (sprite->palette && sprite->palette_size)
-    {
-        palette_count = (unsigned char)(sprite->palette_size / 32u);
-        if (!palette_count) palette_count = 1;
-        pce_vce_copy_palette((uint8_t)(16u + sprite->palette_bank), sprite->palette, palette_count);
-    }
-    if (sprite->patterns && sprite->patterns_size)
-    {
-        pce_vdc_copy_to_vram((uint16_t)(sprite->pattern_base * 64u), sprite->patterns, (uint16_t)sprite->patterns_size);
-    }
-    for (i = 0; i < 64; i++)
-    {
-        satb[i].y = 0;
-        satb[i].x = 0;
-        satb[i].pattern = 0;
-        satb[i].attr = 0;
-    }
-    attr = VDC_SPRITE_FG | VDC_SPRITE_COLOR(sprite->palette_bank);
-    if (sprite->cell_width >= 32) attr |= VDC_SPRITE_WIDTH_32;
-    attr |= sprite_height_attr(sprite->cell_height);
-    satb[0].y = (uint16_t)(sprite->y + 64u);
-    satb[0].x = (uint16_t)(sprite->x + 32u);
-    satb[0].pattern = (uint16_t)sprite->pattern_base;
-    satb[0].attr = (uint16_t)attr;
-    pce_vdc_sprite_set_table_start(0x7f00u);
-    pce_vdc_copy_to_vram(0x7f00u, satb, sizeof(satb));
-    pce_vdc_sprite_enable();
-}
-#endif
-
-static void upload_converted_assets(void)
-{
-#if defined(__CC65__)
-    upload_generated_bg_asset();
-#elif defined(__PCE__)
-    upload_generated_bg_asset();
-    upload_generated_sprite_asset();
-#endif
-}
-
-#define PCE_PSG_SELECT (*(volatile unsigned char *)0x0800)
-#define PCE_PSG_GLOBAL (*(volatile unsigned char *)0x0801)
-#define PCE_PSG_FREQ_LO (*(volatile unsigned char *)0x0802)
-#define PCE_PSG_FREQ_HI (*(volatile unsigned char *)0x0803)
-#define PCE_PSG_CONTROL (*(volatile unsigned char *)0x0804)
-#define PCE_PSG_BALANCE (*(volatile unsigned char *)0x0805)
-
-#if defined(__CC65__)
-static unsigned char pce_pad_ready = 0;
-#endif
-
-static unsigned char read_pad_raw(void)
-{
-#if defined(__CC65__)
     if (!pce_pad_ready)
     {
         joy_install((void *)pce_stdjoy_joy);
         pce_pad_ready = 1;
     }
     return joy_read(JOY_1);
+}
 #elif defined(__PCE__)
+static void pce_editor_vram_copy(uint16_t dest, const uint8_t *source, uint16_t length)
+{
+    pce_vdc_copy_to_vram(dest, source, length);
+}
+
+static void pce_editor_init_video(void)
+{
+    pce_vdc_set_resolution(256, 224, VCE_COLORBURST_ON);
+    pce_vdc_bg_set_size(VDC_BG_SIZE_32_32);
+    pce_vdc_set_copy_word();
+    pce_vdc_bg_enable();
+}
+
+static uint8_t read_pad_raw(void)
+{
     return pce_joypad_read();
+}
 #else
-    return 0;
+static void pce_editor_vram_copy(uint16_t dest, const uint8_t *source, uint16_t length)
+{
+    (void)dest;
+    (void)source;
+    (void)length;
+}
+
+static void pce_editor_init_video(void) {}
+static uint8_t read_pad_raw(void) { return 0; }
 #endif
+
+static uint8_t current_slide = 0;
+static uint8_t bgm_step = 0;
+static uint8_t bgm_frame = 0;
+
+static void sample_wait_delay(void)
+{
+    volatile uint16_t delay;
+    for (delay = 0; delay < 6200u; delay++) {}
 }
 
-static void draw_hex(unsigned char value)
+static uint16_t scale_vce_color(uint16_t color, uint8_t level)
 {
-    static const char hex[] = "0123456789ABCDEF";
-    char out[3];
-    out[0] = hex[(value >> 4) & 0x0f];
-    out[1] = hex[value & 0x0f];
-    out[2] = 0;
-    textcolor(value ? COLOR_YELLOW : COLOR_LIGHTBLUE);
-    cputsxy(12, 5, out);
-    textcolor(COLOR_WHITE);
+    uint16_t r = color & 0x0007u;
+    uint16_t g = (color >> 3) & 0x0007u;
+    uint16_t b = (color >> 6) & 0x0007u;
+    r = (uint16_t)((r * level) / 16u);
+    g = (uint16_t)((g * level) / 16u);
+    b = (uint16_t)((b * level) / 16u);
+    return (uint16_t)(r | (g << 3) | (b << 6));
 }
 
-static void draw_hex_at(unsigned char x, unsigned char y, unsigned char value)
+static void vce_write_color(uint16_t index, uint16_t color)
 {
-    static const char hex[] = "0123456789ABCDEF";
-    char out[3];
-    out[0] = hex[(value >> 4) & 0x0f];
-    out[1] = hex[value & 0x0f];
-    out[2] = 0;
-    textcolor(COLOR_LIGHTBLUE);
-    cputsxy(x, y, out);
-    textcolor(COLOR_WHITE);
+    PCE_VCE_ADDR_LO = (uint8_t)(index & 0xffu);
+    PCE_VCE_ADDR_HI = (uint8_t)((index >> 8) & 0xffu);
+    PCE_VCE_DATA_LO = (uint8_t)(color & 0xffu);
+    PCE_VCE_DATA_HI = (uint8_t)((color >> 8) & 0xffu);
 }
 
-static void draw_frame(unsigned int frame)
+static const uint8_t *data_ref_ptr(const pce_editor_data_ref_t *ref)
 {
-    static const char hex[] = "0123456789ABCDEF";
-    char out[5];
-    out[0] = hex[(frame >> 12) & 0x0f];
-    out[1] = hex[(frame >> 8) & 0x0f];
-    out[2] = hex[(frame >> 4) & 0x0f];
-    out[3] = hex[frame & 0x0f];
-    out[4] = 0;
-    textcolor(COLOR_LIGHTBLUE);
-    cputsxy(12, 4, out);
-    textcolor(COLOR_WHITE);
-}
-
-static void draw_button_state(unsigned char x, unsigned char y, const char *label, unsigned char active)
-{
-    textcolor(active ? COLOR_YELLOW : COLOR_GRAY2);
-    cputsxy(x, y, label);
-    textcolor(COLOR_WHITE);
-}
-
-static void draw_pad_state(unsigned char pad)
-{
-    draw_button_state(2, 7, "I", pad & 0x01);
-    draw_button_state(6, 7, "II", pad & 0x02);
-    draw_button_state(11, 7, "SEL", pad & 0x04);
-    draw_button_state(17, 7, "RUN", pad & 0x08);
-    draw_button_state(2, 8, "UP", pad & 0x10);
-    draw_button_state(7, 8, "RIGHT", pad & 0x20);
-    draw_button_state(15, 8, "DOWN", pad & 0x40);
-    draw_button_state(23, 8, "LEFT", pad & 0x80);
-}
-
-static void play_beep(unsigned int period)
-{
-    PCE_PSG_SELECT = 0;
-    PCE_PSG_GLOBAL = 0xff;
-    PCE_PSG_FREQ_LO = (unsigned char)(period & 0xff);
-    PCE_PSG_FREQ_HI = (unsigned char)((period >> 8) & 0x0f);
-    PCE_PSG_BALANCE = 0xff;
-    PCE_PSG_CONTROL = 0x9f;
-}
-
-static void draw_generated_image(void)
-{
-    unsigned char row;
-    for (row = 0; row < pce_editor_image_row_count; row++)
+    if (!ref) return 0;
+    if (ref->chunk_count && ref->chunks)
     {
-        if (row >= 8) break;
-        cputsxy(2, (unsigned char)(14 + row), pce_editor_image_rows[row]);
+        pce_editor_map_asset_bank(ref->chunks[0].bank);
+        return ref->chunks[0].data;
+    }
+    return ref->data;
+}
+
+static void copy_data_ref_to_vram(uint16_t dest, const pce_editor_data_ref_t *ref)
+{
+    uint8_t i;
+    uint16_t word_offset = 0;
+    if (!ref || !ref->size) return;
+    if (ref->chunk_count && ref->chunks)
+    {
+        for (i = 0; i < ref->chunk_count; i++)
+        {
+            const pce_editor_data_chunk_t *chunk = &ref->chunks[i];
+            if (!chunk->data || !chunk->size) continue;
+            pce_editor_map_asset_bank(chunk->bank);
+            pce_editor_vram_copy((uint16_t)(dest + word_offset), chunk->data, (uint16_t)chunk->size);
+            word_offset = (uint16_t)(word_offset + ((chunk->size + 1u) / 2u));
+        }
+        return;
+    }
+    if (ref->data)
+    {
+        pce_editor_vram_copy(dest, ref->data, (uint16_t)ref->size);
     }
 }
 
-static void draw_converted_asset_summary(void)
+static void apply_bg_palette_level(const pce_editor_bg_asset_t *bg, uint8_t level)
 {
-    cputsxy(2, 10, "Converted BG/Sprite:");
-    cputsxy(2, 11, "BG");
-    draw_hex_at(6, 11, pce_editor_bg_asset_count);
-    cputsxy(10, 11, "SPR");
-    draw_hex_at(16, 11, pce_editor_sprite_asset_count);
-    if (pce_editor_bg_asset_count)
+    uint16_t i;
+    uint16_t color_count;
+    const uint8_t *palette;
+    if (!bg || !bg->palette.size) return;
+    palette = data_ref_ptr(&bg->palette);
+    if (!palette) return;
+    color_count = (uint16_t)(bg->palette.size / 2u);
+    if (color_count > 16u) color_count = 16u;
+    for (i = 0; i < color_count; i++)
     {
-        cputsxy(2, 12, "BG tiles");
-        draw_hex_at(12, 12, (unsigned char)(pce_editor_bg_assets[0].tiles_size / 32u));
+        const uint16_t raw = (uint16_t)(palette[(i * 2u)] | ((uint16_t)palette[(i * 2u) + 1u] << 8));
+        vce_write_color((uint16_t)((bg->palette_bank * 16u) + i), scale_vce_color(raw, level));
     }
-    if (pce_editor_sprite_asset_count)
+    for (; i < 16u; i++)
     {
-        cputsxy(18, 12, "SPR pat");
-        draw_hex_at(28, 12, (unsigned char)(pce_editor_sprite_assets[0].patterns_size / 128u));
+        vce_write_color((uint16_t)((bg->palette_bank * 16u) + i), 0);
+    }
+}
+
+static void psg_load_wave(uint8_t channel, uint8_t timbre)
+{
+    uint8_t i;
+    PCE_PSG_SELECT = channel;
+    PCE_PSG_CONTROL = 0;
+    for (i = 0; i < 32u; i++)
+    {
+        uint8_t sample;
+        if (timbre == 1u)
+        {
+            sample = (i < 8u) ? 31u : ((i < 16u) ? 20u : ((i < 24u) ? 8u : 0u));
+        }
+        else if (timbre == 2u)
+        {
+            sample = (i & 1u) ? 31u : 2u;
+        }
+        else
+        {
+            sample = (i < 16u) ? 31u : 0u;
+        }
+        PCE_PSG_WAVE = sample;
+    }
+}
+
+static void psg_set_channel(uint8_t channel, uint16_t period, uint8_t volume)
+{
+    PCE_PSG_SELECT = channel;
+    PCE_PSG_FREQ_LO = (uint8_t)(period & 0xffu);
+    PCE_PSG_FREQ_HI = (uint8_t)((period >> 8) & 0x0fu);
+    PCE_PSG_BALANCE = 0xffu;
+    PCE_PSG_CONTROL = volume ? (uint8_t)(0x80u | (volume & 0x1fu)) : 0u;
+}
+
+static void psg_init_bgm(void)
+{
+    PCE_PSG_GLOBAL = 0xffu;
+    psg_load_wave(0, 0);
+    psg_load_wave(1, 1);
+    psg_load_wave(2, 2);
+    psg_set_channel(0, pce_editor_tone_period, 0);
+    psg_set_channel(1, (uint16_t)(pce_editor_tone_period * 2u), 0);
+    psg_set_channel(2, 96u, 0);
+}
+
+static uint8_t frames_per_bgm_step(const pce_editor_psg_asset_t *song)
+{
+    uint16_t bpm = song && song->bpm ? song->bpm : 150u;
+    uint16_t frames = (uint16_t)(3600u / (bpm * 4u));
+    if (frames < 2u) frames = 2u;
+    if (frames > 24u) frames = 24u;
+    return (uint8_t)frames;
+}
+
+static void bgm_tick(void)
+{
+    uint16_t i;
+    const pce_editor_psg_asset_t *song;
+    if (!pce_editor_psg_asset_count) return;
+    song = &pce_editor_psg_assets[0];
+    if (!song->pattern || !song->pattern_count) return;
+    if (bgm_frame == 0u)
+    {
+        for (i = 0; i < song->pattern_count; i++)
+        {
+            const pce_editor_psg_step_t *step = &song->pattern[i];
+            if (step->step == bgm_step)
+            {
+                psg_set_channel(step->channel, step->period, step->volume);
+            }
+        }
+    }
+    bgm_frame++;
+    if (bgm_frame >= frames_per_bgm_step(song))
+    {
+        bgm_frame = 0;
+        bgm_step++;
+        if (bgm_step >= song->steps) bgm_step = 0;
+    }
+}
+
+static void wait_frame_with_music(void)
+{
+    sample_wait_delay();
+    bgm_tick();
+}
+
+static void wait_frames_with_music(uint8_t frames)
+{
+    while (frames--)
+    {
+        wait_frame_with_music();
+    }
+}
+
+static void upload_bg_graphics(const pce_editor_bg_asset_t *bg)
+{
+    uint8_t row;
+    uint16_t row_bytes;
+    const uint8_t *map;
+    if (!bg) return;
+    if (bg->tiles.size)
+    {
+        copy_data_ref_to_vram((uint16_t)(bg->tile_base * 16u), &bg->tiles);
+    }
+    if (bg->map.size)
+    {
+        map = data_ref_ptr(&bg->map);
+        if (!map) return;
+        row_bytes = (uint16_t)(bg->width_tiles * 2u);
+        for (row = 0; row < bg->height_tiles; row++)
+        {
+            pce_editor_vram_copy(
+                (uint16_t)(bg->map_base + ((uint16_t)row * 32u)),
+                map + ((uint16_t)row * row_bytes),
+                row_bytes
+            );
+        }
+    }
+}
+
+static void show_slide(uint8_t slide, uint8_t fade_from_current)
+{
+    int8_t level;
+    const pce_editor_bg_asset_t *bg;
+    if (!pce_editor_bg_asset_count) return;
+    if (slide >= pce_editor_bg_asset_count) slide = 0;
+    if (fade_from_current)
+    {
+        const pce_editor_bg_asset_t *old_bg = &pce_editor_bg_assets[current_slide];
+        for (level = 16; level >= 0; level--)
+        {
+            apply_bg_palette_level(old_bg, (uint8_t)level);
+            wait_frames_with_music(2);
+        }
+    }
+    current_slide = slide;
+    bg = &pce_editor_bg_assets[current_slide];
+    apply_bg_palette_level(bg, 0);
+    upload_bg_graphics(bg);
+    for (level = 0; level <= 16; level++)
+    {
+        apply_bg_palette_level(bg, (uint8_t)level);
+        wait_frames_with_music(2);
     }
 }
 
 int main(void)
 {
-    unsigned char pad;
-    unsigned char last_pad = 0xff;
-    unsigned int frame = 0;
+    uint8_t pad;
+    uint8_t last_pad;
+    uint8_t pressed;
 
-    bordercolor(COLOR_BLACK);
-    bgcolor(COLOR_BLACK);
-    textcolor(COLOR_WHITE);
-    cursor(0);
-    clrscr();
-    upload_converted_assets();
-    textcolor(COLOR_LIGHTBLUE);
-    cputsxy(2, 1, "PCE GAME EDITOR SAMPLE");
-    textcolor(COLOR_WHITE);
-    cputsxy(2, 3, "Hello World from PC Engine");
-    cputsxy(2, 4, "FRAME:");
-    cputsxy(2, 5, "PAD RAW:");
-    cputsxy(2, 13, "Legacy preview:");
-    cputsxy(2, 24, "PAD INPUT CHANGES COLORS");
-    draw_converted_asset_summary();
-    draw_generated_image();
-    play_beep(pce_editor_tone_period);
+    pce_editor_init_video();
+    psg_init_bgm();
+    show_slide(0, 0);
+    last_pad = read_pad_raw();
 
     while (1)
     {
+        if (!pce_editor_bg_asset_count)
+        {
+            wait_frame_with_music();
+            continue;
+        }
         pad = read_pad_raw();
-        if (pad != last_pad)
+        pressed = (uint8_t)(pad & (uint8_t)~last_pad);
+        if (pressed & (PAD_RIGHT | PAD_DOWN))
         {
-            draw_pad_state(pad);
-            last_pad = pad;
+            uint8_t next = (uint8_t)(current_slide + 1u);
+            if (next >= pce_editor_bg_asset_count) next = 0;
+            show_slide(next, 1);
         }
-        draw_hex(pad);
-        draw_frame(frame);
-        frame++;
-        if (frame == 60)
+        else if (pressed & (PAD_LEFT | PAD_UP))
         {
-            PCE_PSG_CONTROL = 0x00;
+            uint8_t prev = current_slide ? (uint8_t)(current_slide - 1u) : (uint8_t)(pce_editor_bg_asset_count - 1u);
+            show_slide(prev, 1);
         }
-        waitvsync();
+        last_pad = pad;
+        wait_frame_with_music();
     }
     return 0;
 }

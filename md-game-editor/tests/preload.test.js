@@ -27,6 +27,7 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.equal(typeof api.upsertAsset, 'function');
   assert.equal(typeof api.deleteAsset, 'function');
   assert.equal(typeof api.importAssetImage, 'function');
+  assert.equal(typeof api.importAssetAudio, 'function');
   assert.equal(typeof api.previewAssetSource, 'function');
   assert.equal(typeof api.reorderAssets, 'function');
   assert.equal(typeof api.openLogWindow, 'function');
@@ -56,6 +57,7 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   await api.upsertAsset({ id: 'img', type: 'image' });
   await api.deleteAsset('img');
   await api.importAssetImage({ id: 'img', sourcePath: '/tmp/img.png' });
+  await api.importAssetAudio({ id: 'voice', sourcePath: '/tmp/voice.wav' });
   await api.previewAssetSource('assets/images/img.png');
   await api.reorderAssets(['img']);
   await api.invokePluginHook('audio-converter', 'convertAudio', { sourcePath: 'in.wav' });
@@ -104,6 +106,10 @@ test('main preload exposes renderer API methods with the expected IPC channels',
   assert.deepEqual(invocations.find((entry) => entry.channel === 'assets:importImage'), {
     channel: 'assets:importImage',
     args: [{ id: 'img', sourcePath: '/tmp/img.png' }],
+  });
+  assert.deepEqual(invocations.find((entry) => entry.channel === 'assets:importAudio'), {
+    channel: 'assets:importAudio',
+    args: [{ id: 'voice', sourcePath: '/tmp/voice.wav' }],
   });
   assert.deepEqual(invocations.find((entry) => entry.channel === 'assets:previewSource'), {
     channel: 'assets:previewSource',
