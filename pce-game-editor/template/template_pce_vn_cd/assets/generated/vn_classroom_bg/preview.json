@@ -1,0 +1,10 @@
+{
+  "source": "assets/images/vn_classroom_bg.png",
+  "kind": "background",
+  "width": 256,
+  "height": 144,
+  "tileCount": 73,
+  "paletteCount": 1,
+  "vramBytes": 3488,
+  "warnings": []
+}

@@ -38,11 +38,12 @@ test('PCE app config is PC Engine only and uses a separate app id', () => {
 
 test('PCE plugin tree contains PCE-only and shared plugins only', () => {
   const pluginsRoot = path.join(__dirname, '..', 'plugins');
-  assert.equal(fs.existsSync(path.join(pluginsRoot, 'pc-engine-core')), true);
-  assert.equal(fs.existsSync(path.join(pluginsRoot, 'pce-asset-manager')), true);
-  assert.equal(fs.existsSync(path.join(pluginsRoot, 'code-editor')), true);
-  assert.equal(fs.existsSync(path.join(pluginsRoot, 'mega-drive-core')), false);
-  assert.equal(fs.existsSync(path.join(pluginsRoot, 'standard-emulator')), false);
+  const hasPluginManifest = (id) => fs.existsSync(path.join(pluginsRoot, id, 'manifest.json'));
+  assert.equal(hasPluginManifest('pc-engine-core'), true);
+  assert.equal(hasPluginManifest('pce-asset-manager'), true);
+  assert.equal(hasPluginManifest('code-editor'), true);
+  assert.equal(hasPluginManifest('mega-drive-core'), false);
+  assert.equal(hasPluginManifest('standard-emulator'), false);
 });
 
 test('PCE core manager exposes only PC Engine and creates PCE projects', async () => {

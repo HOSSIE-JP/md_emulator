@@ -1,0 +1,19 @@
+{
+  "source": "assets/sprites/akari_sprite.png",
+  "kind": "sprite",
+  "width": 32,
+  "height": 64,
+  "tileCount": 8,
+  "paletteCount": 1,
+  "vramBytes": 1024,
+  "warnings": [
+    "Tile with too many (49 > 16) unique colors at 0,0 in source image",
+    "Tile with too many (51 > 16) unique colors at 16,0 in source image",
+    "Tile with too many (55 > 16) unique colors at 0,16 in source image",
+    "Tile with too many (74 > 16) unique colors at 16,16 in source image",
+    "Tile with too many (64 > 16) unique colors at 0,32 in source image",
+    "Tile with too many (66 > 16) unique colors at 16,32 in source image",
+    "Tile with too many (52 > 16) unique colors at 0,48 in source image",
+    "Tile with too many (54 > 16) unique colors at 16,48 in source image"
+  ]
+}

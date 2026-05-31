@@ -100,20 +100,27 @@
       };
       installRuntimeGlobalBridge();
       window.EJS_player = '#game';
+      window.EJS_DEBUG_XX = !!ctx.debug;
       window.EJS_core = 'pce';
-      window.EJS_gameName = 'pce_sample.pce';
+      window.EJS_gameName = ctx.cdBundleEntryName || (ctx.romPath || 'pce_sample.pce').split(/[\\/]/).pop();
       window.EJS_gameID = ctx.gameId || ctx.romPath;
       window.EJS_color = '#23a7ff';
       window.EJS_backgroundColor = '#000000';
       window.EJS_startOnLoaded = true;
       window.EJS_disableDatabases = true;
       window.EJS_disableLocalStorage = true;
+      if (ctx.isCdMedia) {
+        window.EJS_forceExtract = true;
+      }
       window.EJS_cacheConfig = { enabled: false, cacheMaxSizeMB: 1, cacheMaxAgeMins: 1 };
       window.EJS_ready = () => setStatus('Emulator ready');
       window.EJS_onGameStart = () => setStatus('Running');
       const baseUrl = ctx.emulatorJsUrl || ctx.emulatorJsDir;
       window.EJS_pathtodata = ctx.emulatorJsDataUrl || (baseUrl.endsWith('/data/') ? baseUrl : baseUrl.replace(/\/$/, '') + '/data/');
       window.EJS_gameUrl = ctx.romUrl || ctx.romPath;
+      if (ctx.systemCardUrl) {
+        window.EJS_biosUrl = ctx.systemCardUrl;
+      }
       const loader = document.createElement('script');
       loader.src = ctx.emulatorJsLoaderUrl || (baseUrl.endsWith('/loader.js') ? baseUrl : window.EJS_pathtodata.replace(/\/$/, '') + '/loader.js');
       loader.onerror = () => {

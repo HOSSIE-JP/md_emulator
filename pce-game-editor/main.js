@@ -7,6 +7,7 @@ const { shell } = require('electron');
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const { loadAppConfig, applyPortableMode } = require('../game-editor-common');
 const { spawn, spawnSync } = require('child_process');
+const cdBundle = require('./pce-cd-bundle');
 const gameEditorAppConfig = loadAppConfig(require('./app.config'));
 if (typeof app.setName === 'function') app.setName(gameEditorAppConfig.productName || gameEditorAppConfig.displayName || app.getName());
 const electronPackageJson = require('./package.json');
@@ -69,6 +70,7 @@ let forcedQuitTimer = null;
 const MAIN_WINDOW_DEFAULT_BOUNDS = { width: 1280, height: 860 };
 const MAIN_WINDOW_MIN_BOUNDS = { width: 960, height: 640 };
 const WINDOW_STATE_FILE = 'window-state.json';
+const PCE_CD_SYSTEM_CARD_EMULATOR_NAME = 'syscard3.pce';
 
 function getRepoRoot() {
   return path.resolve(__dirname, '..');
@@ -693,7 +695,10 @@ function contentTypeForFile(filePath) {
   if (ext === '.html') return 'text/html; charset=utf-8';
   if (ext === '.png') return 'image/png';
   if (ext === '.svg') return 'image/svg+xml';
-  if (ext === '.pce' || ext === '.bin' || ext === '.data') return 'application/octet-stream';
+  if (ext === '.cue') return 'text/plain; charset=utf-8';
+  if (ext === '.zip') return 'application/zip';
+  if (ext === '.wav') return 'audio/wav';
+  if (ext === '.pce' || ext === '.bin' || ext === '.iso' || ext === '.data') return 'application/octet-stream';
   return 'application/octet-stream';
 }
 
@@ -731,14 +736,18 @@ function stopPceTestPlayStaticServer() {
   try { server.close(); } catch (_) {}
 }
 
-async function startPceTestPlayStaticServer({ romPath, runtime }) {
+async function startPceTestPlayStaticServer({ romPath, runtime, systemCardPath = null }) {
   const roots = {
     romPath: path.resolve(romPath),
+    mediaRoot: path.resolve(path.dirname(romPath)),
+    systemCardPath: systemCardPath ? path.resolve(systemCardPath) : '',
     emulatorRoot: path.resolve(runtime.rootDir),
     dataRoot: path.resolve(runtime.dataDir),
   };
   const sameRoots = pceTestPlayStaticRoots
     && pceTestPlayStaticRoots.romPath === roots.romPath
+    && pceTestPlayStaticRoots.mediaRoot === roots.mediaRoot
+    && pceTestPlayStaticRoots.systemCardPath === roots.systemCardPath
     && pceTestPlayStaticRoots.emulatorRoot === roots.emulatorRoot
     && pceTestPlayStaticRoots.dataRoot === roots.dataRoot;
   if (pceTestPlayStaticServer && pceTestPlayStaticPort && sameRoots) {
@@ -760,7 +769,12 @@ async function startPceTestPlayStaticServer({ romPath, runtime }) {
       const parsed = new URL(req.url || '/', `http://127.0.0.1:${port}`);
       let filePath = null;
       if (parsed.pathname.startsWith('/rom/')) {
-        filePath = roots.romPath;
+        filePath = resolveStaticPath(roots.mediaRoot, parsed.pathname.slice('/rom/'.length));
+      } else if (parsed.pathname.startsWith('/bios/')) {
+        const requested = decodeURIComponent(parsed.pathname.slice('/bios/'.length));
+        if (roots.systemCardPath && (requested === path.basename(roots.systemCardPath) || requested === PCE_CD_SYSTEM_CARD_EMULATOR_NAME)) {
+          filePath = roots.systemCardPath;
+        }
       } else if (parsed.pathname.startsWith('/emulatorjs-data/')) {
         filePath = resolveStaticPath(roots.dataRoot, parsed.pathname.slice('/emulatorjs-data/'.length));
       } else if (parsed.pathname.startsWith('/emulatorjs/')) {
@@ -826,17 +840,36 @@ async function makePceTestPlayContext(options = {}) {
     };
   }
 
-  const staticServer = await startPceTestPlayStaticServer({ romPath, runtime });
+  const isCdMedia = path.extname(romPath).toLowerCase() === '.cue';
+  const systemCardPath = isCdMedia ? pceSetupManager.getPceCdSystemCardPath() : null;
+  if (isCdMedia && !systemCardPath) {
+    return {
+      ok: false,
+      error: 'SUPER CD-ROM2 Test Play requires System Card ROM. Setup で System Card パスを指定してください。',
+      needsSetup: true,
+    };
+  }
+
+  const bundle = isCdMedia ? cdBundle.createCdTestPlayBundle(romPath) : null;
+  const servedRomPath = bundle?.zipPath || romPath;
+  const staticServer = await startPceTestPlayStaticServer({ romPath: servedRomPath, runtime, systemCardPath });
   const staticBaseUrl = `http://127.0.0.1:${staticServer.port}`;
-  const romStat = fs.statSync(romPath);
+  const romStat = fs.statSync(servedRomPath);
+  const mediaRoot = path.dirname(servedRomPath);
   return {
     ok: true,
     context: {
       romPath,
-      romUrl: `${staticBaseUrl}/rom/${encodeURIComponent(path.basename(romPath))}?v=${encodeURIComponent(`${romStat.mtimeMs}-${romStat.size}`)}`,
+      romUrl: `${staticBaseUrl}/rom/${encodeURIComponent(path.basename(servedRomPath))}`,
+      isCdMedia,
+      mediaRootUrl: `${staticBaseUrl}/rom/`,
+      systemCardUrl: systemCardPath ? `${staticBaseUrl}/bios/${PCE_CD_SYSTEM_CARD_EMULATOR_NAME}` : '',
+      cdBundlePath: bundle?.zipPath || '',
+      cdBundleEntryName: bundle?.entryName || '',
       romMtimeMs: romStat.mtimeMs,
       romSize: romStat.size,
       gameId: `${path.basename(romPath)}-${romStat.mtimeMs}-${romStat.size}`,
+      mediaRoot,
       emulatorJsDir: runtime.rootDir,
       emulatorJsUrl: `${staticBaseUrl}/emulatorjs/`,
       emulatorJsDataDir: runtime.dataDir,
@@ -2472,7 +2505,7 @@ async function runBuildFull(options = {}) {
 async function runPceBuildFull(options = {}) {
   try {
     const projectDir = buildSystem.getProjectDir();
-    const config = buildSystem.loadProjectConfig();
+    let config = buildSystem.loadProjectConfig();
     const builderPluginId = resolvePluginForRole('builder');
     if (!builderPluginId) {
       return { success: false, error: '有効な PCE Build プラグインが未設定です。Plugins 画面で有効化してください。' };
@@ -2497,6 +2530,7 @@ async function runPceBuildFull(options = {}) {
       toolchain: config.toolchain,
       toolchainPath: buildSystem.getPceSetupManager().getToolchainPath(config.toolchain),
     }, pluginContext);
+    config = buildSystem.loadProjectConfig();
 
     const result = await buildSystem.buildProject((line, level) => {
       sendToRenderer('build-log', { text: line, level: level || 'info' });

@@ -374,6 +374,7 @@ function collectSourceFiles(projectDir) {
   const sourceFiles = [
     path.join(projectDir, 'src', 'main.c'),
     path.join(projectDir, 'src', 'generated', 'assets.c'),
+    path.join(projectDir, 'src', 'generated', 'vn.c'),
   ];
   return sourceFiles.filter((filePath) => fs.existsSync(filePath));
 }
@@ -429,10 +430,17 @@ function collectCddaTracks(projectDir, cuePath) {
       const rel = generated.outputFile || asset.source || '';
       if (!rel) return null;
       const absPath = path.resolve(projectDir, rel);
+      if (!fs.existsSync(absPath)) return null;
+      const trackNumber = Math.max(2, Math.min(99, Number(asset.options?.track) || 2));
+      const safeId = sanitizeRomName(asset.id || `track_${trackNumber}`);
+      const outputName = `track${String(trackNumber).padStart(2, '0')}_${safeId}.wav`;
+      const outputPath = path.join(cueDir, outputName);
       return {
         id: asset.id,
-        track: Math.max(2, Math.min(99, Number(asset.options?.track) || 2)),
-        file: cueRelativePath(cueDir, absPath),
+        track: trackNumber,
+        sourcePath: absPath,
+        outputPath,
+        file: cueRelativePath(cueDir, outputPath),
       };
     })
     .filter(Boolean)
@@ -440,6 +448,14 @@ function collectCddaTracks(projectDir, cuePath) {
 }
 
 function writeCueFile(commandInfo) {
+  for (const track of commandInfo.cddaTracks || []) {
+    if (track.sourcePath && track.outputPath) {
+      ensureDirSync(path.dirname(track.outputPath));
+      if (!fs.existsSync(track.outputPath) || fs.statSync(track.outputPath).mtimeMs < fs.statSync(track.sourcePath).mtimeMs) {
+        fs.copyFileSync(track.sourcePath, track.outputPath);
+      }
+    }
+  }
   const lines = [
     `FILE "${path.basename(commandInfo.isoPath)}" BINARY`,
     '  TRACK 01 MODE1/2048',
@@ -591,7 +607,7 @@ function buildProject(onLog, options = {}) {
             windowsHide: true,
           });
           mkcd.stdout.on('data', (data) => data.toString().split(/\r?\n/).filter(Boolean).forEach((line) => log(line, 'info')));
-          mkcd.stderr.on('data', (data) => data.toString().split(/\r?\n/).filter(Boolean).forEach((line) => log(line, 'error')));
+          mkcd.stderr.on('data', (data) => data.toString().split(/\r?\n/).filter(Boolean).forEach((line) => log(line, 'info')));
           mkcd.on('error', (err) => resolve({ success: false, error: err.message || String(err), commandInfo }));
           mkcd.on('exit', (mkcdCode) => {
             if (mkcdCode !== 0) {

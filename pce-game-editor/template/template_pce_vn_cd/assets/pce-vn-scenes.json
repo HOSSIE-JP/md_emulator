@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "startScene": "opening",
+  "scenes": [
+    {
+      "id": "opening",
+      "backgroundAssetId": "vn_classroom_bg",
+      "characters": [
+        {
+          "assetId": "akari_sprite",
+          "x": 184,
+          "y": 82,
+          "pose": "default"
+        }
+      ],
+      "messages": [
+        {
+          "speaker": "",
+          "text": "こんにちは",
+          "voiceAssetId": "akari_voice",
+          "advanceMode": "button"
+        },
+        {
+          "speaker": "",
+          "text": "おんせい",
+          "voiceAssetId": "",
+          "advanceMode": "button"
+        },
+        {
+          "speaker": "",
+          "text": "つぎへ",
+          "voiceAssetId": "",
+          "advanceMode": "button"
+        }
+      ],
+      "bgmAssetId": "opening_cdda",
+      "nextSceneId": ""
+    }
+  ]
+}

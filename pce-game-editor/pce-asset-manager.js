@@ -17,7 +17,7 @@ const BANKED_DATA_THRESHOLD = 1024;
 const DEFAULT_BG_OPTIONS = Object.freeze({
   kind: 'background',
   paletteBank: 0,
-  tileBase: 32,
+  tileBase: 64,
   mapBase: 0,
   x: 0,
   y: 0,
@@ -444,11 +444,22 @@ function buildImageWarnings(asset, imageSize, generated = {}) {
       : 1;
     if (frameCount > 64) warnings.push('Sprite sheet contains more than 64 cells; PCE SATB displays up to 64 sprites');
     if (Math.floor(width / options.cellWidth) > 16) warnings.push('Many cells share the same scanline; hardware limit is 16 sprites per scanline');
+    const patternWords = Math.ceil((generated.vramBytes || 0) / 2);
+    if (patternWords && (options.tileBase * 64) + patternWords > 32768) {
+      warnings.push('Sprite patterns exceed VRAM; lower tileBase or reduce sprite sheet size');
+    }
   } else {
     if (width && width % 8 !== 0) warnings.push('BG image width is not aligned to 8px tiles');
     if (height && height % 8 !== 0) warnings.push('BG image height is not aligned to 8px tiles');
     if (width > 256 || height > 224) warnings.push('BG image exceeds the v1 recommended 256x224 viewport');
     const tileCount = generated.tileCount || 0;
+    const tileStartWord = options.tileBase * 16;
+    const tileEndWord = tileStartWord + (tileCount * 16);
+    const batStartWord = options.mapBase;
+    const batEndWord = batStartWord + 1024;
+    if (tileCount && tileStartWord < batEndWord && tileEndWord > batStartWord) {
+      warnings.push('BG tiles overlap the 32x32 BAT VRAM area; use tileBase 64 or higher when mapBase is 0');
+    }
     if (tileCount && options.tileBase < 256 && options.tileBase + tileCount > 256) {
       warnings.push('BG tiles overlap the sample text font VRAM area at tile 256');
     }
@@ -892,7 +903,7 @@ function emitDataRef(name, buffer, allocator, options = {}) {
     };
   }
   const threshold = Number.isFinite(Number(options.threshold)) ? Number(options.threshold) : BANKED_DATA_THRESHOLD;
-  if (buffer.length > threshold) {
+  if (options.allowBanking !== false && buffer.length > threshold) {
     const banked = bufferToBankedCArray(name, buffer, allocator);
     return {
       lines: banked.lines,
@@ -933,7 +944,7 @@ function numeric(value, min, max, fallback = 0) {
   return clampInt(value, min, max, fallback);
 }
 
-function generateConvertedAssetArrays(projectDir, assets, type, bankAllocator) {
+function generateConvertedAssetArrays(projectDir, assets, type, bankAllocator, generationOptions = {}) {
   const isSprite = type === 'sprite';
   const converted = assets.filter((asset) => asset.type === type && asset.data?.generated);
   const arrayLines = [];
@@ -944,11 +955,11 @@ function generateConvertedAssetArrays(projectDir, assets, type, bankAllocator) {
     const palette = readGeneratedBuffer(projectDir, generated.paletteFile);
     const tiles = readGeneratedBuffer(projectDir, generated.tilesFile);
     const map = isSprite ? Buffer.alloc(0) : readGeneratedBuffer(projectDir, generated.mapFile);
-    const paletteRef = emitDataRef(`${ident}_palette`, palette, bankAllocator, { threshold: Number.MAX_SAFE_INTEGER });
-    const tilesRef = emitDataRef(`${ident}_${isSprite ? 'patterns' : 'tiles'}`, tiles, bankAllocator);
+    const paletteRef = emitDataRef(`${ident}_palette`, palette, bankAllocator, { threshold: Number.MAX_SAFE_INTEGER, allowBanking: generationOptions.allowBanking });
+    const tilesRef = emitDataRef(`${ident}_${isSprite ? 'patterns' : 'tiles'}`, tiles, bankAllocator, { allowBanking: generationOptions.allowBanking });
     const mapRef = isSprite
-      ? emitDataRef(`${ident}_map`, map, bankAllocator)
-      : emitDataRef(`${ident}_map`, map, bankAllocator);
+      ? emitDataRef(`${ident}_map`, map, bankAllocator, { allowBanking: generationOptions.allowBanking })
+      : emitDataRef(`${ident}_map`, map, bankAllocator, { allowBanking: generationOptions.allowBanking });
     arrayLines.push(...paletteRef.lines);
     arrayLines.push(...tilesRef.lines);
     if (!isSprite) arrayLines.push(...mapRef.lines);
@@ -963,6 +974,17 @@ function generateConvertedAssetArrays(projectDir, assets, type, bankAllocator) {
     }
   });
   return { converted, arrayLines, metaLines };
+}
+
+function projectTargetsCd(projectDir) {
+  try {
+    const configPath = path.join(projectDir, 'project.json');
+    if (!fs.existsSync(configPath)) return false;
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    return String(config.targetMedia || config.media || '').trim().toLowerCase() === 'cd';
+  } catch (_) {
+    return false;
+  }
 }
 
 function firstPsgPeriod(asset) {
@@ -1038,9 +1060,10 @@ function generateAssetSources(projectDir) {
   const sound = doc.assets.find((asset) => asset.type === 'psg-sfx' || asset.type === 'psg-song');
   const rows = image ? generateTextMosaicForImage(projectDir, image).slice(0, 14) : ['NO IMAGE ASSET'];
   const tonePeriod = firstPsgPeriod(sound || {});
+  const allowBanking = !projectTargetsCd(projectDir);
   const bankAllocator = createRomBankAllocator();
-  const bgGenerated = generateConvertedAssetArrays(projectDir, doc.assets, 'image', bankAllocator);
-  const spriteGenerated = generateConvertedAssetArrays(projectDir, doc.assets, 'sprite', bankAllocator);
+  const bgGenerated = generateConvertedAssetArrays(projectDir, doc.assets, 'image', bankAllocator, { allowBanking });
+  const spriteGenerated = generateConvertedAssetArrays(projectDir, doc.assets, 'sprite', bankAllocator, { allowBanking });
   const psgGenerated = generatePsgMetadata(doc.assets);
   const adpcmGenerated = generateAdpcmMetadata(projectDir, doc.assets);
   const cddaGenerated = generateCddaMetadata(doc.assets);
@@ -1141,7 +1164,7 @@ function generateAssetSources(projectDir) {
   const bankDeclarations = bankAllocator.banks.map((bank) => `PCE_ROM_BANK_AT(${bank}, 6);`);
   const bankSwitchLines = bankAllocator.banks.map((bank) => `    case ${bank}u: pce_rom_bank${bank}_map(); return;`);
   const linesC = [
-    '#if defined(__PCE__) && !defined(__CC65__)',
+    '#if defined(__PCE__) && !defined(__CC65__) && !defined(PCE_EDITOR_TARGET_CD)',
     '#define PCE_CONFIG_IMPLEMENTATION',
     '#include <pce.h>',
     ...bankDeclarations,

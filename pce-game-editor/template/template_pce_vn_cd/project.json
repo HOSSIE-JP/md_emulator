@@ -1,0 +1,31 @@
+{
+  "coreId": "pc-engine",
+  "platform": "pce",
+  "title": "PCE Visual Novel CD Sample",
+  "author": "PCE Game Editor",
+  "serial": "PCEVNCD00001",
+  "region": "JUE",
+  "romName": "pce_vn_cd_sample",
+  "toolchain": "llvm-mos",
+  "targetMedia": "cd",
+  "cd": {
+    "iplPath": "",
+    "systemCardPath": "",
+    "dataFiles": [
+      "assets/generated/akari_voice/adpcm.bin"
+    ],
+    "cddaTracks": [
+      "assets/generated/opening_cdda/cdda.wav"
+    ]
+  },
+  "pluginRoles": {
+    "builder": "pce-sample-builder",
+    "testplay": "pce-standard-emulator"
+  },
+  "pluginSettings": {
+    "pce-sample-builder": {
+      "sample": "visual-novel-cd"
+    }
+  },
+  "generatedAt": "2026-05-31T10:04:55.364Z"
+}
